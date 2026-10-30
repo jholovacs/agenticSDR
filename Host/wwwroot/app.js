@@ -137,6 +137,29 @@ async function stopRadio() {
   }
 }
 
+let transcriptKey = "";
+
+function renderTranscript(spans) {
+  const key = JSON.stringify(spans);
+  if (key === transcriptKey) return;
+  const nearBottom = morse.scrollHeight - morse.scrollTop - morse.clientHeight < 32;
+  transcriptKey = key;
+  morse.replaceChildren();
+  if (spans.length === 0) {
+    morse.textContent = "Morse, FT8, and speech appear here.";
+    return;
+  }
+
+  spans.forEach((span, index) => {
+    if (index > 0) morse.append("\n");
+    const line = document.createElement("span");
+    line.className = span.kind === "morse" ? "morse" : "speech";
+    line.textContent = span.text;
+    morse.append(line);
+  });
+  if (nearBottom) morse.scrollTop = morse.scrollHeight;
+}
+
 async function refreshStatus() {
   try {
     const status = await api("/api/status");
@@ -149,8 +172,8 @@ async function refreshStatus() {
     applyRadioControls();
     const progress = Math.round((status.progress || 0) * 100);
     statusLine.textContent = status.message || status.phase;
-    if (status.phase === "listening" && status.liveText)
-      morse.textContent = status.liveText;
+    if (Array.isArray(status.transcript))
+      renderTranscript(status.transcript);
     bar.style.width = status.phase === "idle" ? "0" : `${progress}%`;
     if (status.error) showError(status.error);
   } catch (ex) {
@@ -279,12 +302,6 @@ async function listen() {
   stopLivePlayback();
   showError("");
   setBusy(true);
-  const voice = mode.value === "nbfm" || mode.value === "wbfm" || mode.value === "am" || mode.value === "usb" || mode.value === "lsb";
-  morse.textContent = mode.value === "cw" || mode.value === "ft8" || mode.value === "dmr"
-    ? "Listening…"
-    : voice
-      ? "Listening for speech…"
-      : "Morse, FT8, and speech appear here.";
   const controller = new AbortController();
   liveAbort = controller;
   const frequencyHz = Number(mhz.value) * 1e6;
@@ -520,7 +537,6 @@ async function askModel() {
       await loadBands();
     }
     if (reply.scan) renderHits(reply.scan);
-    if (reply.listenText) morse.textContent = reply.listenText;
   } catch (ex) {
     asked.remove();
     pending.remove();

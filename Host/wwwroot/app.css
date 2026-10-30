@@ -181,6 +181,8 @@ td.num, .readout { font-family: "Cascadia Mono", Consolas, monospace; }
 audio { width: 100%; margin: 8px 0 16px; }
 pre {
   min-height: 5rem;
+  max-height: 16rem;
+  overflow: auto;
   margin: 8px 0 0;
   padding: 12px;
   white-space: pre-wrap;
@@ -189,6 +191,9 @@ pre {
   color: var(--green);
   font-family: "Cascadia Mono", Consolas, monospace;
 }
+
+pre .morse { color: var(--amber); }
+pre .speech, pre .ft8, pre .note { color: var(--green); }
 
 .empty, .key { margin-top: 12px; }
 .key { margin: 0 0 12px; color: var(--muted); font-size: 0.88rem; }

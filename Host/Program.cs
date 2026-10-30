@@ -41,7 +41,10 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache"
+});
 app.MapMcp("/mcp");
 WebApi.Map(app);
 app.Run();

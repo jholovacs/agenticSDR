@@ -29,9 +29,9 @@ One pass looks like this:
 2. **Read.** It fills a buffer with samples. On the NESDR those samples are unsigned 8-bit I/Q. Other radios, opened through SoapySDR, arrive as complex floats and are converted to the same shape.
 3. **Spectrum.** A Fourier transform shows how much energy sits at each frequency near the center. Peaks that stand well above the noise are kept.
 4. **Guess.** Bandwidth, shape, and the band plan suggest a mode: voice, Morse, broadcast FM, and so on.
-5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately. CW is read as Morse from the audio heard so far. FT8 is read as text at the end of each 15-second turn.
+5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately. CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 is read as text at the end of each 15-second turn.
 
-A scan does not sit on one frequency. The band is wider than one snapshot, so the radio hops. Each hop overlaps the next so a signal hiding in the hole at the center of one hop is visible in a neighbor. The strongest few peaks are measured again, slightly off center, for a cleaner reading.
+A scan watches the band for at least 15 seconds. Where the band is wider than one snapshot, the radio hops, and each stop lasts at least a few seconds. A conversation is kept when the energy arrives as a burst, a pause, and another burst, or as one transmission that starts and stops. A station that stays on, such as weather radio, is kept when it stands clearly above the noise. Each mode is measured at its own width: Morse a few hundred hertz, sideband voice about 2.7 kHz, AM about 10 kHz, narrow FM about 12.5 kHz, and broadcast FM about 200 kHz. A phone segment is also watched for Morse, because a keyed signal can share that channel with voice. Hops overlap so a signal hiding in the hole at the center of one hop is visible in a neighbor.
 
 ## The antenna, in plain language
 
@@ -148,7 +148,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 **DC spike.** A false peak exactly at the center frequency, caused by the receiver, not by a station. The scan ignores a narrow hole in the middle and overlaps hops so a real signal there is seen from the next hop.
 
-**Local spur.** A steady whistle made by the dongle or the computer nearby. Many of them sit on a harmonic of the 14.4 MHz clock (28.8 MHz, 144.0 MHz, and so on). Others slide sideways when the radio retunes, which a real station does not. The scan measures the carrier again. If it has no speech, no Morse keying, and no data tone, it is left off the list. A keyed Morse signal, a voice signal, and an FT8 dial are kept.
+**Local spur.** A steady whistle made by the dongle or the computer nearby. Many of them sit on a harmonic of the 14.4 MHz clock (28.8 MHz, 144.0 MHz, and so on). Others slide sideways when the radio retunes, which a real station does not. A carrier that stays on for the whole listen is measured again. If it has no speech, no Morse keying, and no data tone, it is left off the list. A keyed Morse signal, a voice transmission that comes and goes, and an FT8 dial are kept.
 
 **Image.** A mirror copy that direct sampling can create on the other side of the center. Those hits are marked less certain.
 

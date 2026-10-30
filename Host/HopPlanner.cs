@@ -32,6 +32,16 @@ public static class HopPlanner
             centers.Add(last);
         return centers;
     }
+
+    /// <summary>The whole band is watched for at least 15 seconds. Each hop stays at least 3 seconds so a transmission can start.</summary>
+    public const int MinBandMilliseconds = 15_000;
+
+    public const int MinHopMilliseconds = 3_000;
+
+    public const int SliceMilliseconds = 100;
+
+    public static int DwellMilliseconds(int hops) =>
+        hops < 1 ? MinBandMilliseconds : Math.Max(MinBandMilliseconds / hops, MinHopMilliseconds);
 }
 
 /// <summary>

@@ -16,6 +16,36 @@ public class MorseTests
     }
 
     [Fact]
+    public void Quiet_keyed_audio_is_still_read()
+    {
+        float[] audio = Key("CQ", wpm: 20, jitter: 0, seed: 1);
+        for (int i = 0; i < audio.Length; i++)
+            audio[i] *= 0.001f;
+        Assert.Equal("", MorseDecoder.Decode(audio, 48_000));
+        Assert.Equal("CQ", MorseDecoder.DecodeAudible(audio, 48_000));
+    }
+
+    [Fact]
+    public void A_tone_under_wideband_noise_is_still_read()
+    {
+        float[] audio = Key("CQ", wpm: 20, jitter: 0, seed: 1);
+        var random = new Random(3);
+        for (int i = 0; i < audio.Length; i++)
+            audio[i] = audio[i] * 0.2f + (float)(random.NextDouble() * 2 - 1) * 0.5f;
+        Assert.Equal("CQ", MorseDecoder.DecodeAudible(audio, 48_000));
+    }
+
+    [Fact]
+    public void Steady_noise_is_not_called_morse()
+    {
+        var random = new Random(1);
+        var audio = new float[48_000];
+        for (int i = 0; i < audio.Length; i++)
+            audio[i] = (float)(random.NextDouble() * 2 - 1) * 0.001f;
+        Assert.False(MorseDecoder.IsCopy(MorseDecoder.DecodeAudible(audio, 48_000)));
+    }
+
+    [Fact]
     public void Decodes_text_with_timing_jitter()
     {
         float[] audio = Key("CQ TEST", wpm: 18, jitter: 0.15, seed: 7);

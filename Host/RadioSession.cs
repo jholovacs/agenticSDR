@@ -10,7 +10,7 @@ namespace AgenticSdr.Host;
 /// What the page polls a few times a second. Phase is idle, scanning, or listening.
 /// Progress runs from 0 to 1. Message is the sentence under the radio name. Error is set when the last operation failed.
 /// DeviceIndex is the list position of the radio that is started, and null when the radio is stopped.
-/// LiveText is Morse, FT8, or speech decoded so far during a live listen.
+/// LiveText is the plain transcript. Transcript is the same text in pieces, so Morse can be colored apart from speech.
 /// </summary>
 public sealed record SessionStatus(
     bool DeviceOpen,
@@ -22,7 +22,8 @@ public sealed record SessionStatus(
     string? Message,
     string? Error,
     int? DeviceIndex,
-    string? LiveText);
+    string? LiveText,
+    IReadOnlyList<TranscriptSpan> Transcript);
 
 /// <summary>
 /// One row in the band menu. Tunable is false when the open radio cannot reach it.
@@ -110,6 +111,9 @@ public sealed class RadioSession(
     private string? _serial;
     private int? _deviceIndex;
     private string? _liveText;
+    private readonly List<TranscriptSpan> _transcript = [];
+    private string _morseWindow = "";
+    private double? _transcriptHz;
     private bool _directSampling;
     private AntennaSpec? _antenna;
     private Complex[] _liveIq = [];
@@ -130,7 +134,8 @@ public sealed class RadioSession(
                     _message,
                     _error,
                     _deviceIndex,
-                    _liveText);
+                    _liveText,
+                    _transcript.ToArray());
             }
         }
     }
@@ -321,7 +326,6 @@ public sealed class RadioSession(
                 _deviceName = null;
                 _serial = null;
                 _deviceIndex = null;
-                _liveText = null;
                 _directSampling = false;
                 _phase = "idle";
                 _progress = 0;
@@ -352,95 +356,112 @@ public sealed class RadioSession(
             CancellationToken ct = linked.Token;
             IRadioDevice device = RequireDevice();
             var centers = new List<double>();
-            foreach ((double startHz, double endHz) in Region2BandPlan.Coverage(band))
+            foreach (BandSegment segment in band.Segments)
             {
-                double start = Math.Max(startHz, device.Capabilities.MinFrequencyHz);
-                double end = Math.Min(endHz, device.Capabilities.MaxFrequencyHz);
+                if (segment.PreferredMode == RadioMode.Ft8)
+                    continue;
+                double start = Math.Max(segment.StartHz, device.Capabilities.MinFrequencyHz);
+                double end = Math.Min(segment.EndHz, device.Capabilities.MaxFrequencyHz);
                 if (end - start < 5_000)
                     continue;
-                centers.AddRange(HopPlanner.Centers(start, end, device.SampleRateHz, RadioLimits.HopStep(device.SampleRateHz)));
+                foreach (double center in HopPlanner.Centers(start, end, device.SampleRateHz, RadioLimits.HopStep(device.SampleRateHz)))
+                {
+                    if (centers.All(existing => Math.Abs(existing - center) > device.SampleRateHz * 0.25))
+                        centers.Add(center);
+                }
             }
-            var peaks = new List<SpectralPeak>();
+
+            int dwellMs = HopPlanner.DwellMilliseconds(centers.Count);
+            var activity = new List<SpeechActivity.Hit>();
             bool direct = false;
             for (int i = 0; i < centers.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                SetStatus("scanning", i / (double)centers.Count, $"{band.Name} at {centers[i] / 1e6:0.000} MHz");
-                Capture capture = await CaptureAsync(device, centers[i], 120, ct);
-                direct |= capture.DirectSampling;
-                double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, 4096);
-                bool wide = Region2BandPlan.ScanBandwidthHz(band) > 20_000;
-                foreach (SpectralPeak peak in PeakPicker.Find(
-                    db,
-                    capture.CenterHz,
-                    capture.SampleRate,
-                    maxBandwidthHz: Region2BandPlan.ScanBandwidthHz(band),
-                    collapseImages: capture.RealValued,
-                    contourDropDb: wide ? 30 : 18,
-                    minBandwidthHz: wide ? 40_000 : 0))
+                (List<double[]> frames, bool hopDirect, double centerHz, double sampleRate) = await CaptureSpectraAsync(
+                    device,
+                    centers[i],
+                    dwellMs,
+                    (slice, slices) => SetStatus(
+                        "scanning",
+                        (i + slice / (double)Math.Max(1, slices)) / centers.Count,
+                        $"{band.Name} at {centers[i] / 1e6:0.000} MHz, listening for speech and Morse ({slice * HopPlanner.SliceMilliseconds / 1000.0:0}s)"),
+                    ct);
+                direct |= hopDirect;
+                double half = sampleRate * 0.45;
+                foreach (BandSegment segment in band.Segments)
                 {
-                    if (!Region2BandPlan.Covers(band, peak.FrequencyHz))
+                    double start = Math.Max(segment.StartHz, centerHz - half);
+                    double end = Math.Min(segment.EndHz, centerHz + half);
+                    if (end - start < 5_000 || !Region2BandPlan.Covers(band, (start + end) / 2))
                         continue;
-                    peaks.Add(capture.DirectSampling ? peak with { PossibleImage = true } : peak);
-                }
-
-                foreach (CallingChannel channel in band.Calling)
-                {
-                    if (channel.Mode == RadioMode.Ft8)
-                        continue;
-                    if (Math.Abs(channel.FrequencyHz - capture.CenterHz) > capture.SampleRate * 0.45)
-                        continue;
-                    if (!Region2BandPlan.Covers(band, channel.FrequencyHz))
-                        continue;
-                    if (peaks.Exists(peak => Math.Abs(peak.FrequencyHz - channel.FrequencyHz) <= channel.ToleranceHz))
-                        continue;
-                    SpectralPeak? channelPeak = PeakPicker.LoudestIn(
-                        db,
-                        capture.CenterHz,
-                        capture.SampleRate,
-                        channel.FrequencyHz,
-                        channel.ToleranceHz,
-                        minSnrDb: 6);
-                    if (channelPeak is null)
-                        continue;
-                    peaks.Add(capture.DirectSampling ? channelPeak with { PossibleImage = true } : channelPeak);
+                    foreach (RadioMode mode in ModeBandwidth.ScanModes(segment.PreferredMode))
+                    {
+                        foreach (SpeechActivity.Hit hit in SpeechActivity.Find(
+                            frames,
+                            centerHz,
+                            sampleRate,
+                            start,
+                            end,
+                            mode,
+                            HopPlanner.SliceMilliseconds / 1000.0))
+                        {
+                            if (!Region2BandPlan.Covers(band, hit.Peak.FrequencyHz))
+                                continue;
+                            SpectralPeak peak = hopDirect ? hit.Peak with { PossibleImage = true } : hit.Peak;
+                            activity.Add(new SpeechActivity.Hit(peak, hit.Intermittent, hit.Mode));
+                        }
+                    }
                 }
             }
 
-            List<SpectralPeak> ranked = PeakPicker.Merge(peaks, Region2BandPlan.MergeDistanceHz(band))
-                .OrderByDescending(p => p.SnrDb)
-                .Take(8)
-                .ToList();
+            List<SpeechActivity.Hit> ranked = SpeechActivity.Distinct(activity).Take(12).ToList();
             var hits = new List<ScanHit>();
             int ignored = 0;
             for (int i = 0; i < ranked.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                SetStatus("scanning", 0.65 + 0.35 * i / Math.Max(1, ranked.Count), $"Measuring {ranked[i].FrequencyHz / 1e6:0.000} MHz");
-                bool named = !string.IsNullOrWhiteSpace(Region2BandPlan.HintAt(ranked[i].FrequencyHz).CallingName);
-                Measurement? measured = await MeasureAsync(device, ranked[i].FrequencyHz, ct, named ? 6 : 8);
-                if (measured is null || measured.Peak.SnrDb < (named ? 6 : 8))
-                    continue;
-                SpectralPeak refined = measured.Peak;
-                if (!Region2BandPlan.Covers(band, refined.FrequencyHz, 8_000))
-                    continue;
-
-                BandHint hint = Region2BandPlan.HintAt(refined.FrequencyHz);
-                bool ft8 = hint.PreferredMode == RadioMode.Ft8;
-                bool knownChannel = !string.IsNullOrWhiteSpace(hint.CallingName);
-                if (SignalContent.ShouldIgnore(ranked[i].FrequencyHz, refined, ft8, measured.Samples, measured.SampleRate, measured.CenterHz, knownChannel))
+                SpectralPeak refined = ranked[i].Peak;
+                if (SignalContent.IsClockHarmonic(refined.FrequencyHz))
                 {
                     ignored++;
                     continue;
                 }
 
-                bool framed = DmrSync.Present(measured.Samples, measured.SampleRate, refined.FrequencyHz - measured.CenterHz);
+                BandHint hint = Region2BandPlan.HintAt(refined.FrequencyHz);
+                bool knownChannel = !string.IsNullOrWhiteSpace(hint.CallingName);
+                bool framed = false;
+                if (!ranked[i].Intermittent || band.Id == "dmr")
+                {
+                    SetStatus("scanning", 0.85 + 0.15 * i / Math.Max(1, ranked.Count), $"Measuring {refined.FrequencyHz / 1e6:0.000} MHz");
+                    Measurement? measured = await MeasureAsync(device, refined.FrequencyHz, ct, knownChannel ? 6 : 8);
+                    if (measured is null)
+                    {
+                        if (!ranked[i].Intermittent)
+                            continue;
+                    }
+                    else
+                    {
+                        bool ft8 = hint.PreferredMode == RadioMode.Ft8;
+                        if (SignalContent.ShouldIgnore(refined.FrequencyHz, measured.Peak, ft8, measured.Samples, measured.SampleRate, measured.CenterHz, knownChannel))
+                        {
+                            ignored++;
+                            continue;
+                        }
+
+                        framed = DmrSync.Present(measured.Samples, measured.SampleRate, measured.Peak.FrequencyHz - measured.CenterHz);
+                        if (!ranked[i].Intermittent)
+                            refined = measured.Peak;
+                    }
+                }
+
                 if (band.Id == "dmr" && !framed)
                     continue;
 
                 Classification classification = ModeClassifier.Classify(refined, hint);
                 if (knownChannel && hint.PreferredMode != RadioMode.Unknown)
                     classification = new Classification(hint.PreferredMode, Math.Max(classification.Confidence, 0.7), classification.BandwidthHz, refined.SnrDb);
+                if (ranked[i].Mode == RadioMode.Cw && ModeBandwidth.Fits(RadioMode.Cw, refined.BandwidthHz))
+                    classification = new Classification(RadioMode.Cw, Math.Max(classification.Confidence, 0.75), refined.BandwidthHz, refined.SnrDb);
                 if (framed)
                     classification = new Classification(RadioMode.Dmr, 0.9, classification.BandwidthHz, refined.SnrDb);
                 double carrier = ModeClassifier.CarrierFrequency(refined, classification.Mode);
@@ -536,6 +557,7 @@ public sealed class RadioSession(
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            BeginListen(frequencyHz);
             using CancellationTokenSource linked = Begin(cancellationToken);
             CancellationToken ct = linked.Token;
             IRadioDevice device = RequireDevice();
@@ -609,7 +631,18 @@ public sealed class RadioSession(
             string? decoded = mode == RadioMode.Dmr
                 ? DmrSync.VoiceNote
                 : string.IsNullOrWhiteSpace(result.Text) ? null : result.Text;
-            if (SpeechDecoder.IsVoice(mode) && result.Audio.Length >= result.SampleRate)
+            bool sidebandMorse = false;
+            if (mode is RadioMode.Usb or RadioMode.Lsb)
+            {
+                string morse = MorseDecoder.DecodeAudible(result.Audio, result.SampleRate);
+                if (MorseDecoder.IsCopy(morse))
+                {
+                    decoded = morse;
+                    sidebandMorse = true;
+                }
+            }
+
+            if (!sidebandMorse && SpeechDecoder.IsVoice(mode) && result.Audio.Length >= result.SampleRate)
             {
                 try
                 {
@@ -627,6 +660,18 @@ public sealed class RadioSession(
                 }
             }
             var clip = clips.Add(result.Audio.Length == 0 ? WavFile.Write([], result.SampleRate) : WavFile.Write(result.Audio, result.SampleRate), decoded, tuneHz, mode.ToString());
+            if (!string.IsNullOrWhiteSpace(decoded))
+            {
+                if (mode == RadioMode.Cw || sidebandMorse)
+                    AppendMorse(decoded);
+                else if (mode == RadioMode.Ft8)
+                    AppendFt8(decoded);
+                else if (mode == RadioMode.Dmr)
+                    AppendNote(decoded);
+                else
+                    AppendSpeech(decoded);
+            }
+
             SetStatus("idle", 1, ReadyMessage(mode, decoded));
             return new ListenReport(
                 clip.Id,
@@ -636,7 +681,7 @@ public sealed class RadioSession(
                 seconds,
                 $"/audio/{clip.Id}.wav",
                 $"audio://clips/{clip.Id}",
-                mode == RadioMode.Cw ? decoded : null,
+                mode == RadioMode.Cw || sidebandMorse ? decoded : null,
                 decoded,
                 source);
         }
@@ -661,8 +706,7 @@ public sealed class RadioSession(
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            lock (_statusGate)
-                _liveText = null;
+            BeginListen(frequencyHz);
             using CancellationTokenSource linked = Begin(cancellationToken);
             CancellationToken ct = linked.Token;
             IRadioDevice device = RequireDevice();
@@ -724,12 +768,8 @@ public sealed class RadioSession(
             await response.StartAsync(ct);
 
             SetStatus("listening", 1, LiveMessage(mode, tuneHz));
-            if (mode is RadioMode.Cw or RadioMode.Ft8)
-                SetLive(mode == RadioMode.Cw ? "Listening for Morse…" : "Listening for FT8…");
-            else if (dmrFramed)
-                SetLive(DmrSync.VoiceNote);
-            else if (SpeechDecoder.IsVoice(mode))
-                SetLive("Listening for speech…");
+            if (dmrFramed)
+                AppendNote(DmrSync.VoiceNote);
 
             try
             {
@@ -788,8 +828,11 @@ public sealed class RadioSession(
         string ft8Log = "";
         Task<string>? speechTask = null;
         bool voice = SpeechDecoder.IsVoice(mode);
+        bool sideband = mode is RadioMode.Usb or RadioMode.Lsb;
+        bool hearingMorse = false;
         int rate = demod.PlaybackRate;
         int remember = voice ? 6 * rate : 8 * rate;
+        var nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         int ft8Slot = 15 * rate;
         var nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         float level = 0.05f;
@@ -848,7 +891,7 @@ public sealed class RadioSession(
                 if (dmrProbe.Count >= dmrNeed)
                 {
                     dmrChecked = true;
-                    SetLive(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, 0)
+                    AppendNote(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, 0)
                         ? DmrSync.VoiceNote
                         : "No DMR framing. Playing narrow FM.");
                     dmrProbe.Clear();
@@ -869,20 +912,39 @@ public sealed class RadioSession(
                 if (DateTime.UtcNow >= nextText)
                 {
                     string text = MorseDecoder.Decode(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(recent), rate);
-                    SetLive(string.IsNullOrWhiteSpace(text) ? "Listening for Morse…" : text);
+                    AppendMorse(text);
                     nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 }
             }
             else if (voice)
             {
-                AppendLimited(recent, fresh, remember);
+                AppendLimited(recent, fresh, sideband ? 8 * rate : remember);
+                if (sideband && DateTime.UtcNow >= nextMorse)
+                {
+                    string morse = MorseDecoder.DecodeAudible(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(recent), rate);
+                    if (MorseDecoder.IsCopy(morse))
+                    {
+                        hearingMorse = true;
+                        speechTask = null;
+                        AppendMorse(morse);
+                    }
+                    else if (hearingMorse)
+                    {
+                        hearingMorse = false;
+                    }
+
+                    nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+                }
+
+                if (hearingMorse)
+                    continue;
+
                 if (speechTask is { IsCompleted: true })
                 {
                     try
                     {
                         string said = await speechTask;
-                        if (!string.IsNullOrWhiteSpace(said))
-                            SetLive(said);
+                        AppendSpeech(said);
                     }
                     catch (OperationCanceledException)
                     {
@@ -890,7 +952,7 @@ public sealed class RadioSession(
                     }
                     catch (Exception ex)
                     {
-                        SetLive("Speech was not read. " + ex.Message);
+                        AppendNote("Speech was not read. " + ex.Message);
                     }
 
                     speechTask = null;
@@ -912,8 +974,10 @@ public sealed class RadioSession(
                     ft8Period.RemoveRange(0, ft8Slot);
                     string messages = Ft8Decoder.Format(Ft8Decoder.Decode(block.ToArray(), rate));
                     if (!string.IsNullOrWhiteSpace(messages))
+                    {
                         ft8Log = string.IsNullOrEmpty(ft8Log) ? messages : ft8Log + "\n" + messages;
-                    SetLive(string.IsNullOrWhiteSpace(ft8Log) ? "Listening for FT8…" : ft8Log);
+                        AppendFt8(messages);
+                    }
                 }
             }
         }
@@ -1035,10 +1099,72 @@ public sealed class RadioSession(
         }
     }
 
-    private void SetLive(string text)
+    private void BeginListen(double frequencyHz)
     {
         lock (_statusGate)
-            _liveText = text;
+        {
+            if (_transcriptHz is null || Math.Abs(_transcriptHz.Value - frequencyHz) > 100)
+            {
+                _transcript.Clear();
+                _liveText = null;
+            }
+
+            _morseWindow = "";
+            _transcriptHz = frequencyHz;
+        }
+    }
+
+    private void AppendMorse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        text = text.Trim();
+        lock (_statusGate)
+        {
+            string shown = _transcript.Count > 0 && _transcript[^1].Kind == "morse" ? _transcript[^1].Text : "";
+            string grown = TranscriptLog.Grow(shown, _morseWindow, text).Trim();
+            _morseWindow = text;
+            if (grown.Length == 0)
+                return;
+            if (_transcript.Count > 0 && _transcript[^1].Kind == "morse")
+                _transcript[^1] = new TranscriptSpan("morse", grown);
+            else
+                _transcript.Add(new TranscriptSpan("morse", grown));
+            PublishTranscript();
+        }
+    }
+
+    private void AppendSpeech(string text) => AppendSpan("speech", text);
+
+    private void AppendFt8(string text) => AppendSpan("ft8", text);
+
+    private void AppendNote(string text) => AppendSpan("note", text);
+
+    private void AppendSpan(string kind, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        text = text.Trim();
+        lock (_statusGate)
+        {
+            if (_transcript.Count > 0 && _transcript[^1].Kind == kind && _transcript[^1].Text == text)
+                return;
+            _transcript.Add(new TranscriptSpan(kind, text));
+            PublishTranscript();
+        }
+    }
+
+    private void PublishTranscript()
+    {
+        const int maxChars = 12_000;
+        int total = _transcript.Sum(span => span.Text.Length + 1);
+        while (_transcript.Count > 1 && total > maxChars)
+        {
+            total -= _transcript[0].Text.Length + 1;
+            _transcript.RemoveAt(0);
+        }
+
+        _liveText = _transcript.Count == 0 ? null : string.Join('\n', _transcript.Select(span => span.Text));
     }
 
     private async Task<Measurement?> MeasureAsync(IRadioDevice device, double frequencyHz, CancellationToken cancellationToken, double thresholdDb = 8)
@@ -1073,6 +1199,62 @@ public sealed class RadioSession(
             return null;
         SpectralPeak chosen = capture.DirectSampling ? best with { PossibleImage = true } : best;
         return new Measurement(chosen, capture.Samples, capture.CenterHz, capture.SampleRate);
+    }
+
+    private async Task<(List<double[]> Frames, bool DirectSampling, double CenterHz, double SampleRate)> CaptureSpectraAsync(
+        IRadioDevice device,
+        double frequencyHz,
+        int dwellMs,
+        Action<int, int> onSlice,
+        CancellationToken cancellationToken)
+    {
+        int sliceMs = HopPlanner.SliceMilliseconds;
+        int slices = Math.Max(1, dwellMs / sliceMs);
+        int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
+        int unit = Math.Max(1, device.ReadAlignment / stride);
+        int samples = Math.Max(unit, (int)(device.SampleRateHz * sliceMs / 1000.0));
+        samples = Math.Max(unit, samples / unit * unit);
+        var buffer = new byte[samples * stride];
+        var frames = new List<double[]>(slices);
+        bool direct = false;
+        double centerHz = frequencyHz;
+        double sampleRate = device.SampleRateHz;
+        var chunk = new byte[Aligned(device, 262_144)];
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            device.Tune(frequencyHz);
+            lock (_statusGate)
+                _directSampling = device.DirectSampling;
+            direct = device.DirectSampling;
+            centerHz = device.CenterFrequencyHz;
+            sampleRate = device.SampleRateHz;
+            var junk = new byte[Aligned(device, 32 * 1024)];
+            device.Read(junk);
+            for (int slice = 0; slice < slices; slice++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                onSlice(slice, slices);
+                int got = 0;
+                while (got + device.ReadAlignment <= buffer.Length)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int ask = Math.Min(chunk.Length, (buffer.Length - got) / device.ReadAlignment * device.ReadAlignment);
+                    byte[] block = ask == chunk.Length ? chunk : new byte[ask];
+                    int n = device.Read(block);
+                    if (n <= 0)
+                        throw new RadioException("The radio returned no samples.");
+                    int copy = Math.Min(n, buffer.Length - got);
+                    Buffer.BlockCopy(block, 0, buffer, got, copy);
+                    got += copy;
+                }
+
+                (Complex[] iq, _) = ToIq(device, buffer);
+                frames.Add(SpectrumAnalyzer.AveragePowerDb(iq, 4096));
+            }
+        }, cancellationToken);
+
+        return (frames, direct, centerHz, sampleRate);
     }
 
     private async Task<Capture> CaptureAsync(IRadioDevice device, double frequencyHz, int milliseconds, CancellationToken cancellationToken)
