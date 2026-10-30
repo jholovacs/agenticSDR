@@ -93,6 +93,47 @@ public static class PeakPicker
         return merged;
     }
 
+    /// <summary>
+    /// Loudest bin inside a published channel. Voice is often a few kilohertz wide, so the exact center bin can sit in a dip while the station is on a neighbor.
+    /// </summary>
+    public static SpectralPeak? LoudestIn(
+        double[] powerDb,
+        double centerHz,
+        double sampleRate,
+        double channelHz,
+        double halfWidthHz,
+        double minSnrDb)
+    {
+        if (powerDb.Length < 8 || halfWidthHz <= 0 || sampleRate <= 0)
+            return null;
+
+        double noise = Median(powerDb);
+        double binHz = sampleRate / powerDb.Length;
+        int center = (int)Math.Round((channelHz - centerHz) / binHz + powerDb.Length / 2.0);
+        int radius = Math.Max(1, (int)Math.Round(halfWidthHz / binHz));
+        int lo = Math.Max(0, center - radius);
+        int hi = Math.Min(powerDb.Length - 1, center + radius);
+        int best = -1;
+        double bestDb = double.NegativeInfinity;
+        for (int i = lo; i <= hi; i++)
+        {
+            if (powerDb[i] > bestDb)
+            {
+                bestDb = powerDb[i];
+                best = i;
+            }
+        }
+
+        if (best < 0)
+            return null;
+        double snr = bestDb - noise;
+        if (snr < minSnrDb)
+            return null;
+
+        double freq = centerHz + (best - powerDb.Length / 2.0) * binHz;
+        return new SpectralPeak(freq, bestDb, noise, snr, binHz, freq - binHz / 2, freq + binHz / 2, snr, 0, false);
+    }
+
     private static List<SpectralPeak> SuppressOverlaps(List<SpectralPeak> peaks)
     {
         var ordered = peaks.OrderByDescending(p => p.SnrDb).ToList();

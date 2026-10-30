@@ -59,9 +59,8 @@ public sealed class Demodulator
     private readonly int _ft8OutRate;
     private readonly int _wbfmComplexRate;
     private readonly ComplexDecimator? _wbfmAudio;
-    private readonly VoiceCleaner? _voice;
 
-    public Demodulator(RadioMode mode, double offsetHz = 0, double inputRate = InputRate, bool? cleanVoice = null)
+    public Demodulator(RadioMode mode, double offsetHz = 0, double inputRate = InputRate)
     {
         _mode = mode == RadioMode.Unknown ? RadioMode.Nbfm : mode;
         _inputRate = inputRate;
@@ -114,9 +113,6 @@ public sealed class Demodulator
             _ft8Decimator = new ComplexDecimator(Filters.Lowpass(127, 2_100, _audioRate), _audioRate / Ft8Rate);
             _ft8OutRate = Ft8Rate;
         }
-
-        bool clean = cleanVoice ?? VoiceCleaner.IsVoice(_mode);
-        _voice = clean ? VoiceCleaner.For(_mode, _audioRate) : null;
     }
 
     public static DemodResult Demodulate(ReadOnlySpan<Complex> iq, RadioMode mode, double offsetHz = 0, bool normalize = true, double inputRate = InputRate)
@@ -142,7 +138,6 @@ public sealed class Demodulator
             return [];
         var copy = _audio.ToArray();
         _audio.Clear();
-        _voice?.Process(copy);
         return copy;
     }
 
@@ -214,7 +209,6 @@ public sealed class Demodulator
     {
         var audio = _audio.ToArray();
         RemoveDc(audio);
-        _voice?.Process(audio);
         int rate = _mode == RadioMode.Ft8 ? _ft8OutRate : _audioRate;
         string? text = _mode switch
         {

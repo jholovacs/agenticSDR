@@ -384,8 +384,6 @@ public sealed class RadioSession(
                     peaks.Add(capture.DirectSampling ? peak with { PossibleImage = true } : peak);
                 }
 
-                double binHz = capture.SampleRate / db.Length;
-                double noise = Percentile(db, 0.5);
                 foreach (CallingChannel channel in band.Calling)
                 {
                     if (channel.Mode == RadioMode.Ft8)
@@ -396,23 +394,16 @@ public sealed class RadioSession(
                         continue;
                     if (peaks.Exists(peak => Math.Abs(peak.FrequencyHz - channel.FrequencyHz) <= channel.ToleranceHz))
                         continue;
-                    int bin = (int)Math.Round((channel.FrequencyHz - capture.CenterHz) / binHz + db.Length / 2.0);
-                    if ((uint)bin >= (uint)db.Length)
-                        continue;
-                    double snr = db[bin] - noise;
-                    if (snr < 6)
-                        continue;
-                    peaks.Add(new SpectralPeak(
+                    SpectralPeak? channelPeak = PeakPicker.LoudestIn(
+                        db,
+                        capture.CenterHz,
+                        capture.SampleRate,
                         channel.FrequencyHz,
-                        db[bin],
-                        noise,
-                        snr,
-                        binHz,
-                        channel.FrequencyHz - binHz / 2,
-                        channel.FrequencyHz + binHz / 2,
-                        snr,
-                        0,
-                        capture.DirectSampling));
+                        channel.ToleranceHz,
+                        minSnrDb: 6);
+                    if (channelPeak is null)
+                        continue;
+                    peaks.Add(capture.DirectSampling ? channelPeak with { PossibleImage = true } : channelPeak);
                 }
             }
 
@@ -427,7 +418,7 @@ public sealed class RadioSession(
                 ct.ThrowIfCancellationRequested();
                 SetStatus("scanning", 0.65 + 0.35 * i / Math.Max(1, ranked.Count), $"Measuring {ranked[i].FrequencyHz / 1e6:0.000} MHz");
                 bool named = !string.IsNullOrWhiteSpace(Region2BandPlan.HintAt(ranked[i].FrequencyHz).CallingName);
-                Measurement? measured = await MeasureAsync(device, ranked[i].FrequencyHz, ct);
+                Measurement? measured = await MeasureAsync(device, ranked[i].FrequencyHz, ct, named ? 6 : 8);
                 if (measured is null || measured.Peak.SnrDb < (named ? 6 : 8))
                     continue;
                 SpectralPeak refined = measured.Peak;
@@ -605,7 +596,7 @@ public sealed class RadioSession(
             DemodResult result;
             try
             {
-                var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz, VoiceCleaner.IsVoice(mode));
+                var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz);
                 await CaptureDemodAsync(device, loHz, seconds, demod, demodMode, ct);
                 result = demod.Finish(normalize: true);
             }
@@ -722,7 +713,7 @@ public sealed class RadioSession(
             RadioMode demodMode = mode == RadioMode.Dmr ? RadioMode.Nbfm : mode;
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
-            var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz, VoiceCleaner.IsVoice(mode));
+            var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz);
             response.Headers["X-Audio-Rate"] = demod.PlaybackRate.ToString(CultureInfo.InvariantCulture);
             response.Headers["X-Tune-Hz"] = tuneHz.ToString(CultureInfo.InvariantCulture);
             response.Headers["X-Mode"] = mode.ToString();
@@ -1050,7 +1041,7 @@ public sealed class RadioSession(
             _liveText = text;
     }
 
-    private async Task<Measurement?> MeasureAsync(IRadioDevice device, double frequencyHz, CancellationToken cancellationToken)
+    private async Task<Measurement?> MeasureAsync(IRadioDevice device, double frequencyHz, CancellationToken cancellationToken, double thresholdDb = 8)
     {
         double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
         double tune = Math.Clamp(frequencyHz + offset, device.Capabilities.MinFrequencyHz, device.Capabilities.MaxFrequencyHz);
@@ -1061,7 +1052,7 @@ public sealed class RadioSession(
             db,
             capture.CenterHz,
             capture.SampleRate,
-            thresholdDb: 8,
+            thresholdDb: thresholdDb,
             maxBandwidthHz: wide ? 300_000 : 20_000,
             collapseImages: capture.RealValued,
             contourDropDb: wide ? 30 : 18,

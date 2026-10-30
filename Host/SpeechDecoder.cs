@@ -23,7 +23,8 @@ public sealed class SpeechDecoder : IAsyncDisposable
         _modelPath = Path.Combine(contentRoot, "models", "ggml-tiny.en.bin");
     }
 
-    public static bool IsVoice(RadioMode mode) => VoiceCleaner.IsVoice(mode);
+    public static bool IsVoice(RadioMode mode) =>
+        mode is RadioMode.Nbfm or RadioMode.Wbfm or RadioMode.Am or RadioMode.Usb or RadioMode.Lsb;
 
     public async Task<string> TranscribeAsync(ReadOnlyMemory<float> audio, int sampleRate, CancellationToken cancellationToken)
     {

@@ -87,6 +87,27 @@ public class LocationTests
     }
 }
 
+/// <summary>A published channel is kept when the voice sits beside the center bin instead of on it.</summary>
+public class ChannelPeakTests
+{
+    [Fact]
+    public void A_channel_hump_off_the_center_bin_is_still_the_station()
+    {
+        const int n = 64;
+        const double binHz = 1_000;
+        var db = new double[n];
+        int center = n / 2;
+        db[center] = 1;
+        db[center + 4] = 7;
+        SpectralPeak? missed = PeakPicker.LoudestIn(db, 100_000_000, n * binHz, 100_000_000, 1_500, 4);
+        SpectralPeak? found = PeakPicker.LoudestIn(db, 100_000_000, n * binHz, 100_000_000, 8_000, 4);
+        Assert.Null(missed);
+        Assert.NotNull(found);
+        Assert.True(found!.SnrDb > 6);
+        Assert.InRange(found.FrequencyHz, 100_003_000, 100_005_000);
+    }
+}
+
 /// <summary>Checks that a WAV file starts with the header a browser expects.</summary>
 public class WavTests
 {
