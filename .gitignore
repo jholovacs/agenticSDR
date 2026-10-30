@@ -1,0 +1,8 @@
+bin/
+obj/
+native/
+*.user
+.vs/
+TestResults/
+llm.json
+models/

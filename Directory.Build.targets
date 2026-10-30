@@ -1,0 +1,8 @@
+<Project>
+  <Target Name="CopyNativeRtlSdr" AfterTargets="Build">
+    <ItemGroup>
+      <_NativeDlls Include="$(MSBuildThisFileDirectory)native\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_NativeDlls)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="'@(_NativeDlls)' != ''" />
+  </Target>
+</Project>
