@@ -4,101 +4,113 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic SDR</title>
-  <link rel="stylesheet" href="/app.css?v=2">
+    <link rel="stylesheet" href="/app.css?v=14">
 </head>
 <body>
   <header class="face">
     <div class="brand">
       <span class="led" id="led"></span>
       <div>
-        <p class="eyebrow">Receive only</p>
+        <p class="eyebrow" data-tip="receive">Receive only</p>
         <h1>Agentic SDR</h1>
       </div>
     </div>
     <div class="identity">
-      <p id="device-name">No radio</p>
-      <p id="status-line">Starting…</p>
+      <p id="device-name" data-tip="device-name">No radio</p>
+      <p id="status-line" data-tip="status">Starting…</p>
     </div>
   </header>
 
   <p id="error" class="error" hidden></p>
 
-  <section class="panel controls">
-    <label>Radio
+  <details class="panel fold" open data-fold="radio">
+    <summary data-tip="radio"><span class="fold-title">Radio</span><span id="radio-summary" class="fold-aside"></span></summary>
+    <div class="controls">
+    <label data-tip="device">Radio
       <select id="radio"></select>
     </label>
-    <button id="radio-start" type="button">Start radio</button>
-    <button id="radio-stop" type="button" class="ghost">Stop radio</button>
+    <span data-tip="start"><button id="radio-start" type="button">Start radio</button></span>
+    <span data-tip="stop-radio"><button id="radio-stop" type="button" class="ghost">Stop radio</button></span>
+    <span data-tip="details"><button id="radio-details" type="button" class="ghost">Radio details</button></span>
     <p class="antenna-note">Start opens the selected USB radio. Stop releases it. A scan that is running stops too.</p>
-  </section>
+    </div>
+  </details>
 
-  <section class="panel controls antenna">
-    <label>Length
+  <details class="panel fold" open data-fold="antenna">
+    <summary data-tip="antenna"><span class="fold-title">Antenna</span><span id="antenna-summary" class="fold-aside"></span></summary>
+    <div class="controls">
+    <label data-tip="length">Length
       <input id="antenna-length" type="number" min="0.05" step="0.01" value="0.75">
     </label>
-    <label>Unit
+    <label data-tip="unit">Unit
       <select id="antenna-unit">
         <option value="m">meters</option>
         <option value="ft">feet</option>
       </select>
     </label>
-    <label>Orientation
+    <label data-tip="orientation">Orientation
       <select id="antenna-orientation">
         <option value="vertical">Vertical</option>
         <option value="horizontal">Horizontal</option>
       </select>
     </label>
-    <label>Axis toward ° true
+    <label data-tip="azimuth">Axis toward ° true
       <input id="antenna-azimuth" type="number" min="0" max="360" value="0" disabled>
     </label>
-    <button id="antenna-apply" type="button">Use this antenna</button>
-    <button id="antenna-guess" type="button" class="ghost">Guess from signals</button>
+    <span data-tip="apply"><button id="antenna-apply" type="button">Use this antenna</button></span>
+    <span data-tip="guess"><button id="antenna-guess" type="button" class="ghost">Guess from signals</button></span>
     <p id="antenna-note" class="antenna-note">Set the length and orientation, then the matching bands move to the top.</p>
-  </section>
+    </div>
+  </details>
 
-  <section class="panel controls model">
-    <label>Endpoint
+  <details class="panel fold" open data-fold="model">
+    <summary data-tip="model"><span class="fold-title">Model</span><span id="model-summary" class="fold-aside"></span></summary>
+    <div class="controls">
+    <label data-tip="endpoint">Endpoint
       <input id="llm-base" type="url" placeholder="http://127.0.0.1:11434/v1" autocomplete="off">
     </label>
-    <label>Model
+    <label data-tip="model-name">Model
       <input id="llm-model" list="llm-models" placeholder="llama3.2" autocomplete="off">
       <datalist id="llm-models"></datalist>
     </label>
-    <label>API key
+    <label data-tip="key">API key
       <input id="llm-key" type="password" autocomplete="off" placeholder="Optional for a local server">
     </label>
-    <button id="llm-save" type="button">Save model</button>
-    <button id="llm-models-btn" type="button" class="ghost">List models</button>
-    <button id="llm-forget" type="button" class="ghost">Forget key</button>
+    <span data-tip="save-model"><button id="llm-save" type="button">Save model</button></span>
+    <span data-tip="list-models"><button id="llm-models-btn" type="button" class="ghost">List models</button></span>
+    <span data-tip="forget"><button id="llm-forget" type="button" class="ghost">Forget key</button></span>
     <p id="llm-note" class="antenna-note">An instruct model that speaks the OpenAI chat protocol can run the same actions as these buttons. Ask it in the prompt below.</p>
-  </section>
-
-  <section class="panel prompt-pane">
-    <div class="section-head">
-      <h2>Prompt</h2>
-      <p>Tell the agent what to do with the radio.</p>
     </div>
+  </details>
+
+  <details class="panel fold prompt-pane" open data-fold="prompt">
+    <summary data-tip="prompt"><span class="fold-title">Prompt</span><span id="prompt-summary" class="fold-aside"></span></summary>
+    <div class="fold-body">
+    <p class="fold-note">Tell the agent what to do with the radio.</p>
     <div id="prompt-log" class="prompt-log" aria-live="polite">
       <p id="prompt-empty" class="empty">Nothing asked yet. Try “Scan 2 m and tell me what you hear.”</p>
     </div>
     <form id="prompt-form" class="prompt-form">
-      <label class="ask">What should the radio do?
+      <label class="ask" data-tip="ask">What should the radio do?
         <textarea id="llm-ask" rows="3" placeholder="Scan 2 m and tell me what you hear."></textarea>
       </label>
-      <button id="llm-send" type="submit">Send</button>
+      <span data-tip="send"><button id="llm-send" type="submit">Send</button></span>
     </form>
-  </section>
+    </div>
+  </details>
 
-  <section class="panel controls">
-    <label>Band
+  <details class="panel fold" open data-fold="tune">
+    <summary data-tip="tune"><span class="fold-title">Scan and listen</span><span id="tune-summary" class="fold-aside"></span></summary>
+    <div class="controls">
+    <label data-tip="band">Band
       <select id="band"></select>
     </label>
-    <button id="scan" type="button">Scan band</button>
-    <button id="stop" type="button" class="ghost">Stop</button>
-    <label class="freq">Frequency MHz
+    <span data-tip="scan"><button id="scan" type="button">Scan band</button></span>
+    <span data-tip="stop"><button id="stop" type="button" class="ghost">Stop</button></span>
+    <label class="freq" data-tip="freq">Frequency MHz
       <input id="mhz" inputmode="decimal" value="146.520000">
     </label>
-    <label>Mode
+    <label data-tip="mode">Mode
       <select id="mode">
         <option value="auto">Auto</option>
         <option value="nbfm">NBFM</option>
@@ -109,31 +121,30 @@
         <option value="cw">CW</option>
         <option value="ft8">FT8</option>
         <option value="dmr">DMR</option>
+        <option value="raw">Raw</option>
       </select>
     </label>
-    <button id="listen" type="button">Listen</button>
-    <button id="noaa" type="button" class="ghost">NOAA check</button>
-  </section>
+    <span data-tip="listen"><button id="listen" type="button">Listen</button></span>
+    <span data-tip="noaa"><button id="noaa" type="button" class="ghost">NOAA check</button></span>
+    </div>
+  </details>
 
   <div class="progress" aria-hidden="true"><span id="bar"></span></div>
 
   <main class="layout">
-    <section class="panel">
-      <div class="section-head">
-        <h2>Signals</h2>
-        <p id="scan-note"></p>
-      </div>
-      <p class="key">MHz is the frequency. Mode is the kind of signal. Conf is how sure the guess is. kHz is how wide the signal is. SNR is how far it stands above the noise.</p>
+    <details class="panel fold" open data-fold="signals">
+      <summary data-tip="signals"><span class="fold-title">Signals</span><span id="scan-note" class="fold-aside"></span></summary>
+      <div class="fold-body">
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>MHz</th>
-              <th>Mode</th>
-              <th>Conf</th>
-              <th>kHz</th>
-              <th>SNR</th>
-              <th>Source</th>
+              <th data-tip="col-mhz">MHz</th>
+              <th data-tip="col-mode">Mode</th>
+              <th data-tip="col-conf">Conf</th>
+              <th data-tip="col-khz">kHz</th>
+              <th data-tip="col-snr">SNR</th>
+              <th data-tip="col-source">Source</th>
               <th></th>
             </tr>
           </thead>
@@ -141,86 +152,68 @@
         </table>
       </div>
       <p id="empty" class="empty">Scan a band, or type a frequency and listen.</p>
-    </section>
+      </div>
+    </details>
 
-    <section class="panel listen-pane">
-      <h2>Selected signal</h2>
+    <details class="panel fold listen-pane" open data-fold="selected">
+      <summary data-tip="selected"><span class="fold-title">Selected signal</span><span id="selected-summary" class="fold-aside"></span></summary>
+      <div class="fold-body">
       <p class="readout" id="readout">—</p>
       <p id="source" class="source"></p>
+      <div class="hear-row">
+        <label data-tip="hear">Hear as
+          <select id="listen-mode"></select>
+        </label>
+      </div>
+      <div id="dmr-fields" class="dmr-fields" hidden>
+        <label data-tip="dmr-color">Color code
+          <select id="dmr-color">
+            <option value="">Any</option>
+          </select>
+        </label>
+        <label data-tip="dmr-slot">Timeslot
+          <select id="dmr-slot">
+            <option value="">Any</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+        <label data-tip="dmr-tg">Talkgroup
+          <input id="dmr-tg" inputmode="numeric" placeholder="Any">
+        </label>
+      </div>
       <p id="live-state" class="source" hidden>Playing as the signal arrives.</p>
       <button id="live-stop" type="button" hidden>Stop</button>
-      <h3>Decoded text</h3>
+      <div class="signal-actions">
+        <span data-tip="record"><button id="record" type="button" disabled>Record</button></span>
+        <span data-tip="transcript"><button id="record-transcript" type="button" class="ghost" disabled>Download Transcript</button></span>
+      </div>
+      <h3 data-tip="decoded">Decoded text</h3>
       <pre id="morse">Morse, FT8, and speech appear here.</pre>
-    </section>
+      </div>
+    </details>
   </main>
 
-  <details class="panel glossary">
-    <summary>What these words mean</summary>
-    <p>This page only receives. A longer lesson, with the same definitions, is in the project file <code>GUIDE.md</code>.</p>
-    <dl>
-      <dt>SDR</dt>
-      <dd>Software-defined radio. The USB stick captures a slice of radio spectrum, and this program decides what the signal is.</dd>
-      <dt>Frequency</dt>
-      <dd>How fast the radio wave repeats, in MHz (millions of cycles per second). 146.520 MHz is the 2 m calling spot.</dd>
-      <dt>Band</dt>
-      <dd>A named range of frequencies. “2 m” means wavelengths around 2 meters, about 144–148 MHz. “40 m” is near 7 MHz.</dd>
-      <dt>HF</dt>
-      <dd>Below 24 MHz on this RTL-SDR the tuner steps aside and the chip samples the antenna more directly. You need an HF antenna. A short 2 m whip hears little there.</dd>
-      <dt>Vertical</dt>
-      <dd>The wire stands up. Treated as a quarter-wave: about one quarter of the wavelength it hears best.</dd>
-      <dt>Horizontal</dt>
-      <dd>The wire runs sideways. Treated as a half-wave. Enter the compass direction one end points.</dd>
-      <dt>° true</dt>
-      <dd>Degrees clockwise from true north. 0 is north, 90 is east. A horizontal wire hears best at right angles to itself.</dd>
-      <dt>Prompt</dt>
-      <dd>The sentence you type for the agent, such as “Scan 2 m and tell me what you hear.” The agent may scan, listen, or change the antenna. Stop cancels that work.</dd>
-      <dt>Instruct model</dt>
-      <dd>A language model that follows written directions. This page talks to it with the OpenAI chat protocol, at an address ending in /v1, so a local server can stand in for OpenAI.</dd>
-      <dt>Endpoint</dt>
-      <dd>That address. The API key, if the server wants one, is stored on this computer and is not shown again. It is sent only to the endpoint you saved.</dd>
-      <dt>Tool</dt>
-      <dd>An action the model can ask for, such as listing bands or scanning. The model does not tune the radio itself. This program does the work and gives the result back.</dd>
-      <dt>Guess</dt>
-      <dd>Listens at several spots and treats the loudest noise floor as the antenna’s natural frequency. A vertical length is a quarter of that wave. A horizontal wire would be half of it. Strength does not show which way the wire points.</dd>
-      <dt>Best</dt>
-      <dd>A band near the antenna’s natural frequency, including odd multiples of that frequency.</dd>
-      <dt>Scan</dt>
-      <dd>Hop across the band, measure the spectrum, and list peaks that stand out from the noise.</dd>
-      <dt>Mode</dt>
-      <dd>How the voice or data was put onto the wave. Auto guesses. The choices are defined below.</dd>
-      <dt>AM</dt>
-      <dd>The loudness of the audio changes the strength of the wave. This is AM broadcast and some amateur signals.</dd>
-      <dt>NBFM</dt>
-      <dd>Narrow FM. The voice nudges the frequency a little. Amateur repeaters and NOAA weather use this.</dd>
-      <dt>WBFM</dt>
-      <dd>Wide FM. The same idea, but the station is about 200 kHz wide. This is ordinary FM broadcast, 88–108 MHz.</dd>
-      <dt>USB / LSB</dt>
-      <dd>Single-sideband voice. Amateur HF uses LSB on the lower bands and USB on the higher ones.</dd>
-      <dt>CW</dt>
-      <dd>Morse code. An on-off carrier. Listen plays a tone and tries to print the letters.</dd>
-      <dt>CB</dt>
-      <dd>Citizens Band, 40 channels near 27 MHz. Most traffic is AM or narrow FM. Channel 9 is the emergency channel and channel 19 is the highway channel. Receive only.</dd>
-      <dt>GMRS</dt>
-      <dd>General Mobile Radio Service, narrow FM near 462 and 467 MHz. Family radios and repeaters use these channels. Receive only.</dd>
-      <dt>DMR</dt>
-      <dd>A digital voice mode on parts of 2 m and 70 cm. The receiver recognizes the framing. The words use a proprietary codec, so they are not decoded. Receive only.</dd>
-      <dt>Speech</dt>
-      <dd>Spoken audio from AM, FM, or sideband, written out as text. A small speech model is downloaded once into the models folder. It is a guess from the sound, the same way a person might mis-hear a noisy channel.</dd>
-      <dt>FT8</dt>
-      <dd>A short digital message sent in 15-second turns. The radio waits for the next turn, then prints any messages it can read.</dd>
-      <dt>Local spur</dt>
-      <dd>A steady whistle from the dongle or the computer, often a harmonic of its clock. If it has no voice, Morse, or FT8, the scan skips it.</dd>
-      <dt>SNR</dt>
-      <dd>How many decibels the signal sits above the noise. Bigger is cleaner.</dd>
-      <dt>Conf</dt>
-      <dd>How sure the mode guess is. Listening is the check.</dd>
-      <dt>Source</dt>
-      <dd>A label from the band plan, such as a calling frequency, “FM broadcast,” or a NOAA channel. It is not a station’s name.</dd>
-      <dt>NOAA</dt>
-      <dd>US weather radio near 162.55 MHz. The NOAA button listens to one channel so you can tell the radio is working.</dd>
-    </dl>
-  </details>
+  <div id="tip" role="tooltip" hidden></div>
 
-  <script src="/app.js?v=2"></script>
+  <dialog id="radio-details-panel" class="radio-details">
+    <h2 id="radio-details-title">Radio details</h2>
+    <dl id="radio-details-list"></dl>
+    <div class="signal-actions">
+      <button id="radio-details-close" type="button" class="ghost">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="leave-recording">
+    <h2 id="recording-question-title">Download the recording?</h2>
+    <p id="recording-question">Download the recording?</p>
+    <div class="signal-actions">
+      <button id="leave-yes" type="button">Yes</button>
+      <button id="leave-no" type="button" class="ghost">No</button>
+    </div>
+  </dialog>
+
+  <script src="/lame.min.js?v=5"></script>
+  <script src="/app.js?v=13"></script>
 </body>
 </html>

@@ -16,10 +16,7 @@ internal static class SoapyNative
     internal const int Overflow = -4;
     internal const int NotSupported = -5;
 
-    static SoapyNative()
-    {
-        NativeLibrary.SetDllImportResolver(typeof(SoapyNative).Assembly, Resolve);
-    }
+    static SoapyNative() => NativeLibraries.Install();
 
     public static void Touch() => _ = typeof(SoapyNative);
 
@@ -114,7 +111,7 @@ internal static class SoapyNative
     public static string? PtrString(IntPtr ptr) =>
         ptr == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(ptr);
 
-    private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+    internal static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (!libraryName.Contains("SoapySDR", StringComparison.OrdinalIgnoreCase))
             return IntPtr.Zero;

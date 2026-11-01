@@ -10,10 +10,7 @@ internal static class RtlSdrNative
 {
     private const string Lib = "rtlsdr";
 
-    static RtlSdrNative()
-    {
-        NativeLibrary.SetDllImportResolver(typeof(RtlSdrNative).Assembly, RtlSdrLibrary.Resolve);
-    }
+    static RtlSdrNative() => NativeLibraries.Install();
 
     public static void Touch()
     {
@@ -65,6 +62,9 @@ internal static class RtlSdrNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int rtlsdr_read_sync(IntPtr dev, byte[] buf, int len, out int nRead);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int rtlsdr_get_tuner_type(IntPtr dev);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int rtlsdr_get_tuner_gains(IntPtr dev, IntPtr gains);

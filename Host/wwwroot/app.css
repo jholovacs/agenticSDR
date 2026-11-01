@@ -117,7 +117,7 @@ button.ghost {
   border: 1px solid var(--line);
 }
 
-button:disabled { opacity: 0.55; cursor: wait; }
+button:disabled { opacity: 0.55; cursor: wait; pointer-events: none; }
 
 .freq input { width: 9.5rem; font-family: "Cascadia Mono", Consolas, monospace; }
 
@@ -143,7 +143,33 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .prompt-form .ask { flex: 1; }
 .prompt-form textarea { width: 100%; min-height: 4.5rem; resize: vertical; }
 .antenna-note { flex-basis: 100%; margin: 0; }
+#radio-details-panel {
+  width: min(40rem, calc(100vw - 32px));
+  max-width: 40rem;
+}
+.radio-details h2 { margin-bottom: 10px; font-size: 1rem; }
+.radio-details dl {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+}
+.radio-details dt { color: var(--muted); }
+.radio-details dd { margin: 0; font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
 #live-stop { margin-top: 8px; }
+.signal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+#record.recording { background: var(--danger); color: #2a100c; }
+dialog {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 16px;
+  padding: 16px;
+  max-width: 32rem;
+  box-shadow: var(--shadow);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+dialog p { margin: 12px 0; color: var(--muted); }
 
 .progress {
   height: 4px;
@@ -162,13 +188,69 @@ button:disabled { opacity: 0.55; cursor: wait; }
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+  grid-template-columns: 1fr;
   gap: 16px;
   padding: 16px 20px 28px;
 }
 
 .panel { border-radius: 16px; padding: 16px; }
+.fold.panel { padding: 0; }
+.fold { margin: 0 20px 12px; }
+.layout .fold { margin: 0; }
+.fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 14px 16px;
+  list-style: none;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::marker { content: ""; }
+.fold > summary::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-right: 2px solid var(--amber);
+  border-bottom: 2px solid var(--amber);
+  transform: translateY(-0.12rem) rotate(-45deg);
+}
+.fold[open] > summary::before { transform: translateY(0.08rem) rotate(45deg); }
+.fold:not([open]) > :not(summary) { display: none; }
+.fold-title { flex: 0 0 auto; }
+.fold-aside {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.88rem;
+}
+.fold[open] > summary .fold-aside { display: none; }
+.fold-note { margin: 0 0 12px; color: var(--muted); }
+.fold-body { padding: 0 16px 16px; }
+.fold > .controls {
+  margin: 0;
+  padding: 0 16px 16px;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+}
 .section-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.hear-row, .dmr-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: end;
+  margin: 0 0 12px;
+}
+.dmr-fields[hidden] { display: none; }
 
 .table-wrap { overflow-x: auto; }
 
@@ -195,21 +277,27 @@ pre {
 pre .morse { color: var(--amber); }
 pre .speech, pre .ft8, pre .note { color: var(--green); }
 
-.empty, .key { margin-top: 12px; }
-.key { margin: 0 0 12px; color: var(--muted); font-size: 0.88rem; }
+.empty { margin-top: 12px; }
 
-.glossary { margin: 0 20px 28px; }
-.glossary summary { cursor: pointer; font-weight: 600; }
-.glossary p { color: var(--muted); }
-.glossary dl { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 10px 16px; margin: 8px 0 0; }
-.glossary dt { color: var(--amber); }
-.glossary dd { margin: 0; }
-.glossary code { font-family: "Cascadia Mono", Consolas, monospace; }
+#tip {
+  position: fixed;
+  z-index: 40;
+  max-width: 24rem;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #2c241c;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+#tip[hidden] { display: none; }
+#tip a { color: var(--amber); }
 tr.selected { background: rgba(230, 160, 74, 0.08); }
 
 @media (max-width: 900px) {
   .layout, .face { grid-template-columns: 1fr; display: grid; }
   .identity { align-items: flex-start; text-align: left; }
-  .glossary dl { grid-template-columns: 1fr; gap: 4px; }
-  .glossary dt { margin-top: 8px; }
+  .radio-details dl { grid-template-columns: 1fr; gap: 4px; }
 }

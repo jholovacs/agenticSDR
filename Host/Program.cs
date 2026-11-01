@@ -1,7 +1,11 @@
 using System.Text.Json.Serialization;
 using AgenticSdr.Host;
+using AgenticSdr.Radio;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Extensions.Tasks;
+
+if (SetupCommands.TryHandle(args, out int setupCode))
+    return setupCode;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:5088");
@@ -12,6 +16,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.Configure<SdrOptions>(builder.Configuration.GetSection("Sdr"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<SdrOptions>>().Value);
 builder.Services.AddSingleton<ClipStore>();
+builder.Services.AddSingleton<RecordingFiles>();
 builder.Services.AddSingleton(sp =>
 {
     var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
@@ -21,7 +26,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
 {
     var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
-    return new LlmStore(Path.Combine(env.ContentRootPath, "llm.json"));
+    return new LlmStore(AppPaths.SelectLlm(env.ContentRootPath));
 });
 builder.Services.AddSingleton(sp =>
 {
@@ -48,6 +53,7 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapMcp("/mcp");
 WebApi.Map(app);
 app.Run();
+return 0;
 
 /// <summary>
 /// Opens the first visible radio when the process starts, and closes it on shutdown.
@@ -55,19 +61,27 @@ app.Run();
 /// </summary>
 public sealed class RadioStartup(RadioSession session, ILogger<RadioStartup> log) : IHostedService
 {
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ = Task.Run(() => OpenFirst(cancellationToken), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenFirst(CancellationToken cancellationToken)
     {
         try
         {
             var devices = RadioSession.ListDevices();
             if (devices.Count == 0)
             {
-                session.Note("No SDR is visible. An RTL2832U dongle needs librtlsdr and, on Windows, the WinUSB driver for VID_0BDA PID_2838. Other radios need SoapySDR and that radio's module.");
+                session.Note("No SDR is visible. An RTL2832U dongle needs librtlsdr and, on Windows, the WinUSB driver for VID_0BDA PID_2838. A LimeSDR-USB needs the Cypress driver for VID_1D50 PID_6108 and LimeSuiteNG. Other radios need SoapySDR and that radio's module.");
                 return;
             }
 
-            await session.OpenAsync(0, cancellationToken);
-            log.LogInformation("Opened {Name}.", devices[0].Name);
+            RadioDeviceInfo? rtl = devices.FirstOrDefault(device => device.Driver.Equals("rtlsdr", StringComparison.OrdinalIgnoreCase));
+            int index = rtl?.Index ?? 0;
+            await session.OpenAsync(index, cancellationToken);
+            log.LogInformation("Opened {Name}.", devices[index].Name);
         }
         catch (Exception ex)
         {

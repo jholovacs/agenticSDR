@@ -1,0 +1,95 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Agentic SDR"
+           Manufacturer="Jeremy Holovacs"
+           Version="0.1.0.0"
+           UpgradeCode="7c4e9a18-6b2d-4f5a-9c31-2e8d4b7a1f60"
+           Compressed="yes">
+    <SummaryInformation Description="Receive-only amateur radio listener" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Agentic SDR is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="LLMBASE" Value="https://api.openai.com/v1" Secure="yes" />
+    <Property Id="LLMMODEL" Value="gpt-4o-mini" Secure="yes" />
+    <Property Id="LLMKEY" Secure="yes" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AgenticSDR" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenu" Guid="b1e6c4a2-8d37-4f90-a15c-6e2b9d0f4c77">
+        <Shortcut Id="StartShortcut"
+                  Name="Agentic SDR"
+                  Description="Receive-only amateur radio listener"
+                  Target="[INSTALLFOLDER]AgenticSdr.Host.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveStartMenu" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\AgenticSDR" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)**" />
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Agentic SDR" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenu" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Dialog Id="LlmDlg" Width="370" Height="270" Title="Agentic SDR">
+        <Control Id="Title" Type="Text" X="20" Y="15" Width="330" Height="16" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}OpenAI connection" />
+        <Control Id="Description" Type="Text" X="20" Y="36" Width="330" Height="32" Transparent="yes" NoPrefix="yes" Text="The page can ask a model that speaks the OpenAI chat protocol. A local server such as http://127.0.0.1:11434/v1 works too. The key stays on this computer and is sent only to that endpoint." />
+        <Control Id="BaseLabel" Type="Text" X="20" Y="74" Width="330" Height="12" NoPrefix="yes" Text="Endpoint" />
+        <Control Id="Base" Type="Edit" X="20" Y="88" Width="330" Height="18" Property="LLMBASE" />
+        <Control Id="ModelLabel" Type="Text" X="20" Y="114" Width="330" Height="12" NoPrefix="yes" Text="Model" />
+        <Control Id="Model" Type="Edit" X="20" Y="128" Width="330" Height="18" Property="LLMMODEL" />
+        <Control Id="KeyLabel" Type="Text" X="20" Y="154" Width="330" Height="12" NoPrefix="yes" Text="API key (optional)" />
+        <Control Id="Key" Type="Edit" X="20" Y="168" Width="330" Height="18" Property="LLMKEY" Password="yes" />
+        <Control Id="Note" Type="Text" X="20" Y="196" Width="330" Height="28" Transparent="yes" NoPrefix="yes" Text="Next, the installer downloads librtlsdr and the small English speech model." />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="InstallDirDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="LlmDlg" Order="5" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LlmDlg" Order="5" />
+    </UI>
+
+    <SetProperty Id="ApplyLlm"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --set-llm --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
+                 Before="ApplyLlm"
+                 Sequence="execute"
+                 Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    <CustomAction Id="ApplyLlm"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="[CustomActionData]"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="check" />
+    <SetProperty Id="ApplyFetch"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --home &quot;[INSTALLFOLDER]&quot;"
+                 Before="ApplyFetch"
+                 Sequence="execute"
+                 Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    <CustomAction Id="ApplyFetch"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="[CustomActionData]"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="ApplyLlm" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="ApplyFetch" After="ApplyLlm" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

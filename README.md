@@ -6,6 +6,12 @@ New to SDRs? Read [GUIDE.md](GUIDE.md) first. It defines every term used on the 
 
 The bring-up radio is a Nooelec NESDR SMArt v5 (RTL2832U). It tunes about 100 kHz–1.75 GHz. The driver switches to Q-branch direct sampling below 24 MHz, which needs an HF antenna. A short VHF whip is enough for 2 m and 70 cm. Other published USB radios open through SoapySDR when that library and the matching module are installed.
 
+## Install
+
+Windows: `bash packaging/build-msi.sh` writes `packaging/out/AgenticSdr.msi`. The installer asks for the OpenAI endpoint, model, and API key, then downloads librtlsdr and the small English speech model. A local OpenAI-compatible server works in the endpoint field. The program is installed under Program Files. The key is stored in `%LOCALAPPDATA%\AgenticSDR\llm.json`. LimeSuiteNG is included when `native/limesuiteng.dll` and `native/limesuiteng-legacyapi.dll` are already built. The MSI does not install a USB driver.
+
+Debian and Ubuntu: `bash packaging/build-deb.sh` writes `packaging/out/agenticsdr_0.1.0_amd64.deb`. `sudo apt install ./agenticsdr_0.1.0_amd64.deb` asks the same three questions through debconf, depends on `librtlsdr0`, and downloads the speech model. The key is stored in `/etc/agenticsdr/llm.json`, readable only by root. `agenticsdr` starts the page.
+
 ## Run
 
 ```bash

@@ -1,0 +1,20 @@
+Template: agenticsdr/baseurl
+Type: string
+Default: https://api.openai.com/v1
+Description: OpenAI-compatible endpoint:
+ The page talks to a server that implements the OpenAI chat protocol.
+ Use https://api.openai.com/v1, or a local server such as
+ http://127.0.0.1:11434/v1.
+
+Template: agenticsdr/model
+Type: string
+Default: gpt-4o-mini
+Description: Model name:
+ The name that endpoint expects, such as gpt-4o-mini or llama3.2.
+
+Template: agenticsdr/apikey
+Type: password
+Description: API key:
+ Leave this empty for a local server that does not use a key. The key is
+ stored in /etc/agenticsdr/llm.json, readable only by root, and is sent
+ only to the endpoint above.

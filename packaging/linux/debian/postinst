@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+if [ "$1" = "configure" ]; then
+  db_get agenticsdr/baseurl
+  base="$RET"
+  db_get agenticsdr/model
+  model="$RET"
+  db_get agenticsdr/apikey
+  key="$RET"
+  install -d -m 0755 /etc/agenticsdr
+  AGENTIC_LLM_PATH=/etc/agenticsdr/llm.json \
+  AGENTIC_LLM_BASE="$base" \
+  AGENTIC_LLM_MODEL="$model" \
+  AGENTIC_LLM_KEY="$key" \
+  /usr/lib/agenticsdr/AgenticSdr.Host --set-llm-env
+  chmod 600 /etc/agenticsdr/llm.json
+  /usr/lib/agenticsdr/AgenticSdr.Host --fetch-native --home /usr/lib/agenticsdr || true
+fi
+
+db_stop
+exit 0

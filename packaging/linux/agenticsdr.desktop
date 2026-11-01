@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Agentic SDR
+Comment=Receive-only amateur radio listener
+Exec=agenticsdr
+Terminal=false
+Categories=Network;HamRadio;

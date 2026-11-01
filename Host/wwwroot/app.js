@@ -26,6 +26,16 @@ let liveAbort = null;
 let agentAbort = null;
 const agentHistory = [];
 let liveAudio = null;
+let recording = null;
+let recordingFileId = null;
+let recordingStarting = false;
+let transcriptSpans = [];
+let listeningHz = null;
+let listeningMode = "";
+let liveSampleRate = 48000;
+let listenToken = 0;
+let switching = false;
+const mp3Frame = 1152;
 let operatingRadio = false;
 let deviceOpen = false;
 let openIndex = null;
@@ -50,11 +60,16 @@ function mhzText(hz) {
 
 function setBusy(value) {
   busy = value;
+  const live = liveAbort !== null;
   document.querySelectorAll("button").forEach((button) => {
+    if (button.closest("dialog")) return;
     if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop") return;
+    if (button.id === "record" || button.id === "record-transcript" || button.classList.contains("row-listen")) return;
+    if (live && (button.id === "listen" || button.id === "noaa")) return;
     button.disabled = value;
   });
   applyRadioControls();
+  syncSignalButtons();
 }
 
 function applyRadioControls() {
@@ -62,10 +77,12 @@ function applyRadioControls() {
   const selectedIsOpen = deviceOpen && openIndex !== null && Number(radioSelect.value) === openIndex;
   document.querySelector("#radio-start").disabled = busy || selectedIsOpen || !hasRadio;
   document.querySelector("#radio-stop").disabled = !deviceOpen;
+  document.querySelector("#radio-details").disabled = busy || !hasRadio;
   document.querySelector("#antenna-guess").disabled = busy || !deviceOpen;
+  const live = liveAbort !== null;
   document.querySelector("#scan").disabled = busy || !deviceOpen;
-  document.querySelector("#listen").disabled = busy || !deviceOpen;
-  document.querySelector("#noaa").disabled = busy || !deviceOpen;
+  document.querySelector("#listen").disabled = !deviceOpen || (busy && !live);
+  document.querySelector("#noaa").disabled = !deviceOpen || (busy && !live);
   document.querySelector("#stop").disabled = operatingRadio || !busy;
 }
 
@@ -96,6 +113,7 @@ async function loadRadios() {
     radioSignature = signature;
   }
   applyRadioControls();
+  paintFoldSummaries();
 }
 
 async function startRadio() {
@@ -119,6 +137,40 @@ async function startRadio() {
   }
 }
 
+async function showRadioDetails() {
+  const panel = document.querySelector("#radio-details-panel");
+  const list = document.querySelector("#radio-details-list");
+  const title = document.querySelector("#radio-details-title");
+  const button = document.querySelector("#radio-details");
+  if (panel.open && panel.dataset.index === radioSelect.value) {
+    panel.close();
+    return;
+  }
+
+  showError("");
+  panel.dataset.index = radioSelect.value;
+  title.textContent = "Reading radio details…";
+  list.replaceChildren();
+  if (!panel.open) panel.showModal();
+  button.disabled = true;
+  try {
+    const report = await api(`/api/radio-details?index=${encodeURIComponent(radioSelect.value)}`);
+    title.textContent = report.title || "Radio details";
+    for (const fact of report.facts || []) {
+      const label = document.createElement("dt");
+      label.textContent = fact.label;
+      const value = document.createElement("dd");
+      value.textContent = fact.value;
+      list.append(label, value);
+    }
+  } catch (ex) {
+    panel.close();
+    showError(ex.message);
+  } finally {
+    applyRadioControls();
+  }
+}
+
 async function stopRadio() {
   showError("");
   operatingRadio = true;
@@ -139,11 +191,46 @@ async function stopRadio() {
 
 let transcriptKey = "";
 
+function transcriptSource(kind) {
+  if (kind === "morse") return "Morse decoder";
+  if (kind === "ft8") return "FT8 decoder";
+  if (kind === "speech") return "speech to text";
+  if (kind === "note") return "receiver note";
+  return kind || "receiver";
+}
+
+function stampTranscript(spans) {
+  const next = [];
+  let cursor = 0;
+  for (const span of spans) {
+    let match = -1;
+    for (let i = cursor; i < transcriptSpans.length; i++) {
+      const previous = transcriptSpans[i];
+      if (previous.kind !== span.kind) continue;
+      const same = previous.text === span.text;
+      const grown = span.kind === "morse" && (span.text.startsWith(previous.text) || previous.text.startsWith(span.text));
+      if (same || grown) {
+        match = i;
+        break;
+      }
+    }
+    next.push({
+      kind: span.kind,
+      text: span.text,
+      utc: match >= 0 ? transcriptSpans[match].utc : new Date().toISOString()
+    });
+    if (match >= 0) cursor = match + 1;
+  }
+  transcriptSpans = next;
+}
+
 function renderTranscript(spans) {
   const key = JSON.stringify(spans);
   if (key === transcriptKey) return;
   const nearBottom = morse.scrollHeight - morse.scrollTop - morse.clientHeight < 32;
   transcriptKey = key;
+  stampTranscript(spans);
+  updateTranscriptButton();
   morse.replaceChildren();
   if (spans.length === 0) {
     morse.textContent = "Morse, FT8, and speech appear here.";
@@ -176,6 +263,7 @@ async function refreshStatus() {
       renderTranscript(status.transcript);
     bar.style.width = status.phase === "idle" ? "0" : `${progress}%`;
     if (status.error) showError(status.error);
+    paintFoldSummaries();
   } catch (ex) {
     statusLine.textContent = ex.message;
   }
@@ -197,11 +285,77 @@ async function loadBands() {
   const keep = bands.find((item) => item.id === previous && item.tunable);
   const fallback = bands.find((item) => item.id === "2m" && item.tunable) || bands.find((item) => item.tunable);
   band.value = (preferred || keep || fallback)?.id || "";
+  paintFoldSummaries();
+}
+
+function compactNumber(value, places) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  return String(parseFloat(n.toFixed(places)));
+}
+
+function paintFoldSummaries() {
+  const option = radioSelect.selectedOptions[0];
+  const radioLabel = option && option.value !== "" ? option.textContent.split(" · ")[0] : "No radio";
+  const selectedIsOpen = deviceOpen && openIndex !== null && Number(radioSelect.value) === openIndex;
+  document.querySelector("#radio-summary").textContent = radioLabel === "No radio"
+    ? "No radio"
+    : `${radioLabel}, ${selectedIsOpen ? "open" : "stopped"}`;
+
+  const length = compactNumber(antennaLength.value, 2);
+  const unit = antennaUnit.value === "ft" ? "ft" : "m";
+  const antennaSummary = document.querySelector("#antenna-summary");
+  if (!length) antennaSummary.textContent = "";
+  else if (antennaOrientation.value === "horizontal") {
+    const degrees = Math.round(Number(antennaAzimuth.value) || 0);
+    antennaSummary.textContent = `${length}${unit}, horizontal (${degrees} degrees TN)`;
+  } else {
+    antennaSummary.textContent = `${length}${unit}, vertical`;
+  }
+
+  const modelName = document.querySelector("#llm-model").value.trim();
+  const base = document.querySelector("#llm-base").value.trim();
+  let modelText = "Not set";
+  if (modelName) modelText = modelName;
+  else if (base) {
+    try { modelText = new URL(base).host; }
+    catch { modelText = base; }
+  }
+  document.querySelector("#model-summary").textContent = modelText;
+
+  const turns = document.querySelectorAll("#prompt-log .turn");
+  let promptText = "Nothing asked yet";
+  if (turns.length) {
+    const body = turns[turns.length - 1].querySelector("p:last-child")?.textContent.replace(/\s+/g, " ").trim() || "";
+    promptText = body.length > 48 ? `${body.slice(0, 47)}…` : body;
+  }
+  document.querySelector("#prompt-summary").textContent = promptText;
+
+  const bandName = band.selectedOptions[0]?.textContent.split(" · ")[0] || "";
+  const freq = compactNumber(mhz.value, 6);
+  const modeName = mode.selectedOptions[0]?.textContent || "";
+  document.querySelector("#tune-summary").textContent = [bandName, freq ? `${freq} MHz` : "", modeName].filter(Boolean).join(", ");
+
+  if (!scanNote.textContent) scanNote.textContent = "None yet";
+
+  const raw = readout.textContent.replace(/\s+/g, " ").trim();
+  let selected = "None";
+  if (raw && raw !== "—") {
+    const match = raw.match(/^([0-9.]+)\s*MHz\s*(.*)$/);
+    const heard = modeLabel(listeningMode || document.querySelector("#listen-mode").value);
+    selected = match
+      ? `${compactNumber(match[1], 6)} MHz${heard ? `, ${heard}` : ""}`
+      : raw;
+    if (recording) selected += ", recording";
+    else if (!liveState.hidden) selected += ", playing";
+  }
+  document.querySelector("#selected-summary").textContent = selected;
 }
 
 function syncAzimuth() {
   const horizontal = antennaOrientation.value === "horizontal";
   antennaAzimuth.disabled = !horizontal;
+  paintFoldSummaries();
 }
 
 async function applyAntenna() {
@@ -219,6 +373,7 @@ async function applyAntenna() {
   });
   antennaNote.textContent = advice.summary;
   await loadBands();
+  paintFoldSummaries();
 }
 
 async function guessAntenna() {
@@ -235,6 +390,7 @@ async function guessAntenna() {
     syncAzimuth();
     antennaNote.textContent = advice.summary;
     await loadBands();
+    paintFoldSummaries();
   } catch (ex) {
     showError(ex.message);
   } finally {
@@ -247,7 +403,7 @@ function renderHits(report) {
   hits.innerHTML = "";
   const rows = report?.hits || [];
   empty.hidden = rows.length > 0;
-  scanNote.textContent = report?.warning || (report ? `${rows.length} signals` : "");
+  scanNote.textContent = report?.warning || (report ? `${rows.length} signal${rows.length === 1 ? "" : "s"}` : "None yet");
   for (const hit of rows) {
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -257,16 +413,22 @@ function renderHits(report) {
       <td class="num">${(hit.bandwidthHz / 1000).toFixed(1)}</td>
       <td class="num">${hit.snrDb.toFixed(0)}</td>
       <td>${hit.source}</td>
-      <td><button type="button" class="ghost">Listen</button></td>`;
+      <td><button type="button" class="ghost row-listen">Listen</button></td>`;
     row.querySelector("button").addEventListener("click", () => {
       document.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
       row.classList.add("selected");
       mhz.value = mhzText(hit.frequencyHz);
       mode.value = hit.mode.toLowerCase();
-      listen();
+      suggestedMode = mode.value;
+      fillHearModes();
+      document.querySelector("#listen-mode").value = suggestedMode;
+      syncDmrFields();
+      listen().catch((ex) => showError(ex.message));
     });
     hits.append(row);
   }
+  syncSignalButtons();
+  paintFoldSummaries();
 }
 
 async function scan() {
@@ -290,36 +452,403 @@ async function scan() {
 function stopLivePlayback() {
   liveAbort?.abort();
   liveAbort = null;
+  listeningHz = null;
+  listeningMode = "";
   if (liveAudio) {
     liveAudio.close().catch(() => {});
     liveAudio = null;
   }
   liveState.hidden = true;
   liveStop.hidden = true;
+  syncSignalButtons();
+  paintFoldSummaries();
 }
 
-async function listen() {
+function syncSignalButtons() {
+  const live = liveAbort !== null;
+  document.querySelectorAll(".row-listen").forEach((button) => {
+    button.disabled = !live && busy;
+  });
+  document.querySelector("#record").disabled = !live && !recording;
+  updateTranscriptButton();
+}
+
+function updateTranscriptButton() {
+  document.querySelector("#record-transcript").disabled = transcriptSpans.length === 0;
+}
+
+function utcStamp(date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
+function modeToken(value) {
+  const names = {
+    nbfm: "FMNB",
+    wbfm: "FMWB",
+    am: "AM",
+    usb: "SSBUSB",
+    lsb: "SSBLSB",
+    raw: "Raw",
+    cw: "CW",
+    ft8: "FT8",
+    dmr: "DMR"
+  };
+  return names[String(value || "").toLowerCase()] || "Audio";
+}
+
+function recordingName(frequencyHz, started, ended, heard) {
+  return `${mhzText(frequencyHz)}MHz_${modeToken(heard)}_${utcStamp(started)}-${utcStamp(ended)}.mp3`;
+}
+
+async function startRecording() {
+  const created = await api("/api/recording", { method: "POST" });
+  if (!liveAbort) {
+    await removeRecordingFile(created.id);
+    showError("Listen to a signal before recording.");
+    return;
+  }
+  const rate = liveSampleRate || 48000;
+  recording = {
+    frequencyHz: listeningHz ?? Number(mhz.value) * 1e6,
+    mode: listeningMode,
+    started: new Date(),
+    encoder: new lamejs.Mp3Encoder(1, rate, 64),
+    pending: new Int16Array(0),
+    id: created.id,
+    queue: Promise.resolve(),
+    batch: [],
+    bytes: 0,
+    discarded: false,
+    failed: null
+  };
+  recordingFileId = created.id;
+  const button = document.querySelector("#record");
+  button.textContent = "Stop recording";
+  button.classList.add("recording");
+  paintFoldSummaries();
+}
+
+function appendRecording(samples) {
+  if (!recording || samples.length === 0) return;
+  const merged = new Int16Array(recording.pending.length + samples.length);
+  merged.set(recording.pending, 0);
+  merged.set(samples, recording.pending.length);
+  let offset = 0;
+  while (merged.length - offset >= mp3Frame) {
+    const frame = merged.subarray(offset, offset + mp3Frame);
+    const mp3 = recording.encoder.encodeBuffer(frame);
+    if (mp3.length) queueMp3(recording, mp3);
+    offset += mp3Frame;
+  }
+  recording.pending = new Int16Array(merged.subarray(offset));
+}
+
+function queueMp3(rec, data) {
+  if (!data || data.length === 0) return;
+  const copy = new Uint8Array(data.length);
+  copy.set(data);
+  rec.bytes += copy.byteLength;
+  rec.batch.push(copy);
+  let pending = 0;
+  for (const part of rec.batch) pending += part.byteLength;
+  if (pending < 16384) return;
+  flushRecording(rec);
+}
+
+function flushRecording(rec) {
+  if (rec.batch.length === 0) return;
+  const parts = rec.batch;
+  rec.batch = [];
+  let length = 0;
+  for (const part of parts) length += part.byteLength;
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    body.set(part, offset);
+    offset += part.byteLength;
+  }
+  rec.queue = rec.queue.then(async () => {
+    if (rec.discarded || rec.failed) return;
+    await api(`/api/recording/${rec.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body
+    });
+  }).catch((ex) => {
+    rec.failed = ex;
+  });
+}
+
+async function endRecording(discard) {
+  const rec = recording;
+  recording = null;
+  const button = document.querySelector("#record");
+  button.textContent = "Record";
+  button.classList.remove("recording");
+  syncSignalButtons();
+  paintFoldSummaries();
+  if (!rec) return null;
+  rec.discarded = !!discard;
+  if (!discard) {
+    if (rec.pending.length) {
+      const mp3 = rec.encoder.encodeBuffer(rec.pending);
+      if (mp3.length) queueMp3(rec, mp3);
+    }
+    const tail = rec.encoder.flush();
+    if (tail.length) queueMp3(rec, tail);
+    flushRecording(rec);
+  }
+  try {
+    await rec.queue;
+  } catch (ex) {
+    rec.failed = ex;
+  }
+  if (discard || rec.failed || rec.bytes === 0) {
+    await removeRecordingFile(rec.id);
+    if (rec.failed && !discard) showError(rec.failed.message);
+    return null;
+  }
+  return { id: rec.id, name: recordingName(rec.frequencyHz, rec.started, new Date(), rec.mode) };
+}
+
+async function removeRecordingFile(id) {
+  if (!id) return;
+  if (recordingFileId === id) recordingFileId = null;
+  try {
+    await fetch(`/api/recording/${id}`, { method: "DELETE", keepalive: true });
+  } catch {
+    /* The host is already gone, and the next start clears the temp directory. */
+  }
+}
+
+async function releaseRecording(file, download) {
+  if (!file) return;
+  try {
+    if (!download) return;
+    const response = await fetch(`/api/recording/${file.id}`);
+    if (!response.ok) throw new Error("Could not read the recording.");
+    const blob = await response.blob();
+    if (blob.size === 0) {
+      showError("The recording was too short to save.");
+      return;
+    }
+    downloadFile({ blob, name: file.name });
+  } finally {
+    await removeRecordingFile(file.id);
+  }
+}
+
+async function offerRecording(file) {
+  if (!file) return;
+  const choice = await askDownload("Download the recording?", "Download the recording?");
+  await releaseRecording(file, choice === "yes");
+}
+
+function xmlEscape(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function transcriptFile() {
+  const started = transcriptSpans[0].utc;
+  const ended = transcriptSpans[transcriptSpans.length - 1].utc;
+  const start = utcStamp(new Date(started));
+  const end = utcStamp(new Date(ended));
+  const frequencyHz = listeningHz ?? Number(mhz.value) * 1e6;
+  const lines = transcriptSpans.map((span) =>
+    `  <text utc="${xmlEscape(span.utc)}" source="${xmlEscape(transcriptSource(span.kind))}">${xmlEscape(span.text)}</text>`);
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<transcript>\n${lines.join("\n")}\n</transcript>\n`;
+  return {
+    blob: new Blob([xml], { type: "text/xml" }),
+    name: `${mhzText(frequencyHz)}MHz_${modeToken(listeningMode)}_${start}-${end}.xml`
+  };
+}
+
+function closePrompt() {
+  const leave = document.querySelector("#leave-recording");
+  if (leave.open) leave.close("stay");
+}
+
+function askDownload(heading, message) {
+  const dialog = document.querySelector("#leave-recording");
+  document.querySelector("#recording-question-title").textContent = heading;
+  document.querySelector("#recording-question").textContent = message;
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue || "stay"), { once: true });
+    dialog.showModal();
+  });
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file.blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+const hearModes = [
+  ["nbfm", "FMNB"],
+  ["wbfm", "FMWB"],
+  ["am", "AM"],
+  ["usb", "SSB USB"],
+  ["lsb", "SSB LSB"],
+  ["raw", "Raw"],
+  ["cw", "CW"],
+  ["ft8", "FT8"],
+  ["dmr", "DMR"]
+];
+let suggestedMode = "nbfm";
+let listeningDmrKey = "";
+
+function modeLabel(value) {
+  return hearModes.find((item) => item[0] === value)?.[1] || modeToken(value);
+}
+
+function fillHearModes() {
+  const hear = document.querySelector("#listen-mode");
+  const current = hear.value || suggestedMode;
+  hear.innerHTML = "";
+  const add = (value, label) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    hear.append(option);
+  };
+  add(suggestedMode, `${modeLabel(suggestedMode)} · suggested`);
+  for (const [value, label] of hearModes) {
+    if (value !== suggestedMode) add(value, label);
+  }
+  hear.value = [...hear.options].some((option) => option.value === current) ? current : suggestedMode;
+  syncDmrFields();
+}
+
+function dmrKey() {
+  const color = document.querySelector("#dmr-color").value;
+  const slot = document.querySelector("#dmr-slot").value;
+  const talkgroup = document.querySelector("#dmr-tg").value.trim();
+  return `${color}|${slot}|${talkgroup}`;
+}
+
+function syncDmrFields() {
+  const hear = document.querySelector("#listen-mode").value;
+  const scan = document.querySelector("#mode").value;
+  document.querySelector("#dmr-fields").hidden = hear !== "dmr" && scan !== "dmr";
+}
+
+function fillColorCodes() {
+  const select = document.querySelector("#dmr-color");
+  for (let code = 0; code <= 15; code++) {
+    const option = document.createElement("option");
+    option.value = String(code);
+    option.textContent = String(code);
+    select.append(option);
+  }
+}
+
+async function listen(explicitMode) {
+  const frequencyHz = Number(mhz.value) * 1e6;
+  const sendMode = explicitMode || mode.value;
+  const nextDmr = dmrKey();
+  const modeChanged = !!liveAbort && sendMode !== "auto" && sendMode !== listeningMode;
+  const dmrChanged = !!liveAbort && (sendMode === "dmr" || listeningMode === "dmr") && nextDmr !== listeningDmrKey;
+  const leaving = liveAbort && recording && Math.abs(frequencyHz - recording.frequencyHz) > 100;
+  if ((modeChanged || dmrChanged) && recording && !leaving) {
+    if (switching) return;
+    switching = true;
+    const epoch = listenToken;
+    let choice = "stay";
+    try {
+      choice = await askDownload("Download the recording?", "Download the recording?");
+      if (choice === "stay" || listenToken !== epoch) {
+        const hear = document.querySelector("#listen-mode");
+        hear.value = listeningMode || suggestedMode;
+        if ([...mode.options].some((option) => option.value === hear.value)) mode.value = hear.value;
+        const [color, slot, talkgroup] = listeningDmrKey.split("|");
+        document.querySelector("#dmr-color").value = color || "";
+        document.querySelector("#dmr-slot").value = slot || "";
+        document.querySelector("#dmr-tg").value = talkgroup || "";
+        syncDmrFields();
+        return;
+      }
+      await releaseRecording(await endRecording(choice !== "yes"), choice === "yes");
+    } finally {
+      switching = false;
+    }
+  }
+  if (leaving) {
+    if (switching) return;
+    switching = true;
+    const epoch = listenToken;
+    let choice = "stay";
+    try {
+      choice = await askDownload("Leave this frequency?", "Download the recording before leaving this frequency?");
+      if (choice === "yes" && listenToken === epoch) {
+        await releaseRecording(await endRecording(), true);
+      } else if (choice === "no" && listenToken === epoch) {
+        await endRecording(true);
+      }
+    } finally {
+      switching = false;
+    }
+    if (choice === "stay" || listenToken !== epoch) return;
+  } else if (liveAbort && !modeChanged && !dmrChanged && Math.abs(frequencyHz - (listeningHz ?? frequencyHz)) <= 100) {
+    return;
+  }
+
+  const token = ++listenToken;
   stopLivePlayback();
   showError("");
   setBusy(true);
   const controller = new AbortController();
   liveAbort = controller;
-  const frequencyHz = Number(mhz.value) * 1e6;
-  const params = new URLSearchParams({ frequencyHz: String(frequencyHz), mode: mode.value });
+  listeningHz = frequencyHz;
+  listeningMode = sendMode === "auto" ? listeningMode : sendMode;
+  listeningDmrKey = nextDmr;
+  applyRadioControls();
+  syncSignalButtons();
+  const params = new URLSearchParams({ frequencyHz: String(frequencyHz), mode: sendMode });
+  if (sendMode === "dmr" || document.querySelector("#listen-mode").value === "dmr") {
+    const color = document.querySelector("#dmr-color").value;
+    const slot = document.querySelector("#dmr-slot").value;
+    const talkgroup = document.querySelector("#dmr-tg").value.trim();
+    if (color !== "") params.set("colorCode", color);
+    if (slot !== "") params.set("slot", slot);
+    if (talkgroup !== "") params.set("talkgroup", talkgroup);
+  }
   try {
     const response = await fetch(`/api/live?${params}`, { signal: controller.signal });
+    if (token !== listenToken) return;
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       throw new Error(body?.error || response.statusText);
     }
 
     const rate = Number(response.headers.get("X-Audio-Rate")) || 48000;
+    liveSampleRate = rate;
     const tuneHz = Number(response.headers.get("X-Tune-Hz"));
-    readout.textContent = `${mhzText(tuneHz)} MHz  ${response.headers.get("X-Mode") || ""}`;
+    if (Number.isFinite(tuneHz)) listeningHz = tuneHz;
+    const reported = (response.headers.get("X-Mode") || sendMode).toLowerCase();
+    if (reported) {
+      listeningMode = reported;
+      if (sendMode === "auto") {
+        suggestedMode = reported;
+        fillHearModes();
+        document.querySelector("#listen-mode").value = reported;
+      }
+    }
+    syncDmrFields();
+    readout.textContent = `${mhzText(listeningHz)} MHz  ${modeLabel(listeningMode)}`;
     source.textContent = response.headers.get("X-Source") || "";
     liveState.hidden = false;
     liveStop.hidden = false;
     liveState.textContent = "Playing as the signal arrives.";
+    syncSignalButtons();
+    paintFoldSummaries();
 
     const context = new AudioContext();
     liveAudio = context;
@@ -328,9 +857,12 @@ async function listen() {
   } catch (ex) {
     if (ex.name !== "AbortError") showError(ex.message);
   } finally {
+    if (token !== listenToken) return;
+    const file = recording ? await endRecording() : null;
     stopLivePlayback();
     setBusy(false);
     refreshStatus();
+    await offerRecording(file);
   }
 }
 
@@ -349,8 +881,13 @@ async function playPcmStream(body, context, rate, signal) {
     const buffer = context.createBuffer(1, count, rate);
     const channel = buffer.getChannelData(0);
     const view = new DataView(pending.buffer, pending.byteOffset, usable);
-    for (let i = 0; i < count; i++)
-      channel[i] = view.getInt16(i * 2, true) / 32768;
+    const pcm = recording ? new Int16Array(count) : null;
+    for (let i = 0; i < count; i++) {
+      const sample = view.getInt16(i * 2, true);
+      channel[i] = sample / 32768;
+      if (pcm) pcm[i] = sample;
+    }
+    if (pcm) appendRecording(pcm);
     const node = context.createBufferSource();
     node.buffer = buffer;
     node.connect(context.destination);
@@ -372,6 +909,10 @@ function concatBytes(left, right) {
 }
 
 antennaOrientation.addEventListener("change", syncAzimuth);
+for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#mode", "#llm-model", "#llm-base"]) {
+  document.querySelector(id).addEventListener("input", paintFoldSummaries);
+  document.querySelector(id).addEventListener("change", paintFoldSummaries);
+}
 document.querySelector("#antenna-apply").addEventListener("click", () => {
   applyAntenna().catch((ex) => showError(ex.message));
 });
@@ -380,18 +921,88 @@ document.querySelector("#radio-start").addEventListener("click", startRadio);
 document.querySelector("#radio-stop").addEventListener("click", () => {
   stopRadio().catch((ex) => showError(ex.message));
 });
-radioSelect.addEventListener("change", applyRadioControls);
+radioSelect.addEventListener("change", () => {
+  const details = document.querySelector("#radio-details-panel");
+  if (details.open) details.close();
+  applyRadioControls();
+});
+document.querySelector("#radio-details").addEventListener("click", () => {
+  showRadioDetails().catch((ex) => showError(ex.message));
+});
+document.querySelector("#radio-details-close").addEventListener("click", () => {
+  document.querySelector("#radio-details-panel").close();
+});
 radioSelect.addEventListener("focus", () => {
   loadRadios().catch((ex) => showError(ex.message));
 });
 document.querySelector("#scan").addEventListener("click", scan);
-document.querySelector("#listen").addEventListener("click", listen);
+document.querySelector("#listen").addEventListener("click", () => {
+  listen().catch((ex) => showError(ex.message));
+});
+document.querySelector("#mode").addEventListener("change", syncDmrFields);
+document.querySelector("#listen-mode").addEventListener("change", () => {
+  const hear = document.querySelector("#listen-mode").value;
+  if ([...mode.options].some((option) => option.value === hear)) mode.value = hear;
+  syncDmrFields();
+  paintFoldSummaries();
+  if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
+});
+for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
+  document.querySelector(id).addEventListener("change", () => {
+    if (document.querySelector("#listen-mode").value === "dmr" && liveAbort)
+      listen("dmr").catch((ex) => showError(ex.message));
+  });
+}
+document.querySelector("#record").addEventListener("click", () => {
+  if (recordingStarting) return;
+  if (recording) {
+    endRecording()
+      .then((file) => {
+        if (!file) {
+          showError("The recording was too short to save.");
+          return;
+        }
+        return offerRecording(file);
+      })
+      .catch((ex) => showError(ex.message));
+    return;
+  }
+  if (!liveAbort) {
+    showError("Listen to a signal before recording.");
+    return;
+  }
+  recordingStarting = true;
+  startRecording()
+    .catch((ex) => showError(ex.message))
+    .finally(() => {
+      recordingStarting = false;
+    });
+});
+document.querySelector("#record-transcript").addEventListener("click", () => {
+  if (transcriptSpans.length === 0) return;
+  downloadFile(transcriptFile());
+});
+document.querySelector("#leave-yes").addEventListener("click", () => {
+  document.querySelector("#leave-recording").close("yes");
+});
+document.querySelector("#leave-no").addEventListener("click", () => {
+  document.querySelector("#leave-recording").close("no");
+});
 async function stopWork() {
-  liveAbort?.abort();
+  listenToken++;
+  const file = recording ? await endRecording() : null;
+  closePrompt();
+  stopLivePlayback();
   agentAbort?.abort();
+  setBusy(false);
   await api("/api/stop", { method: "POST" });
   refreshStatus();
+  await offerRecording(file);
 }
+window.addEventListener("pagehide", () => {
+  const id = recording?.id || recordingFileId;
+  if (id) navigator.sendBeacon(`/api/recording/${id}/discard`, "");
+});
 document.querySelector("#stop").addEventListener("click", stopWork);
 liveStop.addEventListener("click", stopWork);
 document.querySelector("#llm-save").addEventListener("click", () => {
@@ -416,7 +1027,7 @@ document.querySelector("#llm-ask").addEventListener("keydown", (event) => {
 document.querySelector("#noaa").addEventListener("click", () => {
   mhz.value = "162.550000";
   mode.value = "nbfm";
-  listen();
+  listen().catch((ex) => showError(ex.message));
 });
 
 restoreAntenna()
@@ -436,6 +1047,7 @@ async function loadModel() {
   document.querySelector("#llm-note").textContent = view.baseUrl
     ? `Using ${view.model || "a model"} at ${view.baseUrl}.`
     : "An instruct model that speaks the OpenAI chat protocol can run the same actions as these buttons. Ask it in the prompt below.";
+  paintFoldSummaries();
 }
 
 async function saveModel(clearKey) {
@@ -457,6 +1069,7 @@ async function saveModel(clearKey) {
   document.querySelector("#llm-note").textContent = view.baseUrl
     ? `Saved ${view.model || "the model"} at ${view.baseUrl}.`
     : "The endpoint was cleared.";
+  paintFoldSummaries();
 }
 
 async function listModels() {
@@ -495,16 +1108,22 @@ function addTurn(kind, who, text, steps) {
   const log = document.querySelector("#prompt-log");
   log.append(turn);
   log.scrollTop = log.scrollHeight;
+  paintFoldSummaries();
   return turn;
 }
 
 async function askModel() {
   const box = document.querySelector("#llm-ask");
   const question = box.value.trim();
-  if (!question || busy) return;
+  if (!question) return;
+  if (busy) {
+    showError("The radio is busy. Press Stop, then send the prompt again.");
+    return;
+  }
   showError("");
   const asked = addTurn("user", "You", question);
   const pending = addTurn("agent", "Agent", "Working on it…");
+  asked.scrollIntoView({ block: "nearest" });
   box.value = "";
   setBusy(true);
   agentAbort = new AbortController();
@@ -520,6 +1139,7 @@ async function askModel() {
     while (agentHistory.length > 8) agentHistory.shift();
     const steps = (reply.actions || []).map((action) => `${action.tool}: ${action.result}`).join("\n");
     pending.querySelector("p:last-child").textContent = reply.answer;
+    paintFoldSummaries();
     if (steps) {
       const detail = document.createElement("p");
       detail.className = "steps";
@@ -535,16 +1155,15 @@ async function askModel() {
       syncAzimuth();
       antennaNote.textContent = reply.antenna.summary;
       await loadBands();
+      paintFoldSummaries();
     }
     if (reply.scan) renderHits(reply.scan);
   } catch (ex) {
-    asked.remove();
-    pending.remove();
+    const reason = ex.name === "AbortError" ? "Stopped." : ex.message;
+    pending.querySelector("p:last-child").textContent = reason;
+    paintFoldSummaries();
     box.value = question;
-    if (ex.name === "AbortError") showError("Stopped.");
-    else showError(ex.message);
-    if (!document.querySelector("#prompt-log .turn"))
-      document.querySelector("#prompt-empty").hidden = false;
+    showError(reason);
   } finally {
     agentAbort = null;
     setBusy(false);
@@ -561,6 +1180,146 @@ async function restoreAntenna() {
   if (advice.azimuthDegrees != null) antennaAzimuth.value = String(Math.round(advice.azimuthDegrees));
   syncAzimuth();
   antennaNote.textContent = advice.summary;
+  paintFoldSummaries();
 }
+function rememberFolds() {
+  const folds = document.querySelectorAll("details.fold");
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem("agentic-sdr-folds") || "{}");
+  } catch {
+    saved = {};
+  }
+  folds.forEach((details) => {
+    const id = details.dataset.fold;
+    if (id && Object.hasOwn(saved, id)) details.open = saved[id];
+    details.addEventListener("toggle", () => {
+      const state = {};
+      folds.forEach((item) => {
+        if (item.dataset.fold) state[item.dataset.fold] = item.open;
+      });
+      try {
+        localStorage.setItem("agentic-sdr-folds", JSON.stringify(state));
+      } catch {
+        /* The sections still collapse when the browser will not store the choice. */
+      }
+    });
+  });
+}
+function wiki(page, label) {
+  return `<a href="https://en.wikipedia.org/wiki/${page}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+
+const tips = {
+  receive: "This program only receives. It does not transmit.",
+  "device-name": "The radio that is open.",
+  status: "What the radio is doing right now.",
+  radio: "Open or close the USB radio this page tunes.",
+  device: `The connected ${wiki("Software-defined_radio", "software-defined radio")}. It captures a slice of spectrum, and this program decides what the signal is.`,
+  start: "Opens the selected radio.",
+  "stop-radio": "Releases the radio. A scan that is running stops too.",
+  details: "Shows the tuning range, sample rate, and versions.",
+  antenna: "How long the antenna is, and which way it points. Matching bands move to the top.",
+  length: `A vertical antenna is treated as a quarter-wave ${wiki("Monopole_antenna", "monopole")}. A horizontal wire is treated as a half-wave ${wiki("Dipole_antenna", "dipole")}.`,
+  unit: "Meters or feet. The length is converted when the antenna is saved.",
+  orientation: `Vertical stands up. Horizontal runs sideways. See ${wiki("Monopole_antenna", "monopole")} and ${wiki("Dipole_antenna", "dipole")}.`,
+  azimuth: `Degrees clockwise from true north for a horizontal wire. 0 is north and 90 is east. The wire hears best at right angles to its ${wiki("Azimuth", "azimuth")}.`,
+  apply: "Saves this length and orientation. Bands near that length move to the top.",
+  guess: "Listens at several spots and treats the loudest noise floor as the antenna’s natural frequency. Strength does not show which way a wire points.",
+  model: `An ${wiki("Large_language_model", "instruct model")} that can run the same actions as these buttons.`,
+  endpoint: "The address of a server that speaks the OpenAI chat protocol, usually ending in /v1. A local server works here.",
+  "model-name": "The model name on that server.",
+  key: "Stored on this computer and sent only to the endpoint you saved. A local server often needs none.",
+  "save-model": "Stores the endpoint, model, and key.",
+  "list-models": "Asks the endpoint which models it has.",
+  forget: "Clears the saved API key.",
+  prompt: "Ask the model to scan, listen, or change the antenna. Stop cancels that work.",
+  ask: "The sentence for the model, such as “Scan 2 m and tell me what you hear.”",
+  send: "Sends that sentence. The model asks this program to do the work.",
+  tune: "Pick a band or a frequency and listen.",
+  band: `A named range of ${wiki("Radio_frequency", "frequencies")}. Amateur bands follow the ${wiki("Amateur_radio_frequency_allocations", "amateur allocations")}. Below 24 MHz on an RTL-SDR the tuner steps aside and the chip samples the antenna more directly (${wiki("High_frequency", "HF")}). Also listed: ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("Digital_mobile_radio", "DMR")}, and ${wiki("NOAA_Weather_Radio", "NOAA weather")}.`,
+  scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
+  stop: "Stops a scan, a listen, or a model request.",
+  freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, and ${wiki("Digital_mobile_radio", "DMR")}.`,
+  hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
+  "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
+  "dmr-slot": "DMR timeslot 1 or 2. Any accepts both slots.",
+  "dmr-tg": "The talkgroup to write down. Leave this blank to accept every talkgroup.",
+  listen: "Tunes that frequency and plays it as the signal arrives.",
+  noaa: `Listens to one ${wiki("NOAA_Weather_Radio", "NOAA weather radio")} channel so you can tell the radio is working.`,
+  signals: "Peaks from the last scan.",
+  "col-mhz": `Frequency in megahertz. See ${wiki("Radio_frequency", "radio frequency")}.`,
+  "col-mode": "The kind of signal the scan guessed.",
+  "col-conf": "How sure that mode guess is. Listening is the check.",
+  "col-khz": `How wide the signal is, in kilohertz. See ${wiki("Bandwidth_(signal_processing)", "bandwidth")}.`,
+  "col-snr": `How far the signal stands above the noise, in decibels. Bigger is cleaner. See ${wiki("Signal-to-noise_ratio", "signal-to-noise ratio")}.`,
+  "col-source": `A ${wiki("Band_plan", "band plan")} label, such as a calling frequency or “FM broadcast.” It is not a station’s name.`,
+  selected: "The frequency playing now, and any text decoded from it.",
+  record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",
+  transcript: `Downloads ${wiki("Morse_code", "Morse")}, ${wiki("FT8", "FT8")}, and ${wiki("Speech_recognition", "speech")} text as XML, with the time and which decoder wrote each line.`,
+  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")}, ${wiki("Speech_recognition", "speech")}, and DMR talkgroup, radio ID, and alias text.`
+};
+
+function placeTip(target) {
+  const text = tips[target.dataset.tip];
+  const tip = document.querySelector("#tip");
+  if (!text || !tip) return;
+  tip.innerHTML = text;
+  tip.hidden = false;
+  const box = target.getBoundingClientRect();
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+  let left = Math.min(Math.max(8, box.left), window.innerWidth - width - 8);
+  let top = box.bottom + 8;
+  if (top + height > window.innerHeight - 8) top = Math.max(8, box.top - height - 8);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function bindTips() {
+  const tip = document.querySelector("#tip");
+  if (!tip) return;
+  let hideTimer = 0;
+  const hideSoon = () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      tip.hidden = true;
+    }, 160);
+  };
+  const show = (target) => {
+    if (!target || !tips[target.dataset.tip]) return;
+    clearTimeout(hideTimer);
+    placeTip(target);
+  };
+  document.addEventListener("mouseover", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (target) show(target);
+    else if (event.target.closest("#tip")) clearTimeout(hideTimer);
+  });
+  document.addEventListener("mouseout", (event) => {
+    const leaving = event.target.closest("[data-tip], #tip");
+    const next = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest("[data-tip], #tip") : null;
+    if (leaving && leaving !== next) hideSoon();
+  });
+  document.addEventListener("focusin", (event) => show(event.target.closest("[data-tip]")));
+  document.addEventListener("focusout", (event) => {
+    const next = event.relatedTarget;
+    if (next && next.closest && next.closest("[data-tip], #tip")) return;
+    hideSoon();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") tip.hidden = true;
+  });
+  window.addEventListener("scroll", () => {
+    tip.hidden = true;
+  }, true);
+}
+
+fillColorCodes();
+fillHearModes();
+bindTips();
+rememberFolds();
 refreshStatus();
+loadRadios().catch((ex) => showError(ex.message));
 setInterval(refreshStatus, 800);

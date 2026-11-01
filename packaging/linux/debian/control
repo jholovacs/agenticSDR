@@ -1,0 +1,13 @@
+Package: agenticsdr
+Version: 0.1.0
+Section: hamradio
+Priority: optional
+Architecture: amd64
+Depends: librtlsdr0, debconf, ca-certificates
+Recommends: soapysdr-tools
+Maintainer: Jeremy Holovacs <jholovacs@gmail.com>
+Description: receive-only amateur radio listener
+ Agentic SDR opens a USB software-defined radio and serves a page at
+ http://127.0.0.1:5088. It can ask an OpenAI-compatible model to run the
+ same receive actions. librtlsdr comes from Debian. The speech model is
+ downloaded during setup when the network is available.

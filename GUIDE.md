@@ -72,11 +72,11 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 **RTL-SDR / NESDR / RTL2832U.** A common inexpensive USB receiver. The NESDR SMArt v5 uses the RTL2832U chip and an R820T2 tuner. It covers roughly 100 kHz to 1.75 GHz. This program talks to it through `rtlsdr.dll`.
 
-**SoapySDR.** A common library that opens many other USB radios (Airspy, HackRF, LimeSDR, Pluto, and others) with one programming interface. Install SoapySDR and the module for your radio. This program does not include those vendor libraries.
+**SoapySDR.** A common library that opens many other USB radios (Airspy, HackRF, Pluto, and others) with one programming interface. Install SoapySDR and the module for your radio. This program does not include those vendor libraries. A LimeSDR-USB is the exception: it opens through LimeSuiteNG, and only the receive side is started.
 
 **I/Q samples.** A pair of numbers for each moment in time. Together they describe the radio wave well enough to recover the original signal in software. You can think of them as the two knobs that draw the wave.
 
-**Sample rate.** How many I/Q pairs arrive each second. The NESDR path uses 2.4 million per second. Other radios use the closest practical rate their hardware allows.
+**Sample rate.** How many I/Q pairs arrive each second. The NESDR path uses 2.4 million per second. A LimeSDR-USB uses 3.072 million per second so reception does not need the transmit DAC powered. Other radios use the closest practical rate their hardware allows.
 
 **Center frequency.** The frequency in the middle of the slice the radio is capturing right now. Signals just above and just below it are in the same capture.
 

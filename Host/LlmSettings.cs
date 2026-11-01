@@ -27,16 +27,17 @@ public sealed record LlmSave(string? BaseUrl, string? Model, string? ApiKey, boo
 public sealed class LlmStore(string path)
 {
     private readonly object _gate = new();
+    private string _path = path;
 
     public LlmSettings Read()
     {
         lock (_gate)
         {
-            if (!File.Exists(path))
+            if (!File.Exists(_path))
                 return new LlmSettings("", "", "");
             try
             {
-                var saved = JsonSerializer.Deserialize<Saved>(File.ReadAllText(path), JsonOptions()) ?? new Saved();
+                var saved = JsonSerializer.Deserialize<Saved>(File.ReadAllText(_path), JsonOptions()) ?? new Saved();
                 return new LlmSettings(saved.BaseUrl ?? "", saved.Model ?? "", saved.ApiKey ?? "");
             }
             catch (JsonException)
@@ -63,17 +64,31 @@ public sealed class LlmStore(string path)
             if (key.Length > 512)
                 throw new ArgumentException("The API key is too long.");
             var next = new LlmSettings(baseUrl, model, key);
-            string? directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-            File.WriteAllText(path, JsonSerializer.Serialize(new Saved
+            try
             {
-                BaseUrl = next.BaseUrl,
-                Model = next.Model,
-                ApiKey = next.ApiKey
-            }, JsonOptions()));
+                Write(next);
+            }
+            catch (UnauthorizedAccessException) when (_path != AppPaths.UserLlm())
+            {
+                _path = AppPaths.UserLlm();
+                Write(next);
+            }
+
             return Present(next);
         }
+    }
+
+    private void Write(LlmSettings next)
+    {
+        string? directory = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+        File.WriteAllText(_path, JsonSerializer.Serialize(new Saved
+        {
+            BaseUrl = next.BaseUrl,
+            Model = next.Model,
+            ApiKey = next.ApiKey
+        }, JsonOptions()));
     }
 
     public static string NormalizeBase(string raw)

@@ -41,7 +41,7 @@ public sealed class SdrPrompts
     [Description("How to scan an amateur band and listen to one signal with this radio.")]
     public static string Guide() =>
         """
-        You are operating a receive-only USB SDR. RTL2832U dongles such as the NESDR SMArt v5 use the built-in driver. Airspy, HackRF, bladeRF, LimeSDR, Pluto, SDRplay, USRP, and other published radios open through SoapySDR. Use the tools in this order:
+        You are operating a receive-only USB SDR. RTL2832U dongles such as the NESDR SMArt v5 use the built-in driver. LimeSDR-USB uses the built-in LimeSuiteNG library and must not transmit. Airspy, HackRF, bladeRF, Pluto, SDRplay, USRP, and other published radios open through SoapySDR. Use the tools in this order:
         1. list_devices, then open_device if the radio is not already open. list_sdr_families names the module to install when a radio is missing.
         2. Ask for the antenna length and whether it is vertical or horizontal. For a horizontal wire, also ask which way the wire runs, in degrees true (0 is north). Call set_antenna, or guess_antenna to estimate the length from where the noise floor is strongest. Then list_ham_bands and prefer a recommended band. On an RTL-SDR, bands below 24 MHz use direct sampling and need an HF antenna. Strength cannot show compass direction.
         3. scan_band with one band id. AM broadcast is am-bc, FM broadcast is fm-bc, NOAA weather is noaa, Citizens Band is cb, GMRS is gmrs, and DMR is dmr. Those three are receive-only and appear when the radio can tune them. DMR lists a signal only when its framing is recognized, and the words are not decoded. Report frequency, mode, bandwidth, SNR, and source. Do not invent callsigns or station names.

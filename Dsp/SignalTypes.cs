@@ -29,8 +29,11 @@ public enum RadioMode
     /// <summary>Wide FM, about 200 kHz wide. Ordinary FM broadcast from 88 to 108 MHz.</summary>
     Wbfm,
 
-    /// <summary>DMR digital voice on VHF or UHF. The framing can be recognized. The words use a proprietary codec and are not decoded.</summary>
-    Dmr
+    /// <summary>DMR digital voice on VHF or UHF. The framing carries talkgroup, radio ID, and alias text. The voice codec is not turned into speech.</summary>
+    Dmr,
+
+    /// <summary>Wide discriminator audio, without the voice filter or de-emphasis.</summary>
+    Raw
 }
 
 /// <summary>

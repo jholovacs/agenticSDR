@@ -30,6 +30,9 @@ public static class DmrSync
         Levels("D7557F5FF7F5")
     ];
 
+    public static float[] SymbolStream(ReadOnlySpan<Complex> iq, double sampleRate, double offsetHz) =>
+        Symbols(iq, sampleRate, offsetHz);
+
     public static bool Present(ReadOnlySpan<Complex> iq, double sampleRate, double offsetHz)
     {
         if (iq.Length < 256 || sampleRate < 8_000)

@@ -1,3 +1,4 @@
+using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Host;
@@ -33,6 +34,17 @@ public static class WebApi
             session.Close();
             return Results.Ok(session.Status);
         });
+        app.MapGet("/api/radio-details", (int index, RadioSession session) =>
+        {
+            try
+            {
+                return Results.Ok(session.Details(index));
+            }
+            catch (Exception ex) when (ex is RadioException or InvalidOperationException)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
         app.MapGet("/api/capabilities", (RadioSession session) =>
         {
             try
@@ -65,11 +77,11 @@ public static class WebApi
             await Run(() => session.InspectAsync(body.FrequencyHz, ct)));
         app.MapPost("/api/listen", async (ListenBody body, RadioSession session, CancellationToken ct) =>
             await Run(() => session.ListenAsync(body.FrequencyHz, body.Mode, body.Seconds ?? 8, ct)));
-        app.MapGet("/api/live", async (double frequencyHz, string? mode, HttpContext http, RadioSession session, CancellationToken ct) =>
+        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, HttpContext http, RadioSession session, CancellationToken ct) =>
         {
             try
             {
-                await session.WriteLiveAsync(frequencyHz, mode, http.Response, ct);
+                await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct);
             }
             catch (OperationCanceledException)
             {
@@ -104,6 +116,68 @@ public static class WebApi
         {
             session.Stop();
             return Results.Ok(session.Status);
+        });
+        app.MapPost("/api/recording", (RecordingFiles files) => Results.Ok(new { id = files.Create() }));
+        app.MapPost("/api/recording/{id}", async (string id, HttpContext http, RecordingFiles files, CancellationToken ct) =>
+        {
+            try
+            {
+                using var buffer = new MemoryStream();
+                await http.Request.Body.CopyToAsync(buffer, ct);
+                files.Append(id, buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
+                return Results.NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or IOException)
+            {
+                return Results.NotFound(new { error = "Recording was already removed." });
+            }
+        });
+        app.MapMethods("/api/recording/{id}", ["DELETE"], (string id, RecordingFiles files) =>
+        {
+            try
+            {
+                files.Delete(id);
+                return Results.NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPost("/api/recording/{id}/discard", (string id, RecordingFiles files) =>
+        {
+            try
+            {
+                files.Delete(id);
+                return Results.NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapGet("/api/recording/{id}", (string id, RecordingFiles files, HttpContext http) =>
+        {
+            try
+            {
+                if (!files.TryOpen(id, out Stream? stream) || stream is null)
+                    return Results.NotFound(new { error = "Recording was already removed." });
+                http.Response.OnCompleted(() =>
+                {
+                    stream.Dispose();
+                    files.Delete(id);
+                    return Task.CompletedTask;
+                });
+                return Results.File(stream, "audio/mpeg");
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
         app.MapGet("/audio/{id}.wav", (string id, ClipStore clips) =>
         {

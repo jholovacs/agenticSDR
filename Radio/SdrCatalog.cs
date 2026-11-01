@@ -18,7 +18,7 @@ public static class SdrCatalog
         new("airspyhf", "Airspy HF+", "Airspy HF+ and HF+ Discovery", "SoapyAirspyHF"),
         new("hackrf", "HackRF", "HackRF One, HackRF Jawbreaker, and rad1o", "SoapyHackRF"),
         new("bladerf", "bladeRF", "bladeRF and bladeRF 2.0 micro", "SoapyBladeRF"),
-        new("lime", "LimeSDR", "LimeSDR USB, LimeSDR Mini, and LimeSDR Mini 2.0", "SoapyLMS7"),
+        new("lime", "LimeSDR", "LimeSDR USB, LimeSDR Mini, and LimeSDR Mini 2.0", "LimeSuiteNG, receive only, or SoapyLMS7"),
         new("plutosdr", "ADALM-Pluto", "ADALM-Pluto and Pluto+", "SoapyPlutoSDR"),
         new("sdrplay", "SDRplay", "RSP1, RSP1A, RSP2, RSPduo, RSPdx, and RSPdx-R2", "SoapySDRPlay"),
         new("uhd", "USRP", "USRP B200, B210, B200mini, and B205mini", "SoapyUHD"),

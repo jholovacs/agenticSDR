@@ -1,6 +1,8 @@
 bin/
 obj/
 native/
+packaging/stage/
+packaging/out/
 *.user
 .vs/
 TestResults/

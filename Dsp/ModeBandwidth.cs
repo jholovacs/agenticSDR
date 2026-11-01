@@ -15,6 +15,7 @@ public static class ModeBandwidth
         RadioMode.Am => new Pass(4_000, 12_000, 10_000, 10_000),
         RadioMode.Nbfm or RadioMode.Dmr => new Pass(2_000, 16_000, 12_500, 12_500),
         RadioMode.Wbfm => new Pass(50_000, 250_000, 200_000, 200_000),
+        RadioMode.Raw => new Pass(4_000, 40_000, 20_000, 12_500),
         _ => null
     };
 

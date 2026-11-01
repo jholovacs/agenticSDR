@@ -12,7 +12,7 @@ namespace AgenticSdr.Host;
 [McpServerToolType]
 public sealed class SdrTools(RadioSession session)
 {
-    [McpServerTool, Description("List USB SDRs currently visible. RTL2832U dongles use the built-in driver. Other radios appear when SoapySDR and that radio's module are installed.")]
+    [McpServerTool, Description("List USB SDRs currently visible. RTL2832U dongles and LimeSDR-USB use built-in drivers. Other radios appear when SoapySDR and that radio's module are installed.")]
     public async Task<IReadOnlyList<RadioDeviceInfo>> list_devices(CancellationToken cancellationToken = default) =>
         await Guard(() => Task.FromResult(RadioSession.ListDevices()));
 

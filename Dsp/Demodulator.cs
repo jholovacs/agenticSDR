@@ -29,6 +29,28 @@ public sealed class Demodulator
     /// outside the voice channel, and the signal is shifted back before demodulation.
     /// </summary>
     public const double VoiceOffsetHz = 50_000;
+
+    /// <summary>How far the tuner sits off the station so the dongle spike stays outside the channel.</summary>
+    public static double TunerOffsetHz(RadioMode mode) =>
+        mode == RadioMode.Wbfm ? WideFmOffsetHz : VoiceOffsetHz;
+
+    /// <summary>
+    /// Audio cutoff after the ×10 and ×5 decimation. The decimation itself stays ×10 then ×5 at 2.4 MS/s.
+    /// </summary>
+    public static double ChannelCutoffHz(RadioMode mode) => mode switch
+    {
+        RadioMode.Nbfm or RadioMode.Dmr => 8_000,
+        RadioMode.Am => 5_000,
+        RadioMode.Usb or RadioMode.Lsb => 4_000,
+        RadioMode.Cw => 1_200,
+        RadioMode.Ft8 => 4_200,
+        RadioMode.Raw => 20_000,
+        _ => 16_000
+    };
+
+    /// <summary>R820T window wide enough to hold the station and the tuner offset.</summary>
+    public static int TunerBandwidthHz(RadioMode mode) =>
+        mode == RadioMode.Wbfm ? 900_000 : 300_000;
     public const int Ft8Rate = Ft8Decoder.SampleRate;
 
     private readonly RadioMode _mode;
@@ -84,7 +106,7 @@ public sealed class Demodulator
             _decim1 = 10;
             _decim2 = 5;
             _stage1 = new ComplexDecimator(Filters.Lowpass(95, 90_000, InputRate), 10);
-            double channelHz = _mode == RadioMode.Nbfm ? 8_000 : 16_000;
+            double channelHz = ChannelCutoffHz(_mode);
             _stage2 = new ComplexDecimator(Filters.Lowpass(127, channelHz, InputRate / 10), 5);
             _wbfmComplexRate = 0;
             _wbfmAudio = null;
@@ -97,7 +119,7 @@ public sealed class Demodulator
             _decim2 = second;
             double midRate = inputRate / first;
             _stage1 = new ComplexDecimator(Filters.Lowpass(95, 0.45 * midRate, inputRate), first);
-            double voice = Math.Min(16_000, audio * 0.40);
+            double voice = Math.Min(ChannelCutoffHz(_mode), audio * 0.40);
             _stage2 = new ComplexDecimator(Filters.Lowpass(127, voice, midRate), second);
             _wbfmComplexRate = 0;
             _wbfmAudio = null;
@@ -199,6 +221,9 @@ public sealed class Demodulator
             case RadioMode.Ft8:
                 DemodFt8(baseBand);
                 break;
+            case RadioMode.Raw:
+                DemodRaw(baseBand);
+                break;
             default:
                 DemodNbfm(baseBand);
                 break;
@@ -219,6 +244,30 @@ public sealed class Demodulator
         if (normalize)
             Normalize(audio);
         return new DemodResult(audio, rate, text);
+    }
+
+    private void DemodRaw(List<Complex> baseband)
+    {
+        const double deviation = 12_000;
+        double scale = _audioRate / (2 * Math.PI * deviation);
+        foreach (var sample in baseband)
+        {
+            float phase = (float)Math.Atan2(sample.Imaginary, sample.Real);
+            if (!_hasPhase)
+            {
+                _prevPhase = phase;
+                _hasPhase = true;
+                continue;
+            }
+
+            float delta = phase - _prevPhase;
+            _prevPhase = phase;
+            if (delta > MathF.PI)
+                delta -= 2 * MathF.PI;
+            else if (delta < -MathF.PI)
+                delta += 2 * MathF.PI;
+            _audio.Add(Highpass((float)(delta * scale)));
+        }
     }
 
     private void DemodNbfm(List<Complex> baseband)

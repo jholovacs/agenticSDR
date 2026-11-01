@@ -1,0 +1,5 @@
+lamejs 1.2.1
+https://github.com/zhuker/lamejs
+The accompanying lame.min.js is the unmodified build published at
+https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js
+It is licensed under the GNU Lesser General Public License, version 2 or later.

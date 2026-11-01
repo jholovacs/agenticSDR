@@ -338,6 +338,36 @@ public sealed class RadioSession(
         }
     }
 
+    public RadioReport Details(int index)
+    {
+        _gate.Wait();
+        try
+        {
+            IReadOnlyList<RadioDeviceInfo> devices = RadioDevices.List();
+            if (index < 0 || index >= devices.Count)
+                throw new RadioException($"No SDR at index {index}. {devices.Count} device(s) are visible.");
+            RadioDeviceInfo info = devices[index];
+            if (_device is not null && SameOpenRadio(info))
+                return RadioDevices.DescribeOpen(info, _device, options.SampleRateHz);
+            if (_device is not null)
+                throw new RadioException("Stop the open radio before reading details for a different one.");
+            return RadioDevices.Describe(info, options.SampleRateHz);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private bool SameOpenRadio(RadioDeviceInfo info)
+    {
+        if (_deviceIndex != info.Index)
+            return false;
+        if (string.IsNullOrWhiteSpace(info.Serial) || string.IsNullOrWhiteSpace(_serial))
+            return _deviceIndex == info.Index;
+        return _serial.Equals(info.Serial, StringComparison.OrdinalIgnoreCase);
+    }
+
     public RadioCapabilities Capabilities()
     {
         IRadioDevice device = _device ?? throw new InvalidOperationException("Open the radio before reading capabilities.");
@@ -612,7 +642,7 @@ public sealed class RadioSession(
             }
 
             SetStatus("listening", 0.35, $"Listening {seconds:0.#} s at {tuneHz / 1e6:0.000000} MHz ({mode}).");
-            RadioMode demodMode = mode == RadioMode.Dmr ? RadioMode.Nbfm : mode;
+            RadioMode demodMode = mode;
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
             DemodResult result;
@@ -624,7 +654,7 @@ public sealed class RadioSession(
             }
             finally
             {
-                if (demodMode is RadioMode.Wbfm or RadioMode.Nbfm)
+                if (EasedGain(demodMode))
                     RestoreGain(device);
                 ReleaseTuner(device);
             }
@@ -700,7 +730,7 @@ public sealed class RadioSession(
     /// Tune, demodulate, and write 16-bit audio as it is produced. The response stays open until Stop or the browser disconnects.
     /// Morse and FT8 text are updated on the status the page already polls.
     /// </summary>
-    public async Task WriteLiveAsync(double frequencyHz, string? modeName, HttpResponse response, CancellationToken cancellationToken)
+    public async Task WriteLiveAsync(double frequencyHz, string? modeName, DmrFilter dmr, HttpResponse response, CancellationToken cancellationToken)
     {
         RadioMode requested = ModeClassifier.Parse(modeName);
         await _gate.WaitAsync(cancellationToken);
@@ -754,7 +784,7 @@ public sealed class RadioSession(
 
             if (mode == RadioMode.Dmr)
                 source = "DMR";
-            RadioMode demodMode = mode == RadioMode.Dmr ? RadioMode.Nbfm : mode;
+            RadioMode demodMode = mode;
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
             var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz);
@@ -769,15 +799,15 @@ public sealed class RadioSession(
 
             SetStatus("listening", 1, LiveMessage(mode, tuneHz));
             if (dmrFramed)
-                AppendNote(DmrSync.VoiceNote);
+                AppendNote("DMR framing found.");
 
             try
             {
-                await PumpLiveAsync(device, loHz, mode, demod, response.Body, mode == RadioMode.Dmr && !dmrFramed, ct);
+                await PumpLiveAsync(device, loHz, shiftHz, mode, demod, response.Body, mode == RadioMode.Dmr && !dmrFramed, dmr, ct);
             }
             finally
             {
-                if (demodMode is RadioMode.Wbfm or RadioMode.Nbfm)
+                if (EasedGain(demodMode))
                     RestoreGain(device);
                 ReleaseTuner(device);
             }
@@ -810,10 +840,12 @@ public sealed class RadioSession(
     private async Task PumpLiveAsync(
         IRadioDevice device,
         double frequencyHz,
+        double dmrOffsetHz,
         RadioMode mode,
         Demodulator demod,
         Stream output,
         bool recheckDmr,
+        DmrFilter dmr,
         CancellationToken cancellationToken)
     {
         int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
@@ -822,6 +854,7 @@ public sealed class RadioSession(
         var bufB = new byte[blockBytes];
         var recent = new List<float>();
         var dmrProbe = new List<Complex>();
+        var dmrReader = new DmrReader();
         bool dmrChecked = !recheckDmr;
         int dmrNeed = (int)(device.SampleRateHz * 0.12);
         var ft8Period = new List<float>();
@@ -891,11 +924,17 @@ public sealed class RadioSession(
                 if (dmrProbe.Count >= dmrNeed)
                 {
                     dmrChecked = true;
-                    AppendNote(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, 0)
-                        ? DmrSync.VoiceNote
+                    AppendNote(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, dmrOffsetHz)
+                        ? "DMR framing found."
                         : "No DMR framing. Playing narrow FM.");
                     dmrProbe.Clear();
                 }
+            }
+
+            if (mode == RadioMode.Dmr)
+            {
+                foreach (string line in dmrReader.Push(iq, device.SampleRateHz, dmrOffsetHz, dmr))
+                    AppendNote(line);
             }
 
             demod.Push(iq);
@@ -1044,7 +1083,7 @@ public sealed class RadioSession(
     /// </summary>
     private static (double LoHz, double ShiftHz) PlaceTuner(IRadioDevice device, RadioMode mode, double stationHz)
     {
-        double offset = mode == RadioMode.Wbfm ? Demodulator.WideFmOffsetHz : Demodulator.VoiceOffsetHz;
+        double offset = Demodulator.TunerOffsetHz(mode);
         double above = stationHz + offset;
         if (above <= device.Capabilities.MaxFrequencyHz)
             return (above, -offset);
@@ -1053,9 +1092,12 @@ public sealed class RadioSession(
 
     private const double WideFmListenGainDb = 12;
 
+    private static bool EasedGain(RadioMode mode) =>
+        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Raw;
+
     private static void EaseWideFmGain(IRadioDevice device, RadioMode mode)
     {
-        if (mode is not (RadioMode.Wbfm or RadioMode.Nbfm))
+        if (!EasedGain(mode))
             return;
         if (device.Capabilities.GainDb is not double gain || gain <= WideFmListenGainDb)
             return;
@@ -1075,7 +1117,7 @@ public sealed class RadioSession(
     {
         if (device is not RtlSdrDevice rtl || device.DirectSampling)
             return;
-        int bandwidth = mode == RadioMode.Wbfm ? 900_000 : 300_000;
+        int bandwidth = Demodulator.TunerBandwidthHz(mode);
         try
         {
             rtl.SetBandwidth(bandwidth);

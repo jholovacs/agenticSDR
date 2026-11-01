@@ -175,6 +175,72 @@ public sealed class RtlSdrDevice : IRadioDevice
         return n;
     }
 
+    public static RadioReport Inspect(RadioDeviceInfo info, double preferredRate, RtlSdrDevice? open)
+    {
+        var facts = new List<RadioFact>();
+        RadioText.Identity(facts, info);
+        RadioText.Add(facts, "Role", "Receive only");
+        UsbDriverFacts.Add(facts, "0BDA", "2838", info.Serial);
+        UsbDriverFacts.AddLibraryFile(facts, "librtlsdr", "rtlsdr.dll");
+
+        IntPtr handle = open?._handle ?? IntPtr.Zero;
+        bool close = false;
+        if (handle == IntPtr.Zero)
+        {
+            RtlSdrNative.Touch();
+            if (RtlSdrNative.rtlsdr_open(out handle, (uint)info.DriverIndex) == 0 && handle != IntPtr.Zero)
+                close = true;
+        }
+
+        try
+        {
+            if (handle != IntPtr.Zero)
+                AddTuner(facts, handle);
+        }
+        finally
+        {
+            if (close)
+                RtlSdrNative.rtlsdr_close(handle);
+        }
+
+        RadioText.Add(facts, "Sample format", "8-bit I/Q");
+        if (open is not null)
+            RadioDevices.AddCapabilities(facts, open.Capabilities);
+        else
+        {
+            RadioText.Add(facts, "Tuning range", RadioText.Range(RadioLimits.MinFrequencyHz, RadioLimits.MaxFrequencyHz));
+            RadioText.Add(facts, "Sample rate", RadioText.Hertz(preferredRate) + "/s");
+            RadioText.Add(facts, "Direct sampling", $"below {RadioText.Hertz(RadioLimits.DirectSamplingCutoffHz)}");
+        }
+
+        return new RadioReport(info.Name, facts);
+    }
+
+    private static void AddTuner(List<RadioFact> facts, IntPtr handle)
+    {
+        RadioText.Add(facts, "Tuner", TunerName(RtlSdrNative.rtlsdr_get_tuner_type(handle)));
+        int count = RtlSdrNative.rtlsdr_get_tuner_gains(handle, IntPtr.Zero);
+        if (count <= 0)
+            return;
+        var gains = new int[count];
+        int read = RtlSdrNative.rtlsdr_get_tuner_gains_array(handle, gains);
+        if (read <= 0)
+            return;
+        string list = string.Join(", ", gains.Take(read).Select(gain => $"{gain / 10.0:0.#} dB"));
+        RadioText.Add(facts, "Tuner gains", list);
+    }
+
+    private static string TunerName(int type) => type switch
+    {
+        1 => "Elonics E4000",
+        2 => "Fitipower FC0012",
+        3 => "Fitipower FC0013",
+        4 => "FCI FC2580",
+        5 => "Rafael Micro R820T",
+        6 => "Rafael Micro R828D",
+        _ => ""
+    };
+
     public void Dispose()
     {
         if (_disposed)
@@ -248,7 +314,7 @@ public sealed class RtlSdrDevice : IRadioDevice
     private static RadioException LibraryMissing(Exception ex)
     {
         return new RadioException(
-            "librtlsdr was not found. On Windows run tools/fetch-native.sh and leave rtlsdr.dll in native/. " +
+            "librtlsdr was not found. On Windows the installer downloads it, or run tools/fetch-native.sh and leave rtlsdr.dll in native/. " +
             "On Linux install librtlsdr (package librtlsdr-dev or rtl-sdr). On macOS: brew install librtlsdr.",
             ex);
     }

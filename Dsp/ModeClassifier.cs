@@ -95,15 +95,16 @@ public static class ModeClassifier
 
         return mode.Trim().ToLowerInvariant() switch
         {
-            "nbfm" or "fm" or "nfM" => RadioMode.Nbfm,
+            "nbfm" or "fm" or "nfm" or "fmnb" => RadioMode.Nbfm,
             "am" => RadioMode.Am,
             "usb" => RadioMode.Usb,
             "lsb" => RadioMode.Lsb,
             "cw" or "morse" => RadioMode.Cw,
             "ft8" => RadioMode.Ft8,
-            "wbfm" or "wfm" => RadioMode.Wbfm,
+            "wbfm" or "wfm" or "fmwb" => RadioMode.Wbfm,
             "dmr" => RadioMode.Dmr,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, wbfm, or dmr.")
+            "raw" => RadioMode.Raw,
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, wbfm, dmr, or raw.")
         };
     }
 }
