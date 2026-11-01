@@ -127,6 +127,25 @@ public class CampTests
         Complex[] tone = Tone(12_000, rate, 8_000, 0.8);
         Assert.True(ChannelActivity.Heard(tone, rate, 8_000, 1_000));
         Assert.False(ChannelActivity.Heard(tone, rate, 1_000, 1_000));
+        Assert.True(ChannelActivity.Heard(noise, rate, 8_000, 1_000, squelch: 0));
+        Assert.False(ChannelActivity.Heard(noise, rate, 8_000, 1_000, squelch: 50));
+    }
+
+    [Fact]
+    public void Squelch_zero_is_open_and_fifty_matches_the_old_default()
+    {
+        Assert.Equal(0, ChannelActivity.RatioForSquelch(0));
+        Assert.InRange(ChannelActivity.RatioForSquelch(50), 7, 9);
+        Assert.True(ChannelActivity.RatioForSquelch(100) > ChannelActivity.RatioForSquelch(50));
+    }
+
+    [Fact]
+    public void Measure_reports_higher_snr_on_the_tone_than_on_noise()
+    {
+        const double rate = 48_000;
+        (_, double noiseSnr) = ChannelActivity.Measure(Noise(12_000, 0.05, 7), rate, 8_000, 1_000);
+        (_, double toneSnr) = ChannelActivity.Measure(Tone(12_000, rate, 8_000, 0.8), rate, 8_000, 1_000);
+        Assert.True(toneSnr > noiseSnr + 10);
     }
 
     [Fact]

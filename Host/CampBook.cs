@@ -9,6 +9,7 @@ public sealed record CampView(
     string Mode,
     bool Paused,
     bool YieldToSchedule,
+    int Squelch,
     int Revision,
     string? Note,
     CampEntry? Now,
@@ -41,6 +42,7 @@ public sealed class CampBook
     private string _mode = "explore";
     private string? _pausedKey;
     private bool _yieldToSchedule;
+    private int _squelch = 50;
     private string? _followId;
     private string? _holdId;
     private CampEntry? _now;
@@ -66,6 +68,22 @@ public sealed class CampBook
     public bool Paused
     {
         get { lock (_gate) return _pausedKey is not null; }
+    }
+
+    public int Squelch
+    {
+        get { lock (_gate) return _squelch; }
+    }
+
+    public void SetSquelch(int value)
+    {
+        lock (_gate)
+        {
+            _squelch = Math.Clamp(value, 0, 100);
+            Save();
+        }
+
+        Poke();
     }
 
     public void Poke() => _changes.Writer.TryWrite(1);
@@ -324,6 +342,7 @@ public sealed class CampBook
             _mode,
             _pausedKey is not null,
             _yieldToSchedule,
+            _squelch,
             _revision,
             note,
             _now,
@@ -342,7 +361,7 @@ public sealed class CampBook
     private void Save()
     {
         _revision++;
-        var saved = new Saved(_mode, _yieldToSchedule, _now, _entries);
+        var saved = new Saved(_mode, _yieldToSchedule, _squelch, _now, _entries);
         try
         {
             Write(saved);
@@ -373,6 +392,7 @@ public sealed class CampBook
                 return;
             _mode = saved.Mode == "camp" ? "camp" : "explore";
             _yieldToSchedule = saved.YieldToSchedule;
+            _squelch = Math.Clamp(saved.Squelch ?? 50, 0, 100);
             _now = saved.Now;
             _entries = saved.Entries ?? [];
         }
@@ -383,5 +403,5 @@ public sealed class CampBook
 
     private static string NewId() => Guid.NewGuid().ToString("N")[..12];
 
-    private sealed record Saved(string? Mode, bool YieldToSchedule, CampEntry? Now, List<CampEntry>? Entries);
+    private sealed record Saved(string? Mode, bool YieldToSchedule, int? Squelch, CampEntry? Now, List<CampEntry>? Entries);
 }

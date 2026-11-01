@@ -89,6 +89,12 @@ public static class WebApi
             camp.SetYieldToSchedule(body.YieldToSchedule);
             return Results.Ok(camp.View(DateTime.Now));
         });
+        app.MapPut("/api/camp/squelch", (CampSquelchBody body, CampBook camp, RadioSession session) =>
+        {
+            camp.SetSquelch(body.Squelch);
+            session.SetCampSquelch(camp.Squelch);
+            return Results.Ok(camp.View(DateTime.Now));
+        });
         app.MapPost("/api/camp/follow-schedule", (CampBook camp) =>
         {
             try
@@ -347,3 +353,6 @@ public sealed record AgentBody(string? Message, IReadOnlyList<AgentHistoryTurn>?
 public sealed record CampModeBody(string? Mode);
 /// <summary>Body of PUT /api/camp/policy. When true, a timed schedule entry takes the radio from an explicit camp.</summary>
 public sealed record CampPolicyBody(bool YieldToSchedule);
+
+/// <summary>Body of PUT /api/camp/squelch. 0 is open; 100 is tight.</summary>
+public sealed record CampSquelchBody(int Squelch);

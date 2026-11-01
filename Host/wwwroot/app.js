@@ -278,10 +278,11 @@ async function refreshStatus() {
       ? (status.deviceName || "SDR")
       : "No radio";
     operatingMode = status.operatingMode === "camp" ? "camp" : "explore";
-    campActivity = !!(status.camp && status.camp.activity);
+    campActivity = !!(status.campActivity || (status.camp && status.camp.activity));
     paintModeSwitch();
     paintWorkspace();
     paintCampControls(status);
+    paintCampSnr(status);
     applyVolume();
     applyRadioControls();
     const progress = Math.round((status.progress || 0) * 100);
@@ -1000,15 +1001,52 @@ function paintCampControls(status) {
   const go = document.querySelector("#camp-go");
   const stop = document.querySelector("#camp-stop");
   const policyRow = document.querySelector("#camp-policy-row");
+  const snr = document.querySelector("#camp-snr");
   if (!go || !stop) return;
   go.hidden = operatingMode !== "camp" || camping;
   stop.hidden = operatingMode !== "camp" || !camping;
   if (policyRow) policyRow.hidden = !(operatingMode === "camp" && camping);
+  if (snr) snr.hidden = !(operatingMode === "camp" && camping);
   if (operatingMode === "camp") {
     liveStop.hidden = true;
     if (camping)
       liveState.textContent = campActivity ? "Activity." : "Waiting for activity.";
   }
+}
+
+const snrMeterMin = -10;
+const snrMeterMax = 40;
+
+function squelchThresholdDb(squelch) {
+  const level = Math.max(0, Math.min(100, Number(squelch) || 0));
+  if (level <= 0) return -40;
+  return 10 * Math.log10(1.5 * Math.pow(32, level / 100));
+}
+
+function paintCampSnr(status) {
+  const meter = document.querySelector("#camp-snr");
+  const fill = document.querySelector("#camp-snr-fill");
+  const mark = document.querySelector("#camp-snr-mark");
+  const label = document.querySelector("#camp-snr-label");
+  if (!meter || !fill || !mark || !label) return;
+  const camping = operatingMode === "camp" && campingActive(status);
+  meter.hidden = !camping;
+  if (!camping) {
+    fill.style.width = "0%";
+    label.textContent = "— dB";
+    return;
+  }
+
+  const snr = Number(status.campSnrDb);
+  const shown = Number.isFinite(snr) ? snr : snrMeterMin;
+  const pct = Math.max(0, Math.min(100, ((shown - snrMeterMin) / (snrMeterMax - snrMeterMin)) * 100));
+  fill.style.width = `${pct}%`;
+  fill.classList.toggle("open", !!status.campActivity);
+  label.textContent = Number.isFinite(snr) ? `${shown.toFixed(0)} dB` : "— dB";
+
+  const threshold = squelchThresholdDb(document.querySelector("#camp-squelch")?.value);
+  const markPct = Math.max(0, Math.min(100, ((threshold - snrMeterMin) / (snrMeterMax - snrMeterMin)) * 100));
+  mark.style.left = `${markPct}%`;
 }
 
 function listenCampBody(frequencyHz, heard) {
@@ -1186,12 +1224,21 @@ document.querySelector("#listen-mode").addEventListener("change", () => {
   if ([...mode.options].some((option) => option.value === hear)) mode.value = hear;
   syncDmrFields();
   paintFoldSummaries();
-  if (operatingMode === "camp") return;
+  if (operatingMode === "camp") {
+    if (scheduleView?.now || scheduleView?.active)
+      startCamp().catch((ex) => showError(ex.message));
+    return;
+  }
   if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
 });
 for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
   document.querySelector(id).addEventListener("change", () => {
-    if (operatingMode === "camp") return;
+    if (operatingMode === "camp") {
+      if (document.querySelector("#listen-mode").value === "dmr"
+          && (scheduleView?.now || scheduleView?.active))
+        startCamp().catch((ex) => showError(ex.message));
+      return;
+    }
     if (document.querySelector("#listen-mode").value === "dmr" && liveAbort)
       listen("dmr").catch((ex) => showError(ex.message));
   });
@@ -1512,6 +1559,8 @@ const tips = {
   decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")}, ${wiki("Speech_recognition", "speech")}, and DMR talkgroup, radio ID, and alias text.`,
   "operating-mode": "Explore scans and listens with the audio on. Camp is the camping workspace: camping starts when you press Camp, or when a schedule window is due.",
   volume: "How loud this page plays the radio. Camping stays silent until there is activity, then uses this level.",
+  squelch: "How strong a station must be before Camp opens the speaker. Low is open; high stays quiet until a clear signal. The mark on the SNR meter is this threshold.",
+  "camp-snr": "Live signal-to-noise on the camped channel versus nearby empty channels. The speaker opens when the bar crosses the squelch mark.",
   schedule: "Optional times to camp on. A due window can start camping while you are in Camp. You can also press Camp on a frequency and leave this empty.",
   "schedule-label": "A short name for this watch, such as NOAA.",
   "schedule-freq": "The frequency to tune when this entry is on.",
@@ -1599,6 +1648,9 @@ function renderSchedule(view) {
   note.textContent = view?.note || "";
   const policy = document.querySelector("#camp-policy");
   if (policy) policy.value = view?.yieldToSchedule ? "yield" : "hold";
+  const squelch = document.querySelector("#camp-squelch");
+  if (squelch && view && Number.isFinite(view.squelch) && document.activeElement !== squelch)
+    squelch.value = String(view.squelch);
   const now = document.querySelector("#camp-now");
   const actions = document.querySelector("#camp-actions");
   const follow = document.querySelector("#camp-follow");
@@ -1737,6 +1789,23 @@ document.querySelector("#camp-stop").addEventListener("click", () => {
 document.querySelector("#volume").addEventListener("input", () => {
   try { localStorage.setItem("agentic-sdr-volume", document.querySelector("#volume").value); } catch { /* The slider still changes the level for this visit. */ }
   applyVolume();
+});
+document.querySelector("#camp-squelch").addEventListener("input", () => {
+  const value = Number(document.querySelector("#camp-squelch").value);
+  const mark = document.querySelector("#camp-snr-mark");
+  if (mark) {
+    const threshold = squelchThresholdDb(value);
+    const markPct = Math.max(0, Math.min(100, ((threshold - snrMeterMin) / (snrMeterMax - snrMeterMin)) * 100));
+    mark.style.left = `${markPct}%`;
+  }
+  api("/api/camp/squelch", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ squelch: value })
+  }).then((view) => {
+    showError("");
+    renderSchedule(view);
+  }).catch((ex) => showError(ex.message));
 });
 document.querySelector("#camp-mode").addEventListener("change", syncCampDmr);
 document.querySelector("#camp-cancel").addEventListener("click", clearScheduleForm);

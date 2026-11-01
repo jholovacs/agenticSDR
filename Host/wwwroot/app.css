@@ -281,7 +281,51 @@ dialog p { margin: 12px 0; color: var(--muted); }
   margin: 0 0 12px;
 }
 .dmr-fields[hidden] { display: none; }
-#volume { width: 9rem; padding: 0; accent-color: var(--amber); }
+#volume, #camp-squelch { width: 9rem; padding: 0; accent-color: var(--amber); }
+body.workspace-camp label.camp-only[data-tip="squelch"] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.camp-snr {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+body.workspace-camp .camp-snr.camp-only { display: grid; }
+body.workspace-camp .camp-snr.camp-only[hidden] { display: none !important; }
+.camp-snr-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+.camp-snr-track {
+  position: relative;
+  height: 12px;
+  border-radius: 99px;
+  background: #2a241d;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.camp-snr-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5c5146, var(--amber), var(--green));
+  transition: width 120ms linear;
+}
+.camp-snr-fill.open { box-shadow: 0 0 10px rgba(198, 222, 122, 0.35); }
+.camp-snr-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(244, 236, 223, 0.7);
+  left: 0%;
+}
 .day-row {
   border: 0;
   margin: 0;

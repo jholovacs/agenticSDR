@@ -31,6 +31,7 @@ public sealed class CampWatch(CampBook book, RadioSession session, ILogger<CampW
     private async Task Apply(CancellationToken cancellationToken)
     {
         session.PublishCamp(book.Mode, book.Revision);
+        session.SetCampSquelch(book.Squelch);
         CampRequest? request = book.Desired(DateTime.Now);
         if (request is not null && !session.IsOpen)
         {

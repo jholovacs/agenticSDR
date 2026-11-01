@@ -18,11 +18,34 @@ public static class ChannelActivity
         _ => 12_500
     };
 
+    /// <summary>
+    /// How many times stronger the station must be than nearby empty channels.
+    /// Squelch 0 is wide open (always hear). 50 matches the old default. 100 is tight.
+    /// </summary>
+    public static double RatioForSquelch(int squelch)
+    {
+        int level = Math.Clamp(squelch, 0, 100);
+        if (level <= 0)
+            return 0;
+        return 1.5 * Math.Pow(32, level / 100.0);
+    }
+
     /// <summary>True when <paramref name="stationHz"/> is several times stronger than the nearby empty channels.</summary>
-    public static bool Heard(ReadOnlySpan<Complex> iq, double sampleRate, double stationHz, double channelHz)
+    public static bool Heard(ReadOnlySpan<Complex> iq, double sampleRate, double stationHz, double channelHz, int squelch = 50) =>
+        Measure(iq, sampleRate, stationHz, channelHz, squelch).Heard;
+
+    /// <summary>
+    /// Channel strength versus nearby empty channels, in decibels, plus whether squelch would open.
+    /// </summary>
+    public static (bool Heard, double SnrDb) Measure(
+        ReadOnlySpan<Complex> iq,
+        double sampleRate,
+        double stationHz,
+        double channelHz,
+        int squelch = 50)
     {
         if (iq.Length < 64 || sampleRate <= 0 || channelHz < 100)
-            return false;
+            return (false, -40);
 
         double step = Math.Max(channelHz * 3, 15_000);
         double signal = BinPower(iq, sampleRate, stationHz);
@@ -30,7 +53,21 @@ public static class ChannelActivity
         double right = BinPower(iq, sampleRate, stationHz + step);
         double far = BinPower(iq, sampleRate, stationHz + step * 2);
         double other = Median(left, right, far);
-        return signal > 1e-12 && signal > other * 8;
+        double snrDb = other <= 1e-18
+            ? signal > 1e-12 ? 60 : -40
+            : 10 * Math.Log10(Math.Max(signal, 1e-30) / other);
+        snrDb = Math.Clamp(snrDb, -40, 60);
+
+        double ratio = RatioForSquelch(squelch);
+        bool heard = ratio <= 0 || (signal > 1e-12 && signal > other * ratio);
+        return (heard, snrDb);
+    }
+
+    /// <summary>Squelch setting as the SNR (dB) the channel must exceed to open.</summary>
+    public static double ThresholdDb(int squelch)
+    {
+        double ratio = RatioForSquelch(squelch);
+        return ratio <= 0 ? -40 : 10 * Math.Log10(ratio);
     }
 
     private static double Median(double a, double b, double c)

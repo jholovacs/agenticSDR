@@ -27,6 +27,7 @@ public sealed record SessionStatus(
     IReadOnlyList<TranscriptSpan> Transcript,
     string OperatingMode,
     bool CampActivity,
+    double? CampSnrDb,
     CampTune? Camp,
     int CampRevision);
 
@@ -128,9 +129,11 @@ public sealed class RadioSession(
     private string _campKey = "";
     private string _operatingMode = "explore";
     private bool _campActivity;
+    private double? _campSnrDb;
     private CampTune? _campTune;
     private int _campRevision;
     private int _campSampleRate = 48_000;
+    private int _campSquelch = 50;
     private int _radioBorrow;
 
     /// <summary>True while a scan, guess, inspect, or clip listen holds the radio away from camp.</summary>
@@ -156,6 +159,7 @@ public sealed class RadioSession(
                     _transcript.ToArray(),
                     _operatingMode,
                     _campActivity,
+                    _campSnrDb,
                     _campTune,
                     _campRevision);
             }
@@ -186,6 +190,12 @@ public sealed class RadioSession(
             _operatingMode = mode == "camp" ? "camp" : "explore";
             _campRevision = revision;
         }
+    }
+
+    /// <summary>0 is open (always hear). 100 is tight. Applies on the next camp audio block.</summary>
+    public void SetCampSquelch(int value)
+    {
+        Volatile.Write(ref _campSquelch, Math.Clamp(value, 0, 100));
     }
 
     public void NoteCampIdle(string message)
@@ -260,6 +270,7 @@ public sealed class RadioSession(
         {
             _campTune = null;
             _campActivity = false;
+            _campSnrDb = null;
         }
 
         if (request is null || _device is null)
@@ -303,6 +314,7 @@ public sealed class RadioSession(
                         {
                             _campTune = null;
                             _campActivity = false;
+                            _campSnrDb = null;
                         }
                     }
                 }
@@ -1018,6 +1030,7 @@ public sealed class RadioSession(
                 {
                     _campSampleRate = demod.PlaybackRate;
                     _campActivity = false;
+                    _campSnrDb = null;
                     string heard = CampSchedule.Canonical(mode);
                     _campTune = (_campTune ?? new CampTune(null, null, tuneHz, heard, false, demod.PlaybackRate))
                         with { FrequencyHz = tuneHz, Mode = heard, Activity = false, SampleRate = demod.PlaybackRate };
@@ -1198,19 +1211,30 @@ public sealed class RadioSession(
             bool audible = true;
             if (squelch)
             {
-                bool heard = framed || ChannelActivity.Heard(iq, device.SampleRateHz, dmrOffsetHz, ChannelActivity.WidthHz(mode));
+                int squelchLevel = Volatile.Read(ref _campSquelch);
+                (bool channelHeard, double snrDb) = ChannelActivity.Measure(
+                    iq,
+                    device.SampleRateHz,
+                    dmrOffsetHz,
+                    ChannelActivity.WidthHz(mode),
+                    squelchLevel);
+                bool heard = framed || channelHeard;
                 bool was = activity.Active;
                 activity.Observe(heard, samples, (int)device.SampleRateHz);
                 audible = activity.Active;
-                if (activity.Active != was)
+                lock (_statusGate)
                 {
-                    lock (_statusGate)
+                    _campSnrDb = snrDb;
+                    if (activity.Active != was)
                     {
                         _campActivity = activity.Active;
                         if (_campTune is not null)
                             _campTune = _campTune with { Activity = activity.Active };
                     }
+                }
 
+                if (activity.Active != was)
+                {
                     SetStatus(
                         "listening",
                         1,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic SDR</title>
-    <link rel="stylesheet" href="/app.css?v=22">
+    <link rel="stylesheet" href="/app.css?v=24">
 </head>
 <body>
   <header class="face">
@@ -252,6 +252,19 @@
         <label data-tip="volume">Volume
           <input id="volume" type="range" min="0" max="100" value="80">
         </label>
+        <label class="camp-only" data-tip="squelch">Squelch
+          <input id="camp-squelch" type="range" min="0" max="100" value="50">
+        </label>
+      </div>
+      <div id="camp-snr" class="camp-snr camp-only" data-tip="camp-snr" hidden>
+        <div class="camp-snr-head">
+          <span>SNR</span>
+          <span id="camp-snr-label">— dB</span>
+        </div>
+        <div class="camp-snr-track" aria-hidden="true">
+          <div id="camp-snr-fill" class="camp-snr-fill"></div>
+          <div id="camp-snr-mark" class="camp-snr-mark"></div>
+        </div>
       </div>
       <div id="dmr-fields" class="dmr-fields" hidden>
         <label data-tip="dmr-color">Color code
@@ -317,6 +330,6 @@
   </dialog>
 
   <script src="/lame.min.js?v=5"></script>
-  <script src="/app.js?v=25"></script>
+  <script src="/app.js?v=28"></script>
 </body>
 </html>
