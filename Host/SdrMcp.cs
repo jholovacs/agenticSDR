@@ -46,7 +46,8 @@ public sealed class SdrPrompts
         2. Ask for the antenna length and whether it is vertical or horizontal. For a horizontal wire, also ask which way the wire runs, in degrees true (0 is north). Call set_antenna, or guess_antenna to estimate the length from where the noise floor is strongest. Then list_ham_bands and prefer a recommended band. On an RTL-SDR, bands below 24 MHz use direct sampling and need an HF antenna. Strength cannot show compass direction.
         3. scan_band with one band id. AM broadcast is am-bc, FM broadcast is fm-bc, NOAA weather is noaa, Citizens Band is cb, GMRS is gmrs, and DMR is dmr. Those three are receive-only and appear when the radio can tune them. DMR lists a signal only when its framing is recognized, and the words are not decoded. Report frequency, mode, bandwidth, SNR, and source. Do not invent callsigns or station names.
         4. When the user picks a frequency, call listen. Share the audio URI. For CW, read the Morse text. For FT8, pass mode ft8 (or tune a known FT8 dial such as 14074000 and use auto); the text field lists decoded messages. FT8 occupies the next 15-second slot. For AM, FM, and sideband, the text field is a speech transcript. For broadcast FM, pass mode wbfm.
-        5. stop cancels a scan or a capture.
+        5. stop cancels a scan or a capture. In camp mode, stop pauses the schedule.
+        6. set_operating_mode camp, then camp_now (or the page Listen button) camps on a frequency right away. The schedule is optional. add_schedule_entry takes frequencyHz, mode, and optional local HH:mm start and end. set_schedule_policy chooses whether a timed entry may take the radio from an explicit camp. follow_schedule and ignore_schedule answer that for the window that is due right now. Overlapping entries are rejected.
         AM broadcast, FM broadcast, and NOAA are in range only when the antenna recommendation includes them.
         """;
 }

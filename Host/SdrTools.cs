@@ -10,7 +10,7 @@ namespace AgenticSdr.Host;
 /// Names are snake_case because that is how the AI sees them: list_devices, set_antenna, scan_band, listen, stop.
 /// </summary>
 [McpServerToolType]
-public sealed class SdrTools(RadioSession session)
+public sealed class SdrTools(RadioSession session, CampBook camp)
 {
     [McpServerTool, Description("List USB SDRs currently visible. RTL2832U dongles and LimeSDR-USB use built-in drivers. Other radios appear when SoapySDR and that radio's module are installed.")]
     public async Task<IReadOnlyList<RadioDeviceInfo>> list_devices(CancellationToken cancellationToken = default) =>
@@ -81,13 +81,131 @@ public sealed class SdrTools(RadioSession session)
         CancellationToken cancellationToken = default) =>
         Guard(() => session.ListenAsync(frequencyHz, mode, seconds, cancellationToken));
 
-    [McpServerTool, Description("Cancel the scan or listen that is in progress.")]
+    [McpServerTool, Description("Cancel the scan or listen that is in progress. In camp mode this pauses the schedule until camp mode is chosen again or camp_now is called.")]
     public Task<SessionStatus> stop(CancellationToken cancellationToken = default) =>
         Guard(() =>
         {
+            if (camp.Mode == "camp")
+                camp.Pause(DateTime.Now);
             session.Stop();
             return Task.FromResult(session.Status);
         });
+
+    [McpServerTool, Description("Choose explore or camp. Explore scans and listens with the audio on. Camp tunes the schedule and keeps the audio off until the channel is active.")]
+    public Task<CampView> set_operating_mode(
+        [Description("explore or camp.")] string mode,
+        CancellationToken cancellationToken = default) =>
+        Guard(() =>
+        {
+            camp.SetMode(mode);
+            return Task.FromResult(camp.View(DateTime.Now));
+        });
+
+    [McpServerTool, Description("The camp schedule, the current mode, and which entry would use the radio now.")]
+    public CampView get_schedule() => camp.View(DateTime.Now);
+
+    [McpServerTool, Description("Add a camp entry. Times are local HH:mm. Omit both to listen whenever no timed entry is on. Overlapping times are rejected. Only one open entry is allowed.")]
+    public Task<CampEntry> add_schedule_entry(
+        [Description("Frequency in Hz.")] double frequencyHz,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("Local start HH:mm. Omit with end for an open watch.")] string? start = null,
+        [Description("Local end HH:mm. An earlier end runs past midnight.")] string? end = null,
+        [Description("sun, mon, tue, wed, thu, fri, sat, weekdays, weekends, or empty for every day.")] string? days = null,
+        [Description("Short name, optional.")] string? label = null,
+        [Description("DMR color code 0-15, or omit for any.")] int? colorCode = null,
+        [Description("DMR timeslot 1 or 2, or omit for any.")] int? slot = null,
+        [Description("DMR talkgroup, or omit for any.")] int? talkgroup = null,
+        CancellationToken cancellationToken = default) =>
+        Guard(() => Task.FromResult(camp.Add(new CampDraft
+        {
+            FrequencyHz = frequencyHz,
+            Mode = mode,
+            Start = start,
+            End = end,
+            Days = CampSchedule.ParseDays(days),
+            Label = label,
+            ColorCode = colorCode,
+            Slot = slot,
+            Talkgroup = talkgroup
+        })));
+
+    [McpServerTool, Description("Replace one schedule entry. Send the full entry. Overlaps are rejected.")]
+    public Task<CampEntry> update_schedule_entry(
+        [Description("Entry id from get_schedule.")] string id,
+        [Description("Frequency in Hz.")] double frequencyHz,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("Local start HH:mm, or omit with end for an open watch.")] string? start = null,
+        [Description("Local end HH:mm.")] string? end = null,
+        [Description("Days, or empty for every day.")] string? days = null,
+        [Description("Short name, optional.")] string? label = null,
+        [Description("DMR color code 0-15, or omit for any.")] int? colorCode = null,
+        [Description("DMR timeslot 1 or 2, or omit for any.")] int? slot = null,
+        [Description("DMR talkgroup, or omit for any.")] int? talkgroup = null,
+        CancellationToken cancellationToken = default) =>
+        Guard(() => Task.FromResult(camp.Update(id, new CampDraft
+        {
+            FrequencyHz = frequencyHz,
+            Mode = mode,
+            Start = start,
+            End = end,
+            Days = CampSchedule.ParseDays(days),
+            Label = label,
+            ColorCode = colorCode,
+            Slot = slot,
+            Talkgroup = talkgroup
+        })));
+
+    [McpServerTool, Description("Remove one schedule entry by id.")]
+    public Task<CampView> remove_schedule_entry(
+        [Description("Entry id from get_schedule.")] string id,
+        CancellationToken cancellationToken = default) =>
+        Guard(() =>
+        {
+            camp.Remove(id);
+            return Task.FromResult(camp.View(DateTime.Now));
+        });
+
+    [McpServerTool, Description("Camp on this frequency and mode right away. The schedule is optional. Audio stays off until the channel is active.")]
+    public Task<CampView> camp_now(
+        [Description("Frequency in Hz.")] double frequencyHz,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("Short name, optional.")] string? label = null,
+        [Description("DMR color code 0-15, or omit for any.")] int? colorCode = null,
+        [Description("DMR timeslot 1 or 2, or omit for any.")] int? slot = null,
+        [Description("DMR talkgroup, or omit for any.")] int? talkgroup = null,
+        CancellationToken cancellationToken = default) =>
+        Guard(() => Task.FromResult(camp.CampNow(new CampDraft
+        {
+            FrequencyHz = frequencyHz,
+            Mode = mode,
+            Label = label,
+            ColorCode = colorCode,
+            Slot = slot,
+            Talkgroup = talkgroup
+        }, DateTime.Now)));
+
+    [McpServerTool, Description("Clear the frequency chosen with camp_now. Timed schedule entries stay.")]
+    public CampView clear_camp_now()
+    {
+        camp.ClearNow();
+        return camp.View(DateTime.Now);
+    }
+
+    [McpServerTool, Description("While camping on an explicit frequency: yieldToSchedule true means a timed schedule entry takes the radio; false means stay on that frequency.")]
+    public CampView set_schedule_policy(
+        [Description("True to let the schedule take over. False to keep the explicit camp.")] bool yieldToSchedule)
+    {
+        camp.SetYieldToSchedule(yieldToSchedule);
+        return camp.View(DateTime.Now);
+    }
+
+    [McpServerTool, Description("While camping on an explicit frequency, switch to the timed schedule entry that is due right now.")]
+    public Task<CampView> follow_schedule(CancellationToken cancellationToken = default) =>
+        Guard(() => Task.FromResult(camp.FollowSchedule(DateTime.Now)));
+
+    [McpServerTool, Description("While camping on an explicit frequency, keep that frequency through the timed schedule entry that is due right now.")]
+    public Task<CampView> ignore_schedule(CancellationToken cancellationToken = default) =>
+        Guard(() => Task.FromResult(camp.IgnoreSchedule(DateTime.Now)));
 
     private static async Task<T> Guard<T>(Func<Task<T>> action)
     {

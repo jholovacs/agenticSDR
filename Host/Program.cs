@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
+using AgenticSdr.Dsp;
 using AgenticSdr.Host;
 using AgenticSdr.Radio;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Extensions.Tasks;
+
+NativeDsp.Install();
 
 if (SetupCommands.TryHandle(args, out int setupCode))
     return setupCode;
@@ -30,13 +33,23 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton(sp =>
 {
+    var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+    return new CampBook(AppPaths.SelectSchedule(env.ContentRootPath));
+});
+builder.Services.AddSingleton(sp =>
+{
     var http = new HttpClient { Timeout = TimeSpan.FromMinutes(4) };
     http.DefaultRequestHeaders.UserAgent.ParseAdd("AgenticSdr/0.1 (local amateur-radio receiver)");
-    return new InstructAgent(sp.GetRequiredService<LlmStore>(), sp.GetRequiredService<RadioSession>(), http);
+    return new InstructAgent(
+        sp.GetRequiredService<LlmStore>(),
+        sp.GetRequiredService<RadioSession>(),
+        sp.GetRequiredService<CampBook>(),
+        http);
 });
 builder.Services.AddSingleton(sp => new SpeechDecoder(sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().ContentRootPath));
 builder.Services.AddSingleton<RadioSession>();
 builder.Services.AddHostedService<RadioStartup>();
+builder.Services.AddHostedService<CampWatch>();
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<SdrTools>()

@@ -13,7 +13,18 @@ const morse = document.querySelector("#morse");
 const liveState = document.querySelector("#live-state");
 const liveStop = document.querySelector("#live-stop");
 const mhz = document.querySelector("#mhz");
+const campFreq = document.querySelector("#camp-freq");
 const mode = document.querySelector("#mode");
+
+function syncTuneFrequency(text) {
+  const value = text ?? mhz.value;
+  mhz.value = value;
+  if (campFreq) campFreq.value = value;
+}
+
+function campFrequencyHz() {
+  return Number((campFreq?.value || mhz.value)) * 1e6;
+}
 const antennaLength = document.querySelector("#antenna-length");
 const antennaUnit = document.querySelector("#antenna-unit");
 const antennaOrientation = document.querySelector("#antenna-orientation");
@@ -35,6 +46,14 @@ let listeningMode = "";
 let liveSampleRate = 48000;
 let listenToken = 0;
 let switching = false;
+let operatingMode = "explore";
+let campActivity = false;
+let campPlayKey = "";
+let campConnecting = false;
+let campRevision = -1;
+let scheduleView = null;
+let editingId = null;
+let liveGain = null;
 const mp3Frame = 1152;
 let operatingRadio = false;
 let deviceOpen = false;
@@ -63,13 +82,14 @@ function setBusy(value) {
   const live = liveAbort !== null;
   document.querySelectorAll("button").forEach((button) => {
     if (button.closest("dialog")) return;
-    if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop") return;
+    if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop" || button.id === "camp-stop") return;
     if (button.id === "record" || button.id === "record-transcript" || button.classList.contains("row-listen")) return;
-    if (live && (button.id === "listen" || button.id === "noaa")) return;
+    if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa")) return;
     button.disabled = value;
   });
   applyRadioControls();
   syncSignalButtons();
+  paintCampControls();
 }
 
 function applyRadioControls() {
@@ -82,6 +102,7 @@ function applyRadioControls() {
   const live = liveAbort !== null;
   document.querySelector("#scan").disabled = busy || !deviceOpen;
   document.querySelector("#listen").disabled = !deviceOpen || (busy && !live);
+  document.querySelector("#camp-go").disabled = !deviceOpen || (busy && !live);
   document.querySelector("#noaa").disabled = !deviceOpen || (busy && !live);
   document.querySelector("#stop").disabled = operatingRadio || !busy;
 }
@@ -256,6 +277,12 @@ async function refreshStatus() {
     deviceName.textContent = status.deviceOpen
       ? (status.deviceName || "SDR")
       : "No radio";
+    operatingMode = status.operatingMode === "camp" ? "camp" : "explore";
+    campActivity = !!(status.camp && status.camp.activity);
+    paintModeSwitch();
+    paintWorkspace();
+    paintCampControls(status);
+    applyVolume();
     applyRadioControls();
     const progress = Math.round((status.progress || 0) * 100);
     statusLine.textContent = status.message || status.phase;
@@ -263,6 +290,11 @@ async function refreshStatus() {
       renderTranscript(status.transcript);
     bar.style.width = status.phase === "idle" ? "0" : `${progress}%`;
     if (status.error) showError(status.error);
+    if (status.campRevision !== campRevision) {
+      campRevision = status.campRevision;
+      api("/api/camp").then(renderSchedule).catch(() => {});
+    }
+    followCamp(status);
     paintFoldSummaries();
   } catch (ex) {
     statusLine.textContent = ex.message;
@@ -337,6 +369,12 @@ function paintFoldSummaries() {
   document.querySelector("#tune-summary").textContent = [bandName, freq ? `${freq} MHz` : "", modeName].filter(Boolean).join(", ");
 
   if (!scanNote.textContent) scanNote.textContent = "None yet";
+
+  const saved = scheduleView?.entries?.length || 0;
+  const active = scheduleView?.active;
+  document.querySelector("#schedule-summary").textContent = active
+    ? `${compactNumber(active.frequencyHz / 1e6, 4)} MHz, ${modeLabel(active.mode)}`
+    : saved ? `${saved} saved` : "None";
 
   const raw = readout.textContent.replace(/\s+/g, " ").trim();
   let selected = "None";
@@ -417,7 +455,7 @@ function renderHits(report) {
     row.querySelector("button").addEventListener("click", () => {
       document.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
       row.classList.add("selected");
-      mhz.value = mhzText(hit.frequencyHz);
+      syncTuneFrequency(mhzText(hit.frequencyHz));
       mode.value = hit.mode.toLowerCase();
       suggestedMode = mode.value;
       fillHearModes();
@@ -491,7 +529,8 @@ function modeToken(value) {
     raw: "Raw",
     cw: "CW",
     ft8: "FT8",
-    dmr: "DMR"
+    dmr: "DMR",
+    m17: "M17"
   };
   return names[String(value || "").toLowerCase()] || "Audio";
 }
@@ -700,7 +739,8 @@ const hearModes = [
   ["raw", "Raw"],
   ["cw", "CW"],
   ["ft8", "FT8"],
-  ["dmr", "DMR"]
+  ["dmr", "DMR"],
+  ["m17", "M17"]
 ];
 let suggestedMode = "nbfm";
 let listeningDmrKey = "";
@@ -741,18 +781,21 @@ function syncDmrFields() {
 }
 
 function fillColorCodes() {
-  const select = document.querySelector("#dmr-color");
-  for (let code = 0; code <= 15; code++) {
-    const option = document.createElement("option");
-    option.value = String(code);
-    option.textContent = String(code);
-    select.append(option);
+  for (const id of ["#dmr-color", "#camp-color"]) {
+    const select = document.querySelector(id);
+    for (let code = 0; code <= 15; code++) {
+      const option = document.createElement("option");
+      option.value = String(code);
+      option.textContent = String(code);
+      select.append(option);
+    }
   }
 }
 
 async function listen(explicitMode) {
   const frequencyHz = Number(mhz.value) * 1e6;
-  const sendMode = explicitMode || mode.value;
+  const hear = document.querySelector("#listen-mode").value;
+  const sendMode = explicitMode || hear || mode.value;
   const nextDmr = dmrKey();
   const modeChanged = !!liveAbort && sendMode !== "auto" && sendMode !== listeningMode;
   const dmrChanged = !!liveAbort && (sendMode === "dmr" || listeningMode === "dmr") && nextDmr !== listeningDmrKey;
@@ -845,13 +888,14 @@ async function listen(explicitMode) {
     readout.textContent = `${mhzText(listeningHz)} MHz  ${modeLabel(listeningMode)}`;
     source.textContent = response.headers.get("X-Source") || "";
     liveState.hidden = false;
-    liveStop.hidden = false;
+    liveStop.hidden = operatingMode === "camp";
     liveState.textContent = "Playing as the signal arrives.";
     syncSignalButtons();
     paintFoldSummaries();
 
     const context = new AudioContext();
     liveAudio = context;
+    ensureGain(context);
     await context.resume();
     await playPcmStream(response.body, context, rate, controller.signal);
   } catch (ex) {
@@ -890,12 +934,14 @@ async function playPcmStream(body, context, rate, signal) {
     if (pcm) appendRecording(pcm);
     const node = context.createBufferSource();
     node.buffer = buffer;
-    node.connect(context.destination);
+    node.connect(liveGain || context.destination);
     const start = Math.max(nextTime, context.currentTime + 0.02);
     node.start(start);
     nextTime = start + buffer.duration;
     played += buffer.duration;
-    liveState.textContent = `Playing as the signal arrives · ${played.toFixed(1)} s.`;
+    liveState.textContent = operatingMode === "camp" && !campActivity
+      ? "Waiting for activity."
+      : `Playing as the signal arrives · ${played.toFixed(1)} s.`;
     pending = pending.subarray(usable);
   }
 }
@@ -908,11 +954,206 @@ function concatBytes(left, right) {
   return merged;
 }
 
+function ensureGain(context) {
+  liveGain = context.createGain();
+  liveGain.connect(context.destination);
+  applyVolume();
+  return liveGain;
+}
+
+function applyVolume() {
+  const slider = document.querySelector("#volume");
+  const level = Number(slider.value);
+  if (liveGain) liveGain.gain.value = Number.isFinite(level) ? level / 100 : 0.8;
+}
+
+function loadVolume() {
+  const raw = localStorage.getItem("agentic-sdr-volume");
+  const saved = raw == null ? NaN : Number(raw);
+  const slider = document.querySelector("#volume");
+  if (Number.isFinite(saved) && saved >= 0 && saved <= 100) slider.value = String(saved);
+  applyVolume();
+}
+
+function paintModeSwitch() {
+  document.querySelector("#mode-explore").setAttribute("aria-pressed", String(operatingMode !== "camp"));
+  document.querySelector("#mode-camp").setAttribute("aria-pressed", String(operatingMode === "camp"));
+}
+
+function paintWorkspace() {
+  document.body.classList.toggle("workspace-camp", operatingMode === "camp");
+  document.body.classList.toggle("workspace-explore", operatingMode !== "camp");
+  const selectedTitle = document.querySelector('[data-fold="selected"] .fold-title');
+  if (selectedTitle)
+    selectedTitle.textContent = operatingMode === "camp" ? "Camp" : "Selected signal";
+}
+
+function campingActive(status) {
+  if (status?.camp) return true;
+  if (scheduleView?.active) return true;
+  if (scheduleView?.now) return true;
+  return false;
+}
+
+function paintCampControls(status) {
+  const camping = campingActive(status);
+  const go = document.querySelector("#camp-go");
+  const stop = document.querySelector("#camp-stop");
+  const policyRow = document.querySelector("#camp-policy-row");
+  if (!go || !stop) return;
+  go.hidden = operatingMode !== "camp" || camping;
+  stop.hidden = operatingMode !== "camp" || !camping;
+  if (policyRow) policyRow.hidden = !(operatingMode === "camp" && camping);
+  if (operatingMode === "camp") {
+    liveStop.hidden = true;
+    if (camping)
+      liveState.textContent = campActivity ? "Activity." : "Waiting for activity.";
+  }
+}
+
+function listenCampBody(frequencyHz, heard) {
+  const body = { frequencyHz, mode: heard || "nbfm" };
+  if (body.mode === "dmr") {
+    const color = document.querySelector("#dmr-color").value;
+    const slot = document.querySelector("#dmr-slot").value;
+    const talkgroup = document.querySelector("#dmr-tg").value.trim();
+    if (color !== "") body.colorCode = Number(color);
+    if (slot !== "") body.slot = Number(slot);
+    if (talkgroup !== "") body.talkgroup = Number(talkgroup);
+  }
+  return body;
+}
+
+async function startCamp() {
+  const frequencyHz = campFrequencyHz();
+  const heard = document.querySelector("#listen-mode").value || "nbfm";
+  if (heard === "auto") {
+    showError("Pick a mode to camp on. Camp does not guess.");
+    return;
+  }
+  showError("");
+  const view = await api("/api/camp/now", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(listenCampBody(frequencyHz, heard))
+  });
+  renderSchedule(view);
+  paintCampControls({ camp: view.active ? { frequencyHz: view.active.frequencyHz } : null });
+}
+
+async function stopCamping() {
+  listenToken++;
+  campPlayKey = "";
+  const file = recording ? await endRecording() : null;
+  stopLivePlayback();
+  setBusy(false);
+  try {
+    await api("/api/camp/now", { method: "DELETE" });
+  } catch { /* Clearing an empty camp is fine. */ }
+  try {
+    await api("/api/camp/pause", { method: "POST" });
+  } catch { /* Pause keeps a due schedule from taking the radio again. */ }
+  await api("/api/stop", { method: "POST" });
+  const view = await api("/api/camp");
+  renderSchedule(view);
+  paintCampControls(null);
+  refreshStatus();
+  await offerRecording(file);
+}
+
+function followCamp(status) {
+  const tune = status.operatingMode === "camp" ? status.camp : null;
+  if (!tune) {
+    if (campPlayKey) {
+      campPlayKey = "";
+      listenToken += 1;
+      stopLivePlayback();
+    }
+    return;
+  }
+  if (campConnecting) return;
+  const key = `${tune.frequencyHz}|${tune.mode}`;
+  if (key === campPlayKey && liveAbort) return;
+  campPlayKey = key;
+  campConnecting = true;
+  playCamp(tune).finally(() => {
+    campConnecting = false;
+  });
+}
+
+async function playCamp(tune) {
+  const token = ++listenToken;
+  const pendingFile = recording ? endRecording() : Promise.resolve(null);
+  stopLivePlayback();
+  if (token !== listenToken) return;
+  const controller = new AbortController();
+  liveAbort = controller;
+  listeningHz = tune.frequencyHz;
+  listeningMode = tune.mode;
+  applyRadioControls();
+  syncSignalButtons();
+  let missing = false;
+  try {
+    const file = await pendingFile;
+    if (token !== listenToken) {
+      if (file) offerRecording(file);
+      return;
+    }
+    if (file) await offerRecording(file);
+    if (token !== listenToken) return;
+    const response = await fetch("/api/camp/audio", { signal: controller.signal });
+    if (token !== listenToken) return;
+    if (response.status === 404) {
+      missing = true;
+      campPlayKey = "";
+      return;
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || response.statusText);
+    }
+    const rate = Number(response.headers.get("X-Audio-Rate")) || tune.sampleRate || 48000;
+    liveSampleRate = rate;
+    readout.textContent = `${mhzText(tune.frequencyHz)} MHz  ${modeLabel(tune.mode)}`;
+    syncTuneFrequency(mhzText(tune.frequencyHz));
+    if ([...document.querySelector("#listen-mode").options].some((option) => option.value === tune.mode))
+      document.querySelector("#listen-mode").value = tune.mode;
+    syncDmrFields();
+    liveState.hidden = false;
+    liveStop.hidden = true;
+    liveState.textContent = campActivity ? "Activity." : "Waiting for activity.";
+    paintCampControls({ camp: tune });
+    paintFoldSummaries();
+    setBusy(true);
+    const context = new AudioContext();
+    liveAudio = context;
+    ensureGain(context);
+    await context.resume();
+    await playPcmStream(response.body, context, rate, controller.signal);
+  } catch (ex) {
+    if (ex.name !== "AbortError" && token === listenToken) showError(ex.message);
+  } finally {
+    if (token !== listenToken) return;
+    if (missing) {
+      if (liveAbort === controller) liveAbort = null;
+      setBusy(false);
+      return;
+    }
+    const file = recording ? await endRecording() : null;
+    stopLivePlayback();
+    campPlayKey = "";
+    setBusy(false);
+    await offerRecording(file);
+  }
+}
+
 antennaOrientation.addEventListener("change", syncAzimuth);
-for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#mode", "#llm-model", "#llm-base"]) {
+for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#camp-freq", "#mode", "#llm-model", "#llm-base"]) {
   document.querySelector(id).addEventListener("input", paintFoldSummaries);
   document.querySelector(id).addEventListener("change", paintFoldSummaries);
 }
+mhz.addEventListener("input", () => syncTuneFrequency(mhz.value));
+campFreq?.addEventListener("input", () => syncTuneFrequency(campFreq.value));
 document.querySelector("#antenna-apply").addEventListener("click", () => {
   applyAntenna().catch((ex) => showError(ex.message));
 });
@@ -945,10 +1186,12 @@ document.querySelector("#listen-mode").addEventListener("change", () => {
   if ([...mode.options].some((option) => option.value === hear)) mode.value = hear;
   syncDmrFields();
   paintFoldSummaries();
+  if (operatingMode === "camp") return;
   if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
 });
 for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
   document.querySelector(id).addEventListener("change", () => {
+    if (operatingMode === "camp") return;
     if (document.querySelector("#listen-mode").value === "dmr" && liveAbort)
       listen("dmr").catch((ex) => showError(ex.message));
   });
@@ -990,11 +1233,15 @@ document.querySelector("#leave-no").addEventListener("click", () => {
 });
 async function stopWork() {
   listenToken++;
+  campPlayKey = "";
   const file = recording ? await endRecording() : null;
   closePrompt();
   stopLivePlayback();
   agentAbort?.abort();
   setBusy(false);
+  if (operatingMode === "camp") {
+    try { await api("/api/camp/pause", { method: "POST" }); } catch { /* The watch also stops when the page disconnects. */ }
+  }
   await api("/api/stop", { method: "POST" });
   refreshStatus();
   await offerRecording(file);
@@ -1025,7 +1272,7 @@ document.querySelector("#llm-ask").addEventListener("keydown", (event) => {
   }
 });
 document.querySelector("#noaa").addEventListener("click", () => {
-  mhz.value = "162.550000";
+  syncTuneFrequency("162.550000");
   mode.value = "nbfm";
   listen().catch((ex) => showError(ex.message));
 });
@@ -1241,12 +1488,16 @@ const tips = {
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, and ${wiki("Digital_mobile_radio", "DMR")}.`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, and ${wiki("M17_(amateur_radio)", "M17")}.`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
   "dmr-slot": "DMR timeslot 1 or 2. Any accepts both slots.",
   "dmr-tg": "The talkgroup to write down. Leave this blank to accept every talkgroup.",
-  listen: "Tunes that frequency and plays it as the signal arrives.",
+  listen: "Tunes and plays as the signal arrives.",
+  "camp-go": "Start camping on this frequency and mode. The speaker stays quiet until the channel is active.",
+  "camp-stop": "Stop camping. A due schedule stays paused until you Camp again or leave and return to Camp.",
+  hear: "Mode to demodulate. Camp needs an explicit mode; it does not guess.",
+  freq: "Frequency to listen to or camp on.",
   noaa: `Listens to one ${wiki("NOAA_Weather_Radio", "NOAA weather radio")} channel so you can tell the radio is working.`,
   signals: "Peaks from the last scan.",
   "col-mhz": `Frequency in megahertz. See ${wiki("Radio_frequency", "radio frequency")}.`,
@@ -1255,12 +1506,22 @@ const tips = {
   "col-khz": `How wide the signal is, in kilohertz. See ${wiki("Bandwidth_(signal_processing)", "bandwidth")}.`,
   "col-snr": `How far the signal stands above the noise, in decibels. Bigger is cleaner. See ${wiki("Signal-to-noise_ratio", "signal-to-noise ratio")}.`,
   "col-source": `A ${wiki("Band_plan", "band plan")} label, such as a calling frequency or “FM broadcast.” It is not a station’s name.`,
-  selected: "The frequency playing now, and any text decoded from it.",
+  selected: "The frequency you are hearing or camping on, with live audio and decoded text.",
   record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",
   transcript: `Downloads ${wiki("Morse_code", "Morse")}, ${wiki("FT8", "FT8")}, and ${wiki("Speech_recognition", "speech")} text as XML, with the time and which decoder wrote each line.`,
-  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")}, ${wiki("Speech_recognition", "speech")}, and DMR talkgroup, radio ID, and alias text.`
+  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")}, ${wiki("Speech_recognition", "speech")}, and DMR talkgroup, radio ID, and alias text.`,
+  "operating-mode": "Explore scans and listens with the audio on. Camp is the camping workspace: camping starts when you press Camp, or when a schedule window is due.",
+  volume: "How loud this page plays the radio. Camping stays silent until there is activity, then uses this level.",
+  schedule: "Optional times to camp on. A due window can start camping while you are in Camp. You can also press Camp on a frequency and leave this empty.",
+  "schedule-label": "A short name for this watch, such as NOAA.",
+  "schedule-freq": "The frequency to tune when this entry is on.",
+  "schedule-mode": "The mode to hear that frequency as. Camp does not guess.",
+  "schedule-start": "Local start time. Leave this and the end empty to listen only when nothing else is scheduled.",
+  "schedule-end": "Local end time. An end earlier than the start continues past midnight.",
+  "schedule-days": "Leave every day unchecked to use this entry every day.",
+  "schedule-save": "Saves this entry. A time that overlaps another entry is refused.",
+  "schedule-policy": "While camping on a frequency you chose with Camp: stay there when a schedule starts, or switch to that schedule."
 };
-
 function placeTip(target) {
   const text = tips[target.dataset.tip];
   const tip = document.querySelector("#tip");
@@ -1316,8 +1577,223 @@ function bindTips() {
   }, true);
 }
 
+function dayNames(days) {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  if (!days || days.length === 0 || days.length === 7) return "Every day";
+  return days.map((day) => names[day] || "").filter(Boolean).join(" ");
+}
+
+function whenText(entry) {
+  if (!entry.start) return "Any time";
+  return `${entry.start}–${entry.end} · ${dayNames(entry.days)}`;
+}
+
+function renderSchedule(view) {
+  scheduleView = view;
+  if (view?.mode) operatingMode = view.mode === "camp" ? "camp" : "explore";
+  paintModeSwitch();
+  paintWorkspace();
+  paintCampControls(view?.active ? { camp: { frequencyHz: view.active.frequencyHz } } : null);
+  const note = document.querySelector("#schedule-note");
+  note.hidden = !view?.note;
+  note.textContent = view?.note || "";
+  const policy = document.querySelector("#camp-policy");
+  if (policy) policy.value = view?.yieldToSchedule ? "yield" : "hold";
+  const now = document.querySelector("#camp-now");
+  const actions = document.querySelector("#camp-actions");
+  const follow = document.querySelector("#camp-follow");
+  const ignore = document.querySelector("#camp-ignore");
+  const inCamp = operatingMode === "camp";
+  if (inCamp && view?.now) {
+    now.hidden = false;
+    actions.hidden = false;
+    const activeIsNow = view.active && view.active.id === "now";
+    now.textContent = activeIsNow
+      ? `Camping on ${mhzText(view.now.frequencyHz)} MHz ${modeLabel(view.now.mode)}`
+      : `Returns to ${mhzText(view.now.frequencyHz)} MHz ${modeLabel(view.now.mode)} after the schedule`;
+    follow.hidden = !view.due;
+    ignore.hidden = !(view.active && view.active.id !== "now" && view.now);
+  } else {
+    now.hidden = true;
+    actions.hidden = !(inCamp && (view?.due || view?.active || view?.now));
+    follow.hidden = !(inCamp && view?.due);
+    ignore.hidden = true;
+  }
+  const rows = document.querySelector("#schedule-rows");
+  rows.innerHTML = "";
+  const entries = view?.entries || [];
+  document.querySelector("#schedule-empty").hidden = entries.length > 0;
+  for (const entry of entries) {
+    const row = document.createElement("tr");
+    if (view.active && view.active.id === entry.id) row.className = "camp-on";
+    row.innerHTML = `<td>${whenText(entry)}</td><td class="num">${mhzText(entry.frequencyHz)}</td><td>${modeLabel(entry.mode)}</td><td>${entry.label || ""}</td><td></td>`;
+    const actions = row.lastElementChild;
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "ghost";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => fillScheduleForm(entry));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      api(`/api/camp/entries/${entry.id}`, { method: "DELETE" })
+        .then((view) => {
+          showError("");
+          renderSchedule(view);
+        })
+        .catch((ex) => showError(ex.message));
+    });
+    actions.append(edit, document.createTextNode(" "), remove);
+    rows.append(row);
+  }
+  paintFoldSummaries();
+}
+
+function fillScheduleForm(entry) {
+  editingId = entry.id;
+  document.querySelector("#camp-label").value = entry.label || "";
+  document.querySelector("#camp-mhz").value = mhzText(entry.frequencyHz);
+  document.querySelector("#camp-mode").value = entry.mode;
+  document.querySelector("#camp-start").value = entry.start || "";
+  document.querySelector("#camp-end").value = entry.end || "";
+  document.querySelectorAll("#schedule-form .day-row input").forEach((box) => {
+    box.checked = Array.isArray(entry.days) && entry.days.includes(Number(box.value));
+  });
+  document.querySelector("#camp-color").value = entry.colorCode == null ? "" : String(entry.colorCode);
+  document.querySelector("#camp-slot").value = entry.slot == null ? "" : String(entry.slot);
+  document.querySelector("#camp-tg").value = entry.talkgroup == null ? "" : String(entry.talkgroup);
+  syncCampDmr();
+  document.querySelector("#camp-save").textContent = "Save";
+  document.querySelector("#camp-cancel").hidden = false;
+}
+
+function clearScheduleForm() {
+  editingId = null;
+  document.querySelector("#schedule-form").reset();
+  document.querySelector("#camp-mhz").value = "162.550000";
+  document.querySelector("#camp-mode").value = "nbfm";
+  syncCampDmr();
+  document.querySelector("#camp-save").textContent = "Add to schedule";
+  document.querySelector("#camp-cancel").hidden = true;
+}
+
+function syncCampDmr() {
+  document.querySelector("#camp-dmr").hidden = document.querySelector("#camp-mode").value !== "dmr";
+}
+
+function scheduleDraft() {
+  const frequencyHz = Number(document.querySelector("#camp-mhz").value) * 1e6;
+  const days = [...document.querySelectorAll("#schedule-form .day-row input:checked")].map((box) => Number(box.value));
+  const body = {
+    label: document.querySelector("#camp-label").value.trim(),
+    frequencyHz,
+    mode: document.querySelector("#camp-mode").value,
+    start: document.querySelector("#camp-start").value,
+    end: document.querySelector("#camp-end").value,
+    days: days.length ? days : null
+  };
+  if (body.mode === "dmr") {
+    const color = document.querySelector("#camp-color").value;
+    const slot = document.querySelector("#camp-slot").value;
+    const talkgroup = document.querySelector("#camp-tg").value.trim();
+    if (color !== "") body.colorCode = Number(color);
+    if (slot !== "") body.slot = Number(slot);
+    if (talkgroup !== "") body.talkgroup = Number(talkgroup);
+  }
+  return body;
+}
+
+async function chooseMode(mode) {
+  const view = await api("/api/camp/mode", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode })
+  });
+  showError("");
+  renderSchedule(view);
+  if (mode === "explore") {
+    listenToken++;
+    campPlayKey = "";
+    stopLivePlayback();
+    await api("/api/stop", { method: "POST" }).catch(() => {});
+  }
+  refreshStatus();
+}
+
+document.querySelector("#mode-explore").addEventListener("click", () => {
+  chooseMode("explore").catch((ex) => showError(ex.message));
+});
+document.querySelector("#mode-camp").addEventListener("click", () => {
+  chooseMode("camp").catch((ex) => showError(ex.message));
+});
+document.querySelector("#camp-go").addEventListener("click", () => {
+  startCamp().catch((ex) => showError(ex.message));
+});
+document.querySelector("#camp-stop").addEventListener("click", () => {
+  stopCamping().catch((ex) => showError(ex.message));
+});
+document.querySelector("#volume").addEventListener("input", () => {
+  try { localStorage.setItem("agentic-sdr-volume", document.querySelector("#volume").value); } catch { /* The slider still changes the level for this visit. */ }
+  applyVolume();
+});
+document.querySelector("#camp-mode").addEventListener("change", syncCampDmr);
+document.querySelector("#camp-cancel").addEventListener("click", clearScheduleForm);
+document.querySelector("#camp-clear").addEventListener("click", () => {
+  api("/api/camp/now", { method: "DELETE" })
+    .then((view) => {
+      showError("");
+      renderSchedule(view);
+    })
+    .catch((ex) => showError(ex.message));
+});
+document.querySelector("#camp-policy").addEventListener("change", () => {
+  const yieldToSchedule = document.querySelector("#camp-policy").value === "yield";
+  api("/api/camp/policy", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yieldToSchedule })
+  }).then((view) => {
+    showError("");
+    renderSchedule(view);
+  }).catch((ex) => showError(ex.message));
+});
+document.querySelector("#camp-follow").addEventListener("click", () => {
+  api("/api/camp/follow-schedule", { method: "POST" })
+    .then((view) => {
+      showError("");
+      renderSchedule(view);
+    })
+    .catch((ex) => showError(ex.message));
+});
+document.querySelector("#camp-ignore").addEventListener("click", () => {
+  api("/api/camp/ignore-schedule", { method: "POST" })
+    .then((view) => {
+      showError("");
+      renderSchedule(view);
+    })
+    .catch((ex) => showError(ex.message));
+});
+document.querySelector("#schedule-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const path = editingId ? `/api/camp/entries/${editingId}` : "/api/camp/entries";
+  api(path, {
+    method: editingId ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(scheduleDraft())
+  }).then((view) => {
+    showError("");
+    clearScheduleForm();
+    renderSchedule(view);
+  }).catch((ex) => showError(ex.message));
+});
+
 fillColorCodes();
 fillHearModes();
+loadVolume();
+syncCampDmr();
+paintWorkspace();
 bindTips();
 rememberFolds();
 refreshStatus();

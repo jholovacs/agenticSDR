@@ -105,7 +105,8 @@ public class AgentTests
             new RepeaterLookup(new HttpClient(), NullLogger<RepeaterLookup>.Instance),
             new SpeechDecoder(Path.GetTempPath()),
             NullLogger<RadioSession>.Instance);
-        return new InstructAgent(store, session, http);
+        var camp = new CampBook(path + ".schedule");
+        return new InstructAgent(store, session, camp, http);
     }
 
     private sealed class ScriptHandler : HttpMessageHandler

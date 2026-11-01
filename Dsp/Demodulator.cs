@@ -39,7 +39,7 @@ public sealed class Demodulator
     /// </summary>
     public static double ChannelCutoffHz(RadioMode mode) => mode switch
     {
-        RadioMode.Nbfm or RadioMode.Dmr => 8_000,
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 => 8_000,
         RadioMode.Am => 5_000,
         RadioMode.Usb or RadioMode.Lsb => 4_000,
         RadioMode.Cw => 1_200,
@@ -222,6 +222,7 @@ public sealed class Demodulator
                 DemodFt8(baseBand);
                 break;
             case RadioMode.Raw:
+            case RadioMode.M17:
                 DemodRaw(baseBand);
                 break;
             default:

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
 using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
@@ -23,7 +24,11 @@ public sealed record SessionStatus(
     string? Error,
     int? DeviceIndex,
     string? LiveText,
-    IReadOnlyList<TranscriptSpan> Transcript);
+    IReadOnlyList<TranscriptSpan> Transcript,
+    string OperatingMode,
+    bool CampActivity,
+    CampTune? Camp,
+    int CampRevision);
 
 /// <summary>
 /// One row in the band menu. Tunable is false when the open radio cannot reach it.
@@ -117,6 +122,19 @@ public sealed class RadioSession(
     private bool _directSampling;
     private AntennaSpec? _antenna;
     private Complex[] _liveIq = [];
+    private readonly object _campGate = new();
+    private CampFanout? _fanout;
+    private Task? _campTask;
+    private string _campKey = "";
+    private string _operatingMode = "explore";
+    private bool _campActivity;
+    private CampTune? _campTune;
+    private int _campRevision;
+    private int _campSampleRate = 48_000;
+    private int _radioBorrow;
+
+    /// <summary>True while a scan, guess, inspect, or clip listen holds the radio away from camp.</summary>
+    public bool RadioBorrowed => Volatile.Read(ref _radioBorrow) > 0;
 
     public SessionStatus Status
     {
@@ -135,7 +153,11 @@ public sealed class RadioSession(
                     _error,
                     _deviceIndex,
                     _liveText,
-                    _transcript.ToArray());
+                    _transcript.ToArray(),
+                    _operatingMode,
+                    _campActivity,
+                    _campTune,
+                    _campRevision);
             }
         }
     }
@@ -153,6 +175,189 @@ public sealed class RadioSession(
     {
         lock (_statusGate)
             _cancel.Cancel();
+    }
+
+    public bool IsOpen => _device is not null;
+
+    public void PublishCamp(string mode, int revision)
+    {
+        lock (_statusGate)
+        {
+            _operatingMode = mode == "camp" ? "camp" : "explore";
+            _campRevision = revision;
+        }
+    }
+
+    public void NoteCampIdle(string message)
+    {
+        lock (_statusGate)
+        {
+            if (_phase == "idle")
+                _message = message;
+        }
+    }
+
+    public void ClearCampNote()
+    {
+        lock (_statusGate)
+        {
+            if (_phase == "idle" && _message is not null && _message.StartsWith("Camp", StringComparison.Ordinal))
+                _message = _device is null ? "Radio is closed." : "Explore mode.";
+        }
+    }
+
+    /// <summary>
+    /// Tunes the camp target, or releases the radio when there is nothing to camp on.
+    /// The same target does not retune. Pages hear the audio through <see cref="TryJoinCamp"/>.
+    /// </summary>
+    public async Task RetargetCampAsync(CampRequest? request, CancellationToken cancellationToken)
+    {
+        // A guess or scan has the radio; leave it alone until that work finishes.
+        if (RadioBorrowed)
+            return;
+
+        string key = request?.Key ?? "";
+        Task? previous;
+        CampFanout? previousAudio;
+        lock (_campGate)
+        {
+            // Still on this target.
+            if (key.Length > 0 && key == _campKey && _campTask is { IsCompleted: false })
+                return;
+            // Truly idle: nothing to clear and no camp task still holding the radio.
+            if (key.Length == 0 && (_campTask is null || _campTask.IsCompleted))
+                return;
+
+            previous = _campTask;
+            previousAudio = _fanout;
+            _fanout = null;
+            // Keep _campTask until the old work ends so another clear still waits on it.
+            _campKey = "\u0001";
+        }
+
+        Stop();
+        previousAudio?.Complete();
+        if (previous is not null)
+        {
+            try
+            {
+                await previous.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+
+        lock (_campGate)
+        {
+            if (ReferenceEquals(_campTask, previous))
+                _campTask = null;
+            if (_campKey == "\u0001")
+                _campKey = "";
+        }
+
+        lock (_statusGate)
+        {
+            _campTune = null;
+            _campActivity = false;
+        }
+
+        if (request is null || _device is null)
+            return;
+
+        var fanout = new CampFanout();
+        lock (_campGate)
+        {
+            _fanout = fanout;
+            _campKey = key;
+            _campTask = Task.Run(async () =>
+            {
+                try
+                {
+                    lock (_statusGate)
+                    {
+                        _campActivity = false;
+                        _campTune = new CampTune(request.EntryId, request.Label, request.FrequencyHz, request.Mode, false, _campSampleRate);
+                    }
+
+                    await HoldCampAsync(request, fanout, CancellationToken.None);
+                }
+                finally
+                {
+                    fanout.Complete();
+                    bool current;
+                    lock (_campGate)
+                    {
+                        current = ReferenceEquals(_fanout, fanout);
+                        if (current)
+                        {
+                            _fanout = null;
+                            _campKey = "";
+                            _campTask = null;
+                        }
+                    }
+
+                    if (current)
+                    {
+                        lock (_statusGate)
+                        {
+                            _campTune = null;
+                            _campActivity = false;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /// <summary>Stop camp or live audio, then run one radio job. Camp resumes on the next schedule tick.</summary>
+    private async Task<T> BorrowRadioAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _radioBorrow);
+        try
+        {
+            Stop();
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await work(cancellationToken);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _radioBorrow);
+        }
+    }
+
+    public bool TryJoinCamp(out ChannelReader<byte[]>? reader, out int sampleRate, out CampTune? tune)
+    {
+        lock (_campGate)
+        {
+            if (_fanout is null || _campTask is not { IsCompleted: false })
+            {
+                reader = null;
+                sampleRate = 48_000;
+                tune = null;
+                return false;
+            }
+
+            reader = _fanout.Join();
+            sampleRate = _campSampleRate;
+        }
+
+        lock (_statusGate)
+            tune = _campTune;
+        return true;
+    }
+
+    public void LeaveCamp(ChannelReader<byte[]> reader)
+    {
+        lock (_campGate)
+            _fanout?.Leave(reader);
     }
 
     public static IReadOnlyList<RadioDeviceInfo> ListDevices() => RadioDevices.List();
@@ -219,58 +424,54 @@ public sealed class RadioSession(
     /// Listen at a handful of spots and set the antenna from where the noise floor is strongest.
     /// The typed length is left unchanged when the floors are too even to choose.
     /// </summary>
-    public async Task<AntennaAdvice> GuessAntennaAsync(CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken);
-        try
+    public Task<AntennaAdvice> GuessAntennaAsync(CancellationToken cancellationToken) =>
+        BorrowRadioAsync(async ct =>
         {
-            using CancellationTokenSource linked = Begin(cancellationToken);
-            CancellationToken ct = linked.Token;
-            IRadioDevice device = RequireDevice();
-            List<double> probes = AntennaGuess.ProbesInRange(device.Capabilities.MinFrequencyHz, device.Capabilities.MaxFrequencyHz).ToList();
-            if (probes.Count < 3)
-                throw new InvalidOperationException("This radio cannot tune enough of the dial to guess an antenna.");
-
-            double? savedGain = device.Capabilities.GainDb;
-            if (savedGain is > 8)
-                device.SetGain(8);
-            var readings = new List<SignalStrength>(probes.Count);
             try
             {
-                for (int i = 0; i < probes.Count; i++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    SetStatus("scanning", i / (double)probes.Count, $"Listening for the antenna near {probes[i] / 1e6:0.00} MHz");
-                    Capture capture = await CaptureAsync(device, probes[i], 80, ct);
-                    double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, 4096);
-                    readings.Add(new SignalStrength(probes[i], Percentile(db, 0.15)));
-                    log.LogInformation("Antenna floor {MHz:0.00} MHz {Floor:0.0} dB", probes[i] / 1e6, readings[^1].FloorDb);
-                }
-            }
-            finally
-            {
+                using CancellationTokenSource linked = Begin(ct);
+                CancellationToken token = linked.Token;
+                IRadioDevice device = RequireDevice();
+                List<double> probes = AntennaGuess.ProbesInRange(device.Capabilities.MinFrequencyHz, device.Capabilities.MaxFrequencyHz).ToList();
+                if (probes.Count < 3)
+                    throw new InvalidOperationException("This radio cannot tune enough of the dial to guess an antenna.");
+
+                double? savedGain = device.Capabilities.GainDb;
                 if (savedGain is > 8)
-                    device.SetGain(savedGain);
+                    device.SetGain(8);
+                var readings = new List<SignalStrength>(probes.Count);
+                try
+                {
+                    for (int i = 0; i < probes.Count; i++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        SetStatus("scanning", i / (double)probes.Count, $"Listening for the antenna near {probes[i] / 1e6:0.00} MHz");
+                        Capture capture = await CaptureAsync(device, probes[i], 80, token);
+                        double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, 4096);
+                        readings.Add(new SignalStrength(probes[i], Percentile(db, 0.15)));
+                        log.LogInformation("Antenna floor {MHz:0.00} MHz {Floor:0.0} dB", probes[i] / 1e6, readings[^1].FloorDb);
+                    }
+                }
+                finally
+                {
+                    if (savedGain is > 8)
+                        device.SetGain(savedGain);
+                }
+
+                if (!AntennaGuess.TryFromFloors(readings, out AntennaSpec spec, out string note))
+                    throw new InvalidOperationException(note);
+
+                _antenna = spec;
+                AntennaAdvice advice = AntennaPlan.Advise(spec);
+                SetStatus("idle", 1, "Antenna guessed from signal strength.");
+                return advice with { Summary = note + " " + advice.Summary };
             }
-
-            if (!AntennaGuess.TryFromFloors(readings, out AntennaSpec spec, out string note))
-                throw new InvalidOperationException(note);
-
-            _antenna = spec;
-            AntennaAdvice advice = AntennaPlan.Advise(spec);
-            SetStatus("idle", 1, "Antenna guessed from signal strength.");
-            return advice with { Summary = note + " " + advice.Summary };
-        }
-        catch (OperationCanceledException)
-        {
-            SetStatus("idle", 0, "Antenna guess stopped.");
-            throw;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
+            catch (OperationCanceledException)
+            {
+                SetStatus("idle", 0, "Antenna guess stopped.");
+                throw;
+            }
+        }, cancellationToken);
 
     private static double Percentile(double[] values, double fraction)
     {
@@ -374,12 +575,16 @@ public sealed class RadioSession(
         return device.Capabilities;
     }
 
-    public async Task<ScanReport> ScanAsync(string bandId, CancellationToken cancellationToken)
+    public Task<ScanReport> ScanAsync(string bandId, CancellationToken cancellationToken)
     {
         HamBand band = Region2BandPlan.Find(bandId)
             ?? throw new ArgumentException($"Unknown band '{bandId}'. Use list_ham_bands for ids such as 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, or dmr.");
 
-        await _gate.WaitAsync(cancellationToken);
+        return BorrowRadioAsync(ct => ScanWhileHoldingAsync(band, ct), cancellationToken);
+    }
+
+    private async Task<ScanReport> ScanWhileHoldingAsync(HamBand band, CancellationToken cancellationToken)
+    {
         try
         {
             using CancellationTokenSource linked = Begin(cancellationToken);
@@ -527,15 +732,13 @@ public sealed class RadioSession(
             SetStatus("idle", 0, "Scan stopped.");
             throw;
         }
-        finally
-        {
-            _gate.Release();
-        }
     }
 
-    public async Task<InspectReport> InspectAsync(double frequencyHz, CancellationToken cancellationToken)
+    public Task<InspectReport> InspectAsync(double frequencyHz, CancellationToken cancellationToken) =>
+        BorrowRadioAsync(ct => InspectWhileHoldingAsync(frequencyHz, ct), cancellationToken);
+
+    private async Task<InspectReport> InspectWhileHoldingAsync(double frequencyHz, CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync(cancellationToken);
         try
         {
             using CancellationTokenSource linked = Begin(cancellationToken);
@@ -574,17 +777,17 @@ public sealed class RadioSession(
             SetStatus("idle", 0, "Inspect stopped.");
             throw;
         }
-        finally
-        {
-            _gate.Release();
-        }
     }
 
-    public async Task<ListenReport> ListenAsync(double frequencyHz, string? modeName, double seconds, CancellationToken cancellationToken)
+    public Task<ListenReport> ListenAsync(double frequencyHz, string? modeName, double seconds, CancellationToken cancellationToken)
     {
         seconds = Math.Clamp(double.IsFinite(seconds) && seconds > 0 ? seconds : 10, 1, 20);
         RadioMode requested = ModeClassifier.Parse(modeName);
-        await _gate.WaitAsync(cancellationToken);
+        return BorrowRadioAsync(ct => ListenWhileHoldingAsync(frequencyHz, requested, seconds, ct), cancellationToken);
+    }
+
+    private async Task<ListenReport> ListenWhileHoldingAsync(double frequencyHz, RadioMode requested, double seconds, CancellationToken cancellationToken)
+    {
         try
         {
             BeginListen(frequencyHz);
@@ -720,17 +923,26 @@ public sealed class RadioSession(
             SetStatus("idle", 0, "Listen stopped.");
             throw;
         }
-        finally
-        {
-            _gate.Release();
-        }
     }
 
     /// <summary>
     /// Tune, demodulate, and write 16-bit audio as it is produced. The response stays open until Stop or the browser disconnects.
     /// Morse and FT8 text are updated on the status the page already polls.
     /// </summary>
-    public async Task WriteLiveAsync(double frequencyHz, string? modeName, DmrFilter dmr, HttpResponse response, CancellationToken cancellationToken)
+    public Task WriteLiveAsync(double frequencyHz, string? modeName, DmrFilter dmr, HttpResponse response, CancellationToken cancellationToken) =>
+        PlayLiveAsync(frequencyHz, modeName, dmr, response, null, false, cancellationToken);
+
+    private Task HoldCampAsync(CampRequest request, CampFanout fanout, CancellationToken cancellationToken) =>
+        PlayLiveAsync(request.FrequencyHz, request.Mode, request.Filter, null, fanout, true, cancellationToken);
+
+    private async Task PlayLiveAsync(
+        double frequencyHz,
+        string? modeName,
+        DmrFilter dmr,
+        HttpResponse? response,
+        CampFanout? fanout,
+        bool squelch,
+        CancellationToken cancellationToken)
     {
         RadioMode requested = ModeClassifier.Parse(modeName);
         await _gate.WaitAsync(cancellationToken);
@@ -788,22 +1000,39 @@ public sealed class RadioSession(
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
             var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz);
-            response.Headers["X-Audio-Rate"] = demod.PlaybackRate.ToString(CultureInfo.InvariantCulture);
-            response.Headers["X-Tune-Hz"] = tuneHz.ToString(CultureInfo.InvariantCulture);
-            response.Headers["X-Mode"] = mode.ToString();
-            response.Headers["X-Source"] = source ?? "";
-            response.ContentType = "application/octet-stream";
-            response.Headers.CacheControl = "no-store";
-            response.HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-            await response.StartAsync(ct);
+            if (response is not null)
+            {
+                response.Headers["X-Audio-Rate"] = demod.PlaybackRate.ToString(CultureInfo.InvariantCulture);
+                response.Headers["X-Tune-Hz"] = tuneHz.ToString(CultureInfo.InvariantCulture);
+                response.Headers["X-Mode"] = mode.ToString();
+                response.Headers["X-Source"] = source ?? "";
+                response.ContentType = "application/octet-stream";
+                response.Headers.CacheControl = "no-store";
+                response.HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+                await response.StartAsync(ct);
+            }
 
-            SetStatus("listening", 1, LiveMessage(mode, tuneHz));
+            if (squelch)
+            {
+                lock (_statusGate)
+                {
+                    _campSampleRate = demod.PlaybackRate;
+                    _campActivity = false;
+                    string heard = CampSchedule.Canonical(mode);
+                    _campTune = (_campTune ?? new CampTune(null, null, tuneHz, heard, false, demod.PlaybackRate))
+                        with { FrequencyHz = tuneHz, Mode = heard, Activity = false, SampleRate = demod.PlaybackRate };
+                }
+            }
+
+            SetStatus("listening", 1, squelch
+                ? $"Camped on {tuneHz / 1e6:0.000000} MHz ({mode}), waiting for activity."
+                : LiveMessage(mode, tuneHz));
             if (dmrFramed)
                 AppendNote("DMR framing found.");
 
             try
             {
-                await PumpLiveAsync(device, loHz, shiftHz, mode, demod, response.Body, mode == RadioMode.Dmr && !dmrFramed, dmr, ct);
+                await PumpLiveAsync(device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch, mode == RadioMode.Dmr && !dmrFramed, dmr, ct);
             }
             finally
             {
@@ -828,7 +1057,7 @@ public sealed class RadioSession(
                 _message = ex.Message;
             }
 
-            if (!response.HasStarted)
+            if (response is { HasStarted: false })
                 throw;
         }
         finally
@@ -841,9 +1070,12 @@ public sealed class RadioSession(
         IRadioDevice device,
         double frequencyHz,
         double dmrOffsetHz,
+        double stationHz,
         RadioMode mode,
         Demodulator demod,
-        Stream output,
+        Stream? output,
+        CampFanout? fanout,
+        bool squelch,
         bool recheckDmr,
         DmrFilter dmr,
         CancellationToken cancellationToken)
@@ -855,6 +1087,9 @@ public sealed class RadioSession(
         var recent = new List<float>();
         var dmrProbe = new List<Complex>();
         var dmrReader = new DmrReader();
+        using var m17Reader = mode == RadioMode.M17 ? new M17Reader() : null;
+        if (mode == RadioMode.M17 && m17Reader is { Available: false })
+            AppendNote("M17 voice needs Host/native/m17voice.dll beside the app.");
         bool dmrChecked = !recheckDmr;
         int dmrNeed = (int)(device.SampleRateHz * 0.12);
         var ft8Period = new List<float>();
@@ -869,6 +1104,7 @@ public sealed class RadioSession(
         int ft8Slot = 15 * rate;
         var nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         float level = 0.05f;
+        var activity = new ActivityHold();
 
         await Task.Run(() =>
         {
@@ -931,18 +1167,77 @@ public sealed class RadioSession(
                 }
             }
 
+            bool framed = false;
+            float[]? m17Audio = null;
             if (mode == RadioMode.Dmr)
             {
                 foreach (string line in dmrReader.Push(iq, device.SampleRateHz, dmrOffsetHz, dmr))
+                {
+                    framed = true;
                     AppendNote(line);
+                }
+            }
+            else if (mode == RadioMode.M17 && m17Reader is not null)
+            {
+                foreach (M17Update update in m17Reader.Push(iq, device.SampleRateHz, dmrOffsetHz))
+                {
+                    if (!string.IsNullOrWhiteSpace(update.Note))
+                    {
+                        framed = true;
+                        AppendNote(update.Note);
+                    }
+
+                    if (update.Pcm8k is { Length: > 0 })
+                    {
+                        framed = true;
+                        m17Audio = UpsampleAudio(update.Pcm8k, M17Reader.CodecRate, rate);
+                    }
+                }
             }
 
-            demod.Push(iq);
-            float[] fresh = demod.TakeNewAudio();
-            if (fresh.Length == 0)
-                continue;
+            bool audible = true;
+            if (squelch)
+            {
+                bool heard = framed || ChannelActivity.Heard(iq, device.SampleRateHz, dmrOffsetHz, ChannelActivity.WidthHz(mode));
+                bool was = activity.Active;
+                activity.Observe(heard, samples, (int)device.SampleRateHz);
+                audible = activity.Active;
+                if (activity.Active != was)
+                {
+                    lock (_statusGate)
+                    {
+                        _campActivity = activity.Active;
+                        if (_campTune is not null)
+                            _campTune = _campTune with { Activity = activity.Active };
+                    }
 
-            await WritePcmAsync(output, fresh, level, cancellationToken);
+                    SetStatus(
+                        "listening",
+                        1,
+                        activity.Active
+                            ? $"Activity at {stationHz / 1e6:0.000000} MHz ({mode})."
+                            : $"Camped on {stationHz / 1e6:0.000000} MHz ({mode}), waiting for activity.");
+                }
+            }
+
+            float[] fresh;
+            if (mode == RadioMode.M17)
+            {
+                // Play Codec2 speech when a frame lands; stay quiet between frames.
+                fresh = m17Audio ?? [];
+                if (fresh.Length == 0)
+                    continue;
+                audible = true;
+            }
+            else
+            {
+                demod.Push(iq);
+                fresh = demod.TakeNewAudio();
+                if (fresh.Length == 0)
+                    continue;
+            }
+
+            await WritePcmAsync(output, fanout, fresh, level, audible, cancellationToken);
             level = NextLevel(level, fresh);
 
             if (mode == RadioMode.Cw)
@@ -1037,20 +1332,26 @@ public sealed class RadioSession(
         }
     }
 
-    private static async Task WritePcmAsync(Stream output, float[] samples, float level, CancellationToken cancellationToken)
+    private static async Task WritePcmAsync(Stream? output, CampFanout? fanout, float[] samples, float level, bool audible, CancellationToken cancellationToken)
     {
         float peak = 0;
         foreach (float sample in samples)
             peak = Math.Max(peak, Math.Abs(sample));
         float gain = 0.7f / Math.Max(level, Math.Max(peak, 1e-4f));
         var bytes = new byte[samples.Length * 2];
-        for (int i = 0; i < samples.Length; i++)
+        if (audible)
         {
-            short value = (short)Math.Clamp(samples[i] * gain * 32767f, -32767, 32767);
-            bytes[i * 2] = (byte)value;
-            bytes[i * 2 + 1] = (byte)(value >> 8);
+            for (int i = 0; i < samples.Length; i++)
+            {
+                short value = (short)Math.Clamp(samples[i] * gain * 32767f, -32767, 32767);
+                bytes[i * 2] = (byte)value;
+                bytes[i * 2 + 1] = (byte)(value >> 8);
+            }
         }
 
+        fanout?.Publish(bytes);
+        if (output is null || !audible)
+            return;
         await output.WriteAsync(bytes, cancellationToken);
         await output.FlushAsync(cancellationToken);
     }
@@ -1061,6 +1362,27 @@ public sealed class RadioSession(
         foreach (float sample in samples)
             peak = Math.Max(peak, Math.Abs(sample));
         return Math.Max(peak, level * 0.98f);
+    }
+
+    /// <summary>Stretch Codec2's 8 kHz speech up to the live player rate with linear steps.</summary>
+    private static float[] UpsampleAudio(float[] input, int fromRate, int toRate)
+    {
+        if (input.Length == 0 || fromRate <= 0 || toRate <= 0 || fromRate == toRate)
+            return input;
+        int outLen = (int)((long)input.Length * toRate / fromRate);
+        if (outLen <= 0)
+            return [];
+        var output = new float[outLen];
+        for (int i = 0; i < outLen; i++)
+        {
+            double at = i * (double)fromRate / toRate;
+            int i0 = (int)at;
+            int i1 = Math.Min(i0 + 1, input.Length - 1);
+            float frac = (float)(at - i0);
+            output[i] = input[i0] * (1 - frac) + input[i1] * frac;
+        }
+
+        return output;
     }
 
     private static void AppendLimited(List<float> recent, float[] fresh, int max)
@@ -1093,7 +1415,7 @@ public sealed class RadioSession(
     private const double WideFmListenGainDb = 12;
 
     private static bool EasedGain(RadioMode mode) =>
-        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Raw;
+        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Raw;
 
     private static void EaseWideFmGain(IRadioDevice device, RadioMode mode)
     {

@@ -163,7 +163,9 @@ public static class Region2BandPlan
         Band("dmr", "DMR", 145_200_000, 450_000_000,
             [
                 Seg("VHF DMR", 145_200_000, 145_500_000, RadioMode.Dmr),
-                Seg("UHF DMR", 440_000_000, 450_000_000, RadioMode.Dmr)
+                Seg("UHF DMR", 440_000_000, 450_000_000, RadioMode.Dmr),
+                Seg("VHF M17", 144_000_000, 148_000_000, RadioMode.M17),
+                Seg("UHF M17", 420_000_000, 450_000_000, RadioMode.M17)
             ])
     ];
 

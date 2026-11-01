@@ -18,4 +18,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Include="native\m17voice.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\m17voice.dll')" />
+  </ItemGroup>
+
 </Project>

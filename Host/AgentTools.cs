@@ -26,7 +26,7 @@ public sealed record AgentHistoryTurn(string? Role, string? Content);
 /// The radio actions an instruct model may request. They are the same actions as the buttons and the MCP tools.
 /// The model does not tune the radio itself. It names a tool, and this class runs it.
 /// </summary>
-public sealed class AgentTools(RadioSession session)
+public sealed class AgentTools(RadioSession session, CampBook camp)
 {
     public static readonly JsonArray Schema = JsonNode.Parse(
         """
@@ -43,14 +43,27 @@ public sealed class AgentTools(RadioSession session)
           {"type":"function","function":{"name":"scan_band","description":"Scan one band. bandId examples: 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, dmr.","parameters":{"type":"object","properties":{"bandId":{"type":"string"}},"required":["bandId"]}}},
           {"type":"function","function":{"name":"inspect_signal","description":"Measure one frequency in Hz.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"}},"required":["frequencyHz"]}}},
           {"type":"function","function":{"name":"listen","description":"Demodulate one frequency for a few seconds. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, or dmr. CW returns Morse. FT8 uses 15 seconds. AM, FM, and sideband return a speech transcript. DMR voice is not decoded.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"},"mode":{"type":"string"},"seconds":{"type":"number"}},"required":["frequencyHz"]}}},
-          {"type":"function","function":{"name":"stop","description":"Cancel the scan or listen in progress.","parameters":{"type":"object","properties":{}}}}
+          {"type":"function","function":{"name":"stop","description":"Cancel the scan or listen in progress. In camp mode this pauses the schedule until Listen or Camp is chosen again.","parameters":{"type":"object","properties":{}}}},
+          {"type":"function","function":{"name":"set_operating_mode","description":"Choose explore or camp. Explore scans and listens with the audio on. Camp tunes the schedule and keeps the audio off until the channel is active.","parameters":{"type":"object","properties":{"mode":{"type":"string","description":"explore or camp"}},"required":["mode"]}}},
+          {"type":"function","function":{"name":"get_schedule","description":"The camp schedule, the current mode, and which entry would use the radio now.","parameters":{"type":"object","properties":{}}}},
+          {"type":"function","function":{"name":"add_schedule_entry","description":"Add a camp entry. frequencyHz is hertz. mode is nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw. start and end are local HH:mm; omit both to listen whenever no timed entry is on. days is sun, mon, weekdays, weekends, or empty for every day. Overlapping times are rejected.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"},"mode":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"days":{"type":"string"},"label":{"type":"string"},"colorCode":{"type":"integer"},"slot":{"type":"integer"},"talkgroup":{"type":"integer"}},"required":["frequencyHz","mode"]}}},
+          {"type":"function","function":{"name":"update_schedule_entry","description":"Replace one schedule entry by id. Send the full entry. Omit start and end to make it an open watch. Overlaps are rejected.","parameters":{"type":"object","properties":{"id":{"type":"string"},"frequencyHz":{"type":"number"},"mode":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"days":{"type":"string"},"label":{"type":"string"},"colorCode":{"type":"integer"},"slot":{"type":"integer"},"talkgroup":{"type":"integer"}},"required":["id","frequencyHz","mode"]}}},
+          {"type":"function","function":{"name":"remove_schedule_entry","description":"Remove one schedule entry by id.","parameters":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}}},
+          {"type":"function","function":{"name":"camp_now","description":"Camp on this frequency and mode right away. The schedule is optional. Audio stays off until the channel is active.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"},"mode":{"type":"string"},"label":{"type":"string"},"colorCode":{"type":"integer"},"slot":{"type":"integer"},"talkgroup":{"type":"integer"}},"required":["frequencyHz","mode"]}}},
+          {"type":"function","function":{"name":"clear_camp_now","description":"Clear the frequency chosen with camp_now. Timed schedule entries stay.","parameters":{"type":"object","properties":{}}}},
+          {"type":"function","function":{"name":"set_schedule_policy","description":"While camping on an explicit frequency: yieldToSchedule true means a timed schedule entry takes the radio; false means stay on that frequency and ignore the schedule until asked otherwise.","parameters":{"type":"object","properties":{"yieldToSchedule":{"type":"boolean"}},"required":["yieldToSchedule"]}}},
+          {"type":"function","function":{"name":"follow_schedule","description":"While camping on an explicit frequency, switch to the timed schedule entry that is due right now. Returns when that window ends if camp_now is still set.","parameters":{"type":"object","properties":{}}}},
+          {"type":"function","function":{"name":"ignore_schedule","description":"While camping on an explicit frequency, keep that frequency through the timed schedule entry that is due right now.","parameters":{"type":"object","properties":{}}}}
         ]
         """)!.AsArray();
 
     public static bool Known(string name) =>
         name is "list_devices" or "open_device" or "close_device" or "get_status" or "get_capabilities"
             or "list_ham_bands" or "get_antenna" or "set_antenna" or "guess_antenna"
-            or "scan_band" or "inspect_signal" or "listen" or "stop";
+            or "scan_band" or "inspect_signal" or "listen" or "stop"
+            or "set_operating_mode" or "get_schedule" or "add_schedule_entry" or "update_schedule_entry"
+            or "remove_schedule_entry" or "camp_now" or "clear_camp_now"
+            or "set_schedule_policy" or "follow_schedule" or "ignore_schedule";
 
     public async Task<ToolOutcome> RunAsync(string name, string argumentsJson, CancellationToken cancellationToken)
     {
@@ -119,8 +132,61 @@ public sealed class AgentTools(RadioSession session)
                     return new ToolOutcome(Json(report), Summary: heard, ListenText: report.Text ?? report.Morse);
                 }
                 case "stop":
+                    if (camp.Mode == "camp")
+                        camp.Pause(DateTime.Now);
                     session.Stop();
-                    return Text(Json(session.Status), "Stopped.");
+                    return Text(Json(session.Status), camp.Mode == "camp" ? "Camp paused." : "Stopped.");
+                case "set_operating_mode":
+                    camp.SetMode(TextArg(args, "mode"));
+                    return Text(Json(camp.View(DateTime.Now)), camp.Mode == "camp" ? "Camp mode." : "Explore mode.");
+                case "get_schedule":
+                {
+                    CampView view = camp.View(DateTime.Now);
+                    return Text(Json(view), view.Entries.Count == 1 ? "1 schedule entry." : $"{view.Entries.Count} schedule entries.");
+                }
+                case "add_schedule_entry":
+                {
+                    CampEntry entry = camp.Add(Draft(args));
+                    return Text(Json(entry), $"Added {CampSchedule.Describe(entry)}.");
+                }
+                case "update_schedule_entry":
+                {
+                    string id = TextArg(args, "id") ?? "";
+                    CampEntry entry = camp.Update(id, Draft(args));
+                    return Text(Json(entry), $"Updated {CampSchedule.Describe(entry)}.");
+                }
+                case "remove_schedule_entry":
+                    camp.Remove(TextArg(args, "id") ?? "");
+                    return Text(Json(camp.View(DateTime.Now)), "Removed that schedule entry.");
+                case "camp_now":
+                {
+                    CampView view = camp.CampNow(Draft(args), DateTime.Now);
+                    return Text(Json(view), view.Note ?? "Camping on that frequency.");
+                }
+                case "clear_camp_now":
+                    camp.ClearNow();
+                    return Text(Json(camp.View(DateTime.Now)), "Cleared the camp-now frequency.");
+                case "set_schedule_policy":
+                {
+                    bool? yield = args["yieldToSchedule"] is JsonValue flag && flag.TryGetValue(out bool value) ? value : null;
+                    if (yield is null)
+                        throw new ArgumentException("Set yieldToSchedule to true or false.");
+                    camp.SetYieldToSchedule(yield.Value);
+                    CampView view = camp.View(DateTime.Now);
+                    return Text(Json(view), yield.Value
+                        ? "Scheduled times will take the radio."
+                        : "An explicit camp keeps the radio through scheduled times.");
+                }
+                case "follow_schedule":
+                {
+                    CampView view = camp.FollowSchedule(DateTime.Now);
+                    return Text(Json(view), view.Note ?? "Switched to the schedule.");
+                }
+                case "ignore_schedule":
+                {
+                    CampView view = camp.IgnoreSchedule(DateTime.Now);
+                    return Text(Json(view), view.Note ?? "Staying on the camp frequency.");
+                }
                 default:
                     return Text("""{"error":"Unknown tool."}""", "That tool is not available.");
             }
@@ -177,6 +243,19 @@ public sealed class AgentTools(RadioSession session)
             return number;
         throw new ArgumentException($"Missing {name}.");
     }
+
+    private static CampDraft Draft(JsonObject args) => new()
+    {
+        Label = TextArg(args, "label"),
+        FrequencyHz = Number(args, "frequencyHz"),
+        Mode = TextArg(args, "mode"),
+        Start = TextArg(args, "start"),
+        End = TextArg(args, "end"),
+        Days = CampSchedule.ParseDays(TextArg(args, "days")),
+        ColorCode = IntArg(args, "colorCode"),
+        Slot = IntArg(args, "slot"),
+        Talkgroup = IntArg(args, "talkgroup")
+    };
 
     private static double? NumberOrNull(JsonObject args, string name)
     {

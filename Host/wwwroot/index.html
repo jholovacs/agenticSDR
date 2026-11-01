@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic SDR</title>
-    <link rel="stylesheet" href="/app.css?v=14">
+    <link rel="stylesheet" href="/app.css?v=22">
 </head>
 <body>
   <header class="face">
@@ -13,6 +13,10 @@
       <div>
         <p class="eyebrow" data-tip="receive">Receive only</p>
         <h1>Agentic SDR</h1>
+        <div class="mode-switch" data-tip="operating-mode">
+          <button id="mode-explore" type="button" aria-pressed="true">Explore</button>
+          <button id="mode-camp" type="button" aria-pressed="false">Camp</button>
+        </div>
       </div>
     </div>
     <div class="identity">
@@ -121,11 +125,89 @@
         <option value="cw">CW</option>
         <option value="ft8">FT8</option>
         <option value="dmr">DMR</option>
+        <option value="m17">M17</option>
         <option value="raw">Raw</option>
       </select>
     </label>
-    <span data-tip="listen"><button id="listen" type="button">Listen</button></span>
     <span data-tip="noaa"><button id="noaa" type="button" class="ghost">NOAA check</button></span>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="schedule">
+    <summary data-tip="schedule"><span class="fold-title">Schedule</span><span id="schedule-summary" class="fold-aside"></span></summary>
+    <div class="fold-body">
+      <p class="fold-note">Optional. While you are in Camp, a due window can start camping on its own. Camp on a frequency with the Camp button, or leave that empty and rely on the schedule.</p>
+      <p id="schedule-note" class="antenna-note" hidden></p>
+      <form id="schedule-form" class="controls">
+        <label data-tip="schedule-label">Label
+          <input id="camp-label" maxlength="80" placeholder="NOAA">
+        </label>
+        <label class="freq" data-tip="schedule-freq">Frequency MHz
+          <input id="camp-mhz" inputmode="decimal" value="162.550000">
+        </label>
+        <label data-tip="schedule-mode">Mode
+          <select id="camp-mode">
+            <option value="nbfm">FMNB</option>
+            <option value="wbfm">FMWB</option>
+            <option value="am">AM</option>
+            <option value="usb">SSB USB</option>
+            <option value="lsb">SSB LSB</option>
+            <option value="cw">CW</option>
+            <option value="ft8">FT8</option>
+            <option value="dmr">DMR</option>
+            <option value="m17">M17</option>
+            <option value="raw">Raw</option>
+          </select>
+        </label>
+        <label data-tip="schedule-start">Start
+          <input id="camp-start" type="time">
+        </label>
+        <label data-tip="schedule-end">End
+          <input id="camp-end" type="time">
+        </label>
+        <fieldset class="day-row" data-tip="schedule-days">
+          <legend>Days</legend>
+          <label><input type="checkbox" value="0">Sun</label>
+          <label><input type="checkbox" value="1">Mon</label>
+          <label><input type="checkbox" value="2">Tue</label>
+          <label><input type="checkbox" value="3">Wed</label>
+          <label><input type="checkbox" value="4">Thu</label>
+          <label><input type="checkbox" value="5">Fri</label>
+          <label><input type="checkbox" value="6">Sat</label>
+        </fieldset>
+        <div id="camp-dmr" class="dmr-fields" hidden>
+          <label data-tip="dmr-color">Color code
+            <select id="camp-color"><option value="">Any</option></select>
+          </label>
+          <label data-tip="dmr-slot">Timeslot
+            <select id="camp-slot">
+              <option value="">Any</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </label>
+          <label data-tip="dmr-tg">Talkgroup
+            <input id="camp-tg" inputmode="numeric" placeholder="Any">
+          </label>
+        </div>
+        <span data-tip="schedule-save"><button id="camp-save" type="submit">Add to schedule</button></span>
+        <button id="camp-cancel" type="button" class="ghost" hidden>Cancel</button>
+      </form>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>MHz</th>
+              <th>Mode</th>
+              <th>Label</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="schedule-rows"></tbody>
+        </table>
+      </div>
+      <p id="schedule-empty" class="empty">Nothing scheduled.</p>
     </div>
   </details>
 
@@ -160,9 +242,15 @@
       <div class="fold-body">
       <p class="readout" id="readout">—</p>
       <p id="source" class="source"></p>
-      <div class="hear-row">
-        <label data-tip="hear">Hear as
+      <div class="controls selected-tune">
+        <label class="freq camp-only" data-tip="freq">Frequency MHz
+          <input id="camp-freq" inputmode="decimal" value="146.520000">
+        </label>
+        <label data-tip="hear">Mode
           <select id="listen-mode"></select>
+        </label>
+        <label data-tip="volume">Volume
+          <input id="volume" type="range" min="0" max="100" value="80">
         </label>
       </div>
       <div id="dmr-fields" class="dmr-fields" hidden>
@@ -183,8 +271,23 @@
         </label>
       </div>
       <p id="live-state" class="source" hidden>Playing as the signal arrives.</p>
-      <button id="live-stop" type="button" hidden>Stop</button>
-      <div class="signal-actions">
+      <p id="camp-now" class="source camp-only" hidden></p>
+      <label id="camp-policy-row" class="camp-only" data-tip="schedule-policy" hidden>When a scheduled time starts
+        <select id="camp-policy">
+          <option value="hold">Stay on this frequency</option>
+          <option value="yield">Switch to the schedule</option>
+        </select>
+      </label>
+      <div class="signal-actions camp-only" id="camp-actions" hidden>
+        <button id="camp-follow" type="button" class="ghost" hidden>Switch to schedule</button>
+        <button id="camp-ignore" type="button" class="ghost" hidden>Ignore schedule</button>
+        <button id="camp-clear" type="button" class="ghost">Clear camp</button>
+      </div>
+      <div class="signal-actions player-actions">
+        <span data-tip="listen" class="explore-only"><button id="listen" type="button">Listen</button></span>
+        <span data-tip="camp-go" class="camp-only"><button id="camp-go" type="button">Camp</button></span>
+        <span data-tip="camp-stop" class="camp-only"><button id="camp-stop" type="button" class="ghost" hidden>Stop camping</button></span>
+        <button id="live-stop" type="button" class="ghost explore-only" hidden>Stop</button>
         <span data-tip="record"><button id="record" type="button" disabled>Record</button></span>
         <span data-tip="transcript"><button id="record-transcript" type="button" class="ghost" disabled>Download Transcript</button></span>
       </div>
@@ -214,6 +317,6 @@
   </dialog>
 
   <script src="/lame.min.js?v=5"></script>
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=25"></script>
 </body>
 </html>

@@ -103,8 +103,9 @@ public static class ModeClassifier
             "ft8" => RadioMode.Ft8,
             "wbfm" or "wfm" or "fmwb" => RadioMode.Wbfm,
             "dmr" => RadioMode.Dmr,
+            "m17" => RadioMode.M17,
             "raw" => RadioMode.Raw,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, wbfm, dmr, or raw.")
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, wbfm, dmr, m17, or raw.")
         };
     }
 }

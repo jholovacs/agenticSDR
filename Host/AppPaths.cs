@@ -10,6 +10,21 @@ public static class AppPaths
 
     public static string ContentLlm(string contentRoot) => Path.Combine(contentRoot, "llm.json");
 
+    public static string UserSchedule()
+    {
+        string llm = UserLlm();
+        string? directory = Path.GetDirectoryName(llm);
+        return Path.Combine(directory ?? "", "schedule.json");
+    }
+
+    public static string SelectSchedule(string contentRoot)
+    {
+        string content = Path.Combine(contentRoot, "schedule.json");
+        if (File.Exists(content))
+            return content;
+        return UserSchedule();
+    }
+
     public static string UserLlm()
     {
         if (OperatingSystem.IsWindows())

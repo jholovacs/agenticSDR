@@ -32,6 +32,9 @@ public enum RadioMode
     /// <summary>DMR digital voice on VHF or UHF. The framing carries talkgroup, radio ID, and alias text. The voice codec is not turned into speech.</summary>
     Dmr,
 
+    /// <summary>M17 digital voice on VHF or UHF. Open Codec2 speech with callsigns in the link setup.</summary>
+    M17,
+
     /// <summary>Wide discriminator audio, without the voice filter or de-emphasis.</summary>
     Raw
 }

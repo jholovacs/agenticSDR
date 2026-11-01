@@ -1,10 +1,13 @@
 bin/
 obj/
-native/
+/native/
+Host/native/libcodec2.dll
+Host/native/m17.dll
 packaging/stage/
 packaging/out/
 *.user
 .vs/
 TestResults/
 llm.json
+schedule.json
 models/

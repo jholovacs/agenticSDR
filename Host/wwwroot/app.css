@@ -39,6 +39,18 @@ body {
 }
 
 .brand, .identity { display: flex; gap: 14px; align-items: center; }
+.brand { align-items: flex-start; }
+.mode-switch { display: flex; gap: 6px; margin-top: 8px; }
+.mode-switch button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.mode-switch button[aria-pressed="true"] {
+  background: var(--amber);
+  color: #2a1c0b;
+  border: 0;
+}
 .identity { flex-direction: column; align-items: flex-end; text-align: right; }
 
 .eyebrow, .identity p, .section-head p, .source, .empty {
@@ -156,8 +168,24 @@ button:disabled { opacity: 0.55; cursor: wait; pointer-events: none; }
 }
 .radio-details dt { color: var(--muted); }
 .radio-details dd { margin: 0; font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
-#live-stop { margin-top: 8px; }
 .signal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.selected-tune { margin-top: 10px; }
+body.workspace-camp [data-fold="model"],
+body.workspace-camp [data-fold="tune"],
+body.workspace-camp [data-fold="signals"],
+body.workspace-camp .explore-only { display: none !important; }
+body:not(.workspace-camp) [data-fold="schedule"],
+body:not(.workspace-camp) .camp-only { display: none !important; }
+body.workspace-camp span.camp-only { display: inline-flex; align-items: center; }
+body.workspace-camp p.camp-only { display: block; }
+body.workspace-camp label.freq.camp-only {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+body.workspace-camp #camp-actions.camp-only { display: flex; }
+body.workspace-camp .camp-only[hidden] { display: none !important; }
+body.workspace-camp label.camp-only { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; align-items: stretch; }
 #record.recording { background: var(--danger); color: #2a100c; }
 dialog {
   border: 1px solid var(--line);
@@ -234,7 +262,8 @@ dialog p { margin: 12px 0; color: var(--muted); }
 .fold[open] > summary .fold-aside { display: none; }
 .fold-note { margin: 0 0 12px; color: var(--muted); }
 .fold-body { padding: 0 16px 16px; }
-.fold > .controls {
+.fold > .controls,
+.fold-body > .controls {
   margin: 0;
   padding: 0 16px 16px;
   border: 0;
@@ -242,6 +271,7 @@ dialog p { margin: 12px 0; color: var(--muted); }
   background: transparent;
   border-radius: 0;
 }
+.fold-body > .controls { padding: 0 0 16px; }
 .section-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .hear-row, .dmr-fields {
   display: flex;
@@ -251,6 +281,21 @@ dialog p { margin: 12px 0; color: var(--muted); }
   margin: 0 0 12px;
 }
 .dmr-fields[hidden] { display: none; }
+#volume { width: 9rem; padding: 0; accent-color: var(--amber); }
+.day-row {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+.day-row legend { padding: 0; color: var(--muted); font-size: 0.82rem; }
+.day-row label { display: flex; gap: 4px; align-items: center; }
+tr.camp-on td { color: var(--green); }
+#camp-policy { min-width: 14rem; }
+#camp-actions { margin: 0 0 12px; }
 
 .table-wrap { overflow-x: auto; }
 

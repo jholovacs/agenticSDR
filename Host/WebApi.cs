@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Threading.Channels;
 using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
 
@@ -12,6 +14,131 @@ public static class WebApi
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/status", (RadioSession session) => session.Status);
+        app.MapGet("/api/camp", (CampBook camp) => camp.View(DateTime.Now));
+        app.MapPut("/api/camp/mode", (CampModeBody body, CampBook camp) =>
+        {
+            try
+            {
+                camp.SetMode(body.Mode);
+                return Results.Ok(camp.View(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPost("/api/camp/entries", (CampDraft body, CampBook camp) =>
+        {
+            try
+            {
+                camp.Add(body);
+                return Results.Ok(camp.View(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPut("/api/camp/entries/{id}", (string id, CampDraft body, CampBook camp) =>
+        {
+            try
+            {
+                camp.Update(id, body);
+                return Results.Ok(camp.View(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapDelete("/api/camp/entries/{id}", (string id, CampBook camp) =>
+        {
+            try
+            {
+                camp.Remove(id);
+                return Results.Ok(camp.View(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPost("/api/camp/now", (CampDraft body, CampBook camp) =>
+        {
+            try
+            {
+                return Results.Ok(camp.CampNow(body, DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapDelete("/api/camp/now", (CampBook camp) =>
+        {
+            camp.ClearNow();
+            return Results.Ok(camp.View(DateTime.Now));
+        });
+        app.MapPost("/api/camp/pause", (CampBook camp) =>
+        {
+            camp.Pause(DateTime.Now);
+            return Results.Ok(camp.View(DateTime.Now));
+        });
+        app.MapPut("/api/camp/policy", (CampPolicyBody body, CampBook camp) =>
+        {
+            camp.SetYieldToSchedule(body.YieldToSchedule);
+            return Results.Ok(camp.View(DateTime.Now));
+        });
+        app.MapPost("/api/camp/follow-schedule", (CampBook camp) =>
+        {
+            try
+            {
+                return Results.Ok(camp.FollowSchedule(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPost("/api/camp/ignore-schedule", (CampBook camp) =>
+        {
+            try
+            {
+                return Results.Ok(camp.IgnoreSchedule(DateTime.Now));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapGet("/api/camp/audio", async (HttpContext http, RadioSession session, CancellationToken ct) =>
+        {
+            if (!session.TryJoinCamp(out ChannelReader<byte[]>? reader, out int sampleRate, out CampTune? tune) || reader is null || tune is null)
+            {
+                http.Response.StatusCode = 404;
+                return;
+            }
+
+            http.Response.Headers["X-Audio-Rate"] = sampleRate.ToString(CultureInfo.InvariantCulture);
+            http.Response.Headers["X-Tune-Hz"] = tune.FrequencyHz.ToString(CultureInfo.InvariantCulture);
+            http.Response.Headers["X-Mode"] = tune.Mode;
+            http.Response.ContentType = "application/octet-stream";
+            http.Response.Headers.CacheControl = "no-store";
+            http.Response.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            await http.Response.StartAsync(ct);
+            try
+            {
+                await foreach (byte[] chunk in reader.ReadAllAsync(ct))
+                    await http.Response.Body.WriteAsync(chunk, ct);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                session.LeaveCamp(reader);
+            }
+        });
         app.MapGet("/api/devices", () =>
         {
             try
@@ -216,3 +343,7 @@ public sealed record InspectBody(double FrequencyHz);
 public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds);
 /// <summary>Body of POST /api/agent. Message is the question. History is earlier user and assistant sentences, not tool results.</summary>
 public sealed record AgentBody(string? Message, IReadOnlyList<AgentHistoryTurn>? History);
+/// <summary>Body of PUT /api/camp/mode. Mode is explore or camp.</summary>
+public sealed record CampModeBody(string? Mode);
+/// <summary>Body of PUT /api/camp/policy. When true, a timed schedule entry takes the radio from an explicit camp.</summary>
+public sealed record CampPolicyBody(bool YieldToSchedule);
