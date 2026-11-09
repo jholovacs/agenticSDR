@@ -42,6 +42,17 @@ public class BandPlanTests
     }
 
     [Fact]
+    public void Known_service_channels_list_cb_gmrs_and_noaa()
+    {
+        IReadOnlyList<KnownChannelGroup> groups = Region2BandPlan.KnownServiceChannels();
+        Assert.Equal(["cb", "gmrs", "noaa"], groups.Select(group => group.Id).ToArray());
+        Assert.Contains(groups.Single(group => group.Id == "cb").Channels, channel => channel.Label == "19 highway" && channel.FrequencyHz == 27_185_000 && channel.Mode == "am");
+        Assert.Contains(groups.Single(group => group.Id == "noaa").Channels, channel => channel.Label == "WX1" && channel.FrequencyHz == 162_550_000 && channel.Mode == "nbfm");
+        Assert.DoesNotContain(groups.Single(group => group.Id == "gmrs").Channels, channel => channel.Name.Contains("input", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(22, groups.Single(group => group.Id == "gmrs").Channels.Count);
+    }
+
+    [Fact]
     public void Two_meter_hops_cover_the_band()
     {
         var centers = HopPlanner.Centers(144_000_000, 148_000_000, RadioLimits.DefaultSampleRateHz, RadioLimits.HopStepHz);

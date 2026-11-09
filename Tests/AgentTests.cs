@@ -20,6 +20,18 @@ public class AgentTests
     }
 
     [Fact]
+    public void A_bare_ollama_host_is_normalized_to_the_v1_root()
+    {
+        Assert.Equal("http://10.10.26.10:11434/v1", LlmStore.NormalizeBase("http://10.10.26.10:11434"));
+        Assert.Equal("http://10.10.26.10:11434/v1", LlmStore.NormalizeBase("http://10.10.26.10:11434/"));
+        Assert.Equal("http://10.10.26.10:11434/v1", LlmStore.NormalizeBase("http://10.10.26.10:11434/v1"));
+        Assert.Equal("http://10.10.26.10:11434/v1", LlmStore.NormalizeBase("http://10.10.26.10:11434/api/tags"));
+        Assert.Equal(
+            "http://10.10.26.10:11434/api/tags",
+            new LlmSettings("http://10.10.26.10:11434/v1", "", "").OllamaTagsUrl);
+    }
+
+    [Fact]
     public void Saved_key_is_not_returned_to_the_page()
     {
         string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-llm-" + Guid.NewGuid().ToString("N") + ".json");
@@ -45,6 +57,17 @@ public class AgentTests
             if (File.Exists(path))
                 File.Delete(path);
         }
+    }
+
+    [Fact]
+    public async Task Listing_models_accepts_ollama_tags_when_openai_is_empty()
+    {
+        var script = new GetScriptHandler(
+            ("/v1/models", """{"object":"list","data":[]}"""),
+            ("/api/tags", """{"models":[{"name":"llama3.2:latest"},{"name":"qwen2.5:7b"}]}"""));
+        InstructAgent agent = Agent(script, "");
+        IReadOnlyList<string> names = await agent.ListModelsAsync(CancellationToken.None);
+        Assert.Equal(["llama3.2:latest", "qwen2.5:7b"], names);
     }
 
     [Fact]
@@ -93,7 +116,7 @@ public class AgentTests
         Assert.DoesNotContain("\"tools\"", script.Bodies[1]);
     }
 
-    private static InstructAgent Agent(ScriptHandler script, string apiKey)
+    private static InstructAgent Agent(HttpMessageHandler script, string apiKey)
     {
         string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-llm-" + Guid.NewGuid().ToString("N") + ".json");
         var store = new LlmStore(path);
@@ -131,12 +154,37 @@ public class AgentTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Authorization = request.Headers.Authorization?.ToString();
-            Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            Bodies.Add(request.Content is null
+                ? ""
+                : await request.Content.ReadAsStringAsync(cancellationToken));
             (HttpStatusCode status, string body) = _responses.Dequeue();
             return new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
             };
+        }
+    }
+
+    private sealed class GetScriptHandler(params (string Path, string Body)[] routes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string path = request.RequestUri?.AbsolutePath ?? "";
+            foreach ((string expected, string body) in routes)
+            {
+                if (path.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(body, Encoding.UTF8, "application/json")
+                    });
+                }
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("missing", Encoding.UTF8, "text/plain")
+            });
         }
     }
 }

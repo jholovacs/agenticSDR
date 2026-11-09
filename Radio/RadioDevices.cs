@@ -124,6 +124,7 @@ public static class RadioDevices
         if (string.IsNullOrWhiteSpace(candidate.Serial) || string.IsNullOrWhiteSpace(existing.Serial))
             return false;
         return existing.Serial.Equals(candidate.Serial, StringComparison.OrdinalIgnoreCase)
-            && existing.Driver.Equals(candidate.Driver, StringComparison.OrdinalIgnoreCase);
+            && existing.Driver.Equals(candidate.Driver, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(existing.OpenArgs, candidate.OpenArgs, StringComparison.OrdinalIgnoreCase);
     }
 }

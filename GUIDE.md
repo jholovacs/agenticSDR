@@ -2,20 +2,31 @@
 
 This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, and speech are also written out as text.
 
-You and an AI share one radio. The web page at http://127.0.0.1:5088, an instruct model you configure, and the tools in Cursor talk to the same session. Only one of them can tune or listen at a time, because a USB radio has one input.
+You and an AI share one radio. The web page at http://127.0.0.1:5088, an instruct model you configure, and the tools in Cursor or Antigravity talk to the same session. Only one of them can tune or listen at a time, because a USB radio has one input.
 
 If a word in the page or the code is unfamiliar, it is defined below. The same definitions are on the page under **What these words mean**.
 
 ## What you do
 
-1. Start the host with `dotnet run --project Host` and open http://127.0.0.1:5088.
+1. Start the host. On Windows you can double-click **start** in the project folder; that starts the program in the background and opens the page. Or run `dotnet run --project Host` and open http://127.0.0.1:5088 yourself.
 2. Choose the USB radio in the **Radio** list and press **Start radio**. The light beside the title turns green. **Stop radio** closes it and frees the USB port. **Stop** cancels a scan or the live audio; the radio stays open.
 3. Enter the antenna, or press **Guess from signals**. Length can be meters or feet. **Vertical** means the wire stands up. **Horizontal** means the wire runs sideways, and **axis toward ° true** is the compass direction one end points. 0° is true north, 90° is east, 180° is south, 270° is west. A guess listens at several spots and takes the strongest part of the dial as the antenna’s natural frequency. The receiver’s own noise at the bottom of the dial, and a broadcast band full of stations, are left out of that choice. A vertical is a quarter of that wave. A horizontal wire would be twice as long. Strength does not show which way the wire points, so a close guess is called vertical and you can correct it.
 4. Press **Use this antenna**. Bands the antenna can hear move to the top and are marked **best**. The closest match is selected for you.
-5. Press **Scan band**. The table fills with strong signals.
-6. Press **Listen** on a row, or type a frequency yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop** beside the playing line. The same **Stop** next to **Scan band** ends a scan. Morse text updates about once a second. FT8 still gathers one 15-second turn, then prints messages while the next turn plays.
+5. Confirm the radio hears something with a **known channel** before you learn to scan (next section).
+6. Press **Scan band**. The table fills with strong signals.
+7. Press **Listen** on a row, or type a frequency yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop** beside the playing line. The same **Stop** next to **Scan band** ends a scan. Morse text updates about once a second. FT8 still gathers one 15-second turn, then prints messages while the next turn plays.
 
-**NOAA check** jumps to 162.550 MHz, a US weather-radio channel, so you can confirm the radio hears something without scanning a whole band.
+### First listen: Known channels
+
+A new SDR often arrives with a short whip. That whip is a poor match for many amateur bands, but it can still hear strong local services. Under **Scan and listen**, open **Known channels**. You get three lists you can expand:
+
+- **NOAA weather** — seven US weather-radio channels (WX1–WX7). These are almost always on the air. Click any one. The page tunes narrow FM and plays the audio. If you hear a clear voice reading the weather, the radio, antenna, speakers, and this program are working.
+- **CB** — forty Citizens Band channels near 27 MHz. Channel **9** is the emergency channel; **19** is the highway channel. Mode is AM. You may hear truckers or nothing at all; silence on CB is normal, and is not a failure of the radio.
+- **GMRS** — twenty-two General Mobile Radio Service channels near 462 MHz. Mode is narrow FM. Walkie-talkies and neighborhood repeaters use these. Again, a quiet channel is fine.
+
+Click a channel once. The frequency and mode fill in, and listening starts. Press **Stop** when you are done. **NOAA check** is a one-button shortcut to WX1 (162.550 MHz) if you only want that quick test.
+
+You need an antenna that can hear the channel’s band. NOAA and GMRS are VHF/UHF and suit a short vertical whip. CB is near 27 MHz; a short whip is weak there, so do not judge the whole radio by a silent CB channel. Direct sampling below 24 MHz needs an HF antenna for other bands; CB itself is just above that line and still uses the tuner on a typical RTL-SDR.
 
 The **Prompt** box is where you tell the agent what to do, in your own words. “Scan 2 m and tell me what you hear” is a prompt. Enter sends it. Shift+Enter starts a new line. The exchange stays on the page. **Send** gives that prompt to an instruct model that speaks the OpenAI chat protocol. The **endpoint** is a web address ending in `/v1`, such as `https://api.openai.com/v1` or a local server like `http://127.0.0.1:11434/v1`. The **model** is the name that server expects. The **API key** is stored in `Host/llm.json` on this computer, is not shown again, and is sent only to that endpoint. **List models** asks the endpoint which names it offers. The model can request the same actions as the buttons. This program runs the action and hands the result back. **Stop** cancels that work. The model only receives.
 
@@ -53,7 +64,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 | --- | --- |
 | Which USB radio is open | `RadioDevices`, `RtlSdrDevice`, `SoapyDevice`, behind `IRadioDevice` |
 | Antenna length and direction | `AntennaPlan` |
-| Band names, calling frequencies, NOAA, CB, GMRS, DMR, AM, and FM | `Region2BandPlan` |
+| Band names, calling frequencies, NOAA, CB, GMRS, DMR, AM, and FM | `Region2BandPlan` (Known channels: `KnownServiceChannels`) |
 | The shared radio, scan, and listen | `RadioSession` |
 | Finding peaks | `PeakPicker` and `SpectrumAnalyzer` |
 | Guessing the mode | `ModeClassifier` |
@@ -108,11 +119,13 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 **FM broadcast.** Ordinary FM radio, 88–108 MHz. Each station is about 200 kHz wide, much wider than amateur FM. The mode is WBFM.
 
-**NOAA weather.** Seven US weather-radio channels from 162.400 to 162.550 MHz. They use narrow FM. The channels are named WX1 through WX7.
+**Known channels.** The expandable list under **Scan and listen** with fixed CB, GMRS, and NOAA weather frequencies. Click a channel to tune and listen without scanning. The same frequencies live in `Region2BandPlan` and are served by `/api/channels`.
 
-**CB.** Citizens Band. Forty channels from 26.965 to 27.405 MHz. Most traffic is AM or narrow FM. Channel 9 is the emergency channel and channel 19 is the highway channel. This program only receives. The band is listed when the open radio can tune near 27 MHz.
+**NOAA weather.** Seven US weather-radio channels from 162.400 to 162.550 MHz. They use narrow FM. The channels are named WX1 through WX7. They appear under **Known channels** and as the **noaa** band for scanning. **NOAA check** tunes WX1.
 
-**GMRS.** General Mobile Radio Service. Narrow FM channels near 462 MHz, and the repeater inputs 5 MHz higher, near 467 MHz. This program only receives. The band is listed when the radio can tune there.
+**CB.** Citizens Band. Forty channels from 26.965 to 27.405 MHz. This program receives them as AM. Channel 9 is the emergency channel and channel 19 is the highway channel. All forty are under **Known channels**. This program only receives. The band is listed when the open radio can tune near 27 MHz.
+
+**GMRS.** General Mobile Radio Service. Narrow FM channels near 462 MHz (channels 1–22 on the page). Repeaters also have inputs 5 MHz higher, near 467 MHz; those inputs are not listed in **Known channels**, but a scan of the **gmrs** band can still find them. This program only receives. The band is listed when the radio can tune there.
 
 **DMR.** Digital Mobile Radio on parts of 2 m (145.2–145.5 MHz) and 70 cm (440–450 MHz). A scan keeps a hit only when a published framing word is present. The words use a proprietary voice codec, so they are not decoded. Listening plays the digital signal and says that the words were not read. This program only receives.
 

@@ -39,7 +39,7 @@ public sealed class Demodulator
     /// </summary>
     public static double ChannelCutoffHz(RadioMode mode) => mode switch
     {
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 => 8_000,
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet => 8_000,
         RadioMode.Am => 5_000,
         RadioMode.Usb or RadioMode.Lsb => 4_000,
         RadioMode.Cw => 1_200,
@@ -240,6 +240,7 @@ public sealed class Demodulator
         {
             RadioMode.Cw => MorseDecoder.Decode(audio, rate),
             RadioMode.Ft8 => Ft8Decoder.Format(Ft8Decoder.Decode(audio, rate)),
+            RadioMode.Packet => PacketDecoder.Decode(audio, rate),
             _ => null
         };
         if (normalize)

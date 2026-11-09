@@ -118,6 +118,35 @@ public class CampTests
     }
 
     [Fact]
+    public void Packet_mode_is_supported_in_camp_entries_and_camp_now()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-camp-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var book = new CampBook(path);
+            book.SetMode("camp");
+            CampEntry packetEntry = book.Add(Draft(144_390_000, "packet", "08:00", "12:00", "APRS watch"));
+            Assert.Equal("packet", packetEntry.Mode);
+            Assert.Equal(144_390_000, packetEntry.FrequencyHz);
+
+            var time = new DateTime(2026, 11, 2, 9, 30, 0);
+            CampRequest? desired = book.Desired(time);
+            Assert.NotNull(desired);
+            Assert.Equal("packet", desired.Mode);
+            Assert.Equal(144_390_000, desired.FrequencyHz);
+
+            CampView view = book.CampNow(Draft(144_390_000, "ax25", null, null, "Live APRS"), time);
+            Assert.Equal("camp", view.Mode);
+            Assert.Equal("packet", book.Desired(time)!.Mode);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void A_tone_on_the_station_is_activity_and_noise_is_not()
     {
         const double rate = 48_000;

@@ -135,6 +135,28 @@ button:disabled { opacity: 0.55; cursor: wait; pointer-events: none; }
 
 .antenna, .model { margin-bottom: 12px; }
 #radio, #llm-base, #llm-model { min-width: 16rem; }
+.llm-picks {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 0;
+}
+.llm-picks[hidden] { display: none !important; }
+.llm-picks button {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #2a241d;
+  color: var(--ink);
+  cursor: pointer;
+}
+.llm-picks button:hover { border-color: var(--amber); }
+.llm-picks button.active {
+  border-color: var(--amber);
+  background: #3a3228;
+}
 .prompt-pane { margin: 0 20px 12px; }
 .prompt-log {
   min-height: 9rem;
@@ -261,6 +283,52 @@ dialog p { margin: 12px 0; color: var(--muted); }
 }
 .fold[open] > summary .fold-aside { display: none; }
 .fold-note { margin: 0 0 12px; color: var(--muted); }
+.known-channels {
+  margin: 0 16px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.known-channels > summary,
+.known-group > summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.known-channels > summary::-webkit-details-marker,
+.known-group > summary::-webkit-details-marker { display: none; }
+.known-channels > summary::marker,
+.known-group > summary::marker { content: ""; }
+.known-channels > summary::before,
+.known-group > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.38rem;
+  height: 0.38rem;
+  margin-right: 8px;
+  border-right: 2px solid var(--amber);
+  border-bottom: 2px solid var(--amber);
+  transform: translateY(-0.1rem) rotate(-45deg);
+}
+.known-channels[open] > summary::before,
+.known-group[open] > summary::before {
+  transform: translateY(0.05rem) rotate(45deg);
+}
+.known-channels > .fold-note { margin-top: 4px; }
+.known-group { margin: 4px 0 8px; }
+.channel-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 8px 1.1rem;
+}
+.channel-grid .channel-tune {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
 .fold-body { padding: 0 16px 16px; }
 .fold > .controls,
 .fold-body > .controls {
@@ -364,6 +432,7 @@ pre {
 }
 
 pre .morse { color: var(--amber); }
+pre .packet { color: #38bdf8; }
 pre .speech, pre .ft8, pre .note { color: var(--green); }
 
 .empty { margin-top: 12px; }

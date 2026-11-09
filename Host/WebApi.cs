@@ -190,6 +190,7 @@ public static class WebApi
             }
         });
         app.MapGet("/api/bands", (RadioSession session) => session.ListBands());
+        app.MapGet("/api/channels", () => Region2BandPlan.KnownServiceChannels());
         app.MapGet("/api/antenna", (RadioSession session) => session.Antenna());
         app.MapPost("/api/antenna/guess", async (RadioSession session, CancellationToken ct) =>
             await Run(() => session.GuessAntennaAsync(ct)));

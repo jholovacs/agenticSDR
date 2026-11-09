@@ -197,6 +197,7 @@ public static class CampSchedule
         RadioMode.Ft8 => "ft8",
         RadioMode.Dmr => "dmr",
         RadioMode.M17 => "m17",
+        RadioMode.Packet => "packet",
         RadioMode.Raw => "raw",
         _ => "nbfm"
     };

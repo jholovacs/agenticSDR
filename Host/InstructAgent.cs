@@ -17,10 +17,36 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
     {
         LlmSettings settings = Require(store.Read(), needModel: false);
-        using var request = new HttpRequestMessage(HttpMethod.Get, settings.ModelsUrl);
-        Authorize(request, settings);
-        string body = await SendAsync(request, cancellationToken);
-        return ParseModelIds(body);
+        InvalidOperationException? openaiError = null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, settings.ModelsUrl);
+            Authorize(request, settings);
+            string body = await SendAsync(request, cancellationToken);
+            IReadOnlyList<string> names = ParseModelIds(body);
+            if (names.Count > 0)
+                return names;
+        }
+        catch (InvalidOperationException ex)
+        {
+            openaiError = ex;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, settings.OllamaTagsUrl);
+            Authorize(request, settings);
+            string body = await SendAsync(request, cancellationToken);
+            IReadOnlyList<string> names = ParseModelIds(body);
+            if (names.Count > 0)
+                return names;
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw openaiError ?? ex;
+        }
+
+        return [];
     }
 
     public async Task<AgentReply> AskAsync(string? message, IReadOnlyList<AgentHistoryTurn>? history, CancellationToken cancellationToken)
@@ -252,12 +278,21 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 throw new InvalidOperationException("The endpoint refused the API key.");
             if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"The model endpoint returned {(int)response.StatusCode}.");
+            {
+                string detail = body.Trim();
+                if (detail.Length > 160)
+                    detail = detail[..160].Trim() + "…";
+                throw new InvalidOperationException(
+                    string.IsNullOrWhiteSpace(detail)
+                        ? $"The model endpoint returned {(int)response.StatusCode}."
+                        : $"The model endpoint returned {(int)response.StatusCode}: {detail}");
+            }
             return body;
         }
         catch (HttpRequestException)
         {
-            throw new InvalidOperationException("The model endpoint did not answer. Check the base URL.");
+            throw new InvalidOperationException(
+                $"The model endpoint did not answer ({request.RequestUri}). Check the address and that this computer can reach it.");
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -277,14 +312,19 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
             throw new InvalidOperationException("The model endpoint did not return a model list.");
         }
 
-        JsonArray? data = root as JsonArray ?? root?["data"] as JsonArray;
+        JsonArray? data = root as JsonArray
+            ?? root?["data"] as JsonArray
+            ?? root?["models"] as JsonArray;
         if (data is null)
             return [];
         var names = new List<string>();
         foreach (JsonNode? item in data)
         {
-            string? id = item?["id"]?.GetValue<string>() ?? item?.GetValue<string>();
-            if (!string.IsNullOrWhiteSpace(id))
+            string? id = item?["id"]?.GetValue<string>()
+                ?? item?["name"]?.GetValue<string>()
+                ?? item?["model"]?.GetValue<string>()
+                ?? item?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(id) && !names.Contains(id, StringComparer.Ordinal))
                 names.Add(id);
         }
 
@@ -294,9 +334,9 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
     private static LlmSettings Require(LlmSettings settings, bool needModel)
     {
         if (string.IsNullOrWhiteSpace(settings.BaseUrl))
-            throw new InvalidOperationException("Save an endpoint first. It is the address ending in /v1.");
+            throw new InvalidOperationException("Save an endpoint first. For Ollama that is http://host:11434 or …/v1.");
         if (needModel && string.IsNullOrWhiteSpace(settings.Model))
-            throw new InvalidOperationException("Type the model name the endpoint expects.");
+            throw new InvalidOperationException("Type the model name the endpoint expects, or list models and pick one.");
         return settings;
     }
 

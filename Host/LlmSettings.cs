@@ -4,12 +4,25 @@ namespace AgenticSdr.Host;
 
 /// <summary>
 /// An OpenAI-compatible instruct model. BaseUrl is the address that ends in /v1.
+/// A bare host like http://host:11434 is normalized to …/v1 for Ollama and similar servers.
 /// ApiKey is sent only to that address, as a bearer token. Model is the name the server expects.
 /// </summary>
 public sealed record LlmSettings(string BaseUrl, string Model, string ApiKey)
 {
     public string ChatUrl => $"{BaseUrl}/chat/completions";
     public string ModelsUrl => $"{BaseUrl}/models";
+
+    /// <summary>Ollama's native model list, one path above the OpenAI /v1 root.</summary>
+    public string OllamaTagsUrl
+    {
+        get
+        {
+            string root = BaseUrl;
+            if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                root = root[..^3];
+            return $"{root.TrimEnd('/')}/api/tags";
+        }
+    }
 }
 
 /// <summary>
@@ -99,10 +112,19 @@ public sealed class LlmStore(string path)
         const string chat = "/chat/completions";
         if (url.EndsWith(chat, StringComparison.OrdinalIgnoreCase))
             url = url[..^chat.Length].TrimEnd('/');
+        if (url.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+            url = url[..^"/models".Length].TrimEnd('/');
+        if (url.EndsWith("/api/tags", StringComparison.OrdinalIgnoreCase))
+            url = url[..^"/api/tags".Length].TrimEnd('/');
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed) ||
             parsed.Scheme is not ("http" or "https") ||
             !string.IsNullOrEmpty(parsed.UserInfo))
-            throw new ArgumentException("The endpoint must be an http or https address, usually ending in /v1. Put the key in the API key field.");
+            throw new ArgumentException("The endpoint must be an http or https address. For Ollama use http://host:11434 or …/v1. Put any key in the API key field.");
+
+        // Bare Ollama (and similar) roots need the OpenAI /v1 path.
+        string path = parsed.AbsolutePath.TrimEnd('/');
+        if (path.Length == 0)
+            url += "/v1";
         return url;
     }
 

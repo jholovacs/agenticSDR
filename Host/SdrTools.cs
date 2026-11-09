@@ -73,10 +73,10 @@ public sealed class SdrTools(RadioSession session, CampBook camp)
         CancellationToken cancellationToken = default) =>
         Guard(() => session.InspectAsync(frequencyHz, cancellationToken));
 
-    [McpServerTool, Description("Demodulate a frequency for a fixed number of seconds and return a WAV clip. The web page instead plays the same demodulator live until Stop. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, or dmr. CW returns Morse text. FT8 waits for a 15-second slot and returns decoded messages. Voice modes return a speech transcript.")]
+    [McpServerTool, Description("Demodulate a frequency for a fixed number of seconds and return a WAV clip. The web page instead plays the same demodulator live until Stop. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or packet. CW returns Morse text. FT8 returns decoded messages. Packet returns AX.25 / APRS frames. Voice modes return a speech transcript.")]
     public Task<ListenReport> listen(
         [Description("Frequency in Hz.")] double frequencyHz,
-        [Description("auto, nbfm, wbfm, am, usb, lsb, cw, ft8, or dmr.")] string mode = "auto",
+        [Description("auto, nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or packet.")] string mode = "auto",
         [Description("Clip length in seconds, from 1 to 20. FT8 always uses one 15-second slot.")] double seconds = 10,
         CancellationToken cancellationToken = default) =>
         Guard(() => session.ListenAsync(frequencyHz, mode, seconds, cancellationToken));
@@ -107,7 +107,7 @@ public sealed class SdrTools(RadioSession session, CampBook camp)
     [McpServerTool, Description("Add a camp entry. Times are local HH:mm. Omit both to listen whenever no timed entry is on. Overlapping times are rejected. Only one open entry is allowed.")]
     public Task<CampEntry> add_schedule_entry(
         [Description("Frequency in Hz.")] double frequencyHz,
-        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, packet, or raw.")] string mode,
         [Description("Local start HH:mm. Omit with end for an open watch.")] string? start = null,
         [Description("Local end HH:mm. An earlier end runs past midnight.")] string? end = null,
         [Description("sun, mon, tue, wed, thu, fri, sat, weekdays, weekends, or empty for every day.")] string? days = null,
@@ -133,7 +133,7 @@ public sealed class SdrTools(RadioSession session, CampBook camp)
     public Task<CampEntry> update_schedule_entry(
         [Description("Entry id from get_schedule.")] string id,
         [Description("Frequency in Hz.")] double frequencyHz,
-        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, packet, or raw.")] string mode,
         [Description("Local start HH:mm, or omit with end for an open watch.")] string? start = null,
         [Description("Local end HH:mm.")] string? end = null,
         [Description("Days, or empty for every day.")] string? days = null,
@@ -168,7 +168,7 @@ public sealed class SdrTools(RadioSession session, CampBook camp)
     [McpServerTool, Description("Camp on this frequency and mode right away. The schedule is optional. Audio stays off until the channel is active.")]
     public Task<CampView> camp_now(
         [Description("Frequency in Hz.")] double frequencyHz,
-        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or raw.")] string mode,
+        [Description("nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, packet, or raw.")] string mode,
         [Description("Short name, optional.")] string? label = null,
         [Description("DMR color code 0-15, or omit for any.")] int? colorCode = null,
         [Description("DMR timeslot 1 or 2, or omit for any.")] int? slot = null,

@@ -28,7 +28,7 @@ public static class LimePlan
 
         if (usable.All(port => port.MaximumHz <= port.MinimumHz))
         {
-            foreach (string name in new[] { "LNAL", "LNAW", "LNAH" })
+            foreach (string name in new[] { "LNAW", "LNAL", "LNAH" })
             {
                 Port match = usable.FirstOrDefault(port => port.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
                 if (!string.IsNullOrEmpty(match.Name))

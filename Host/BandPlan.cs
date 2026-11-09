@@ -8,6 +8,12 @@ namespace AgenticSdr.Host;
 /// </summary>
 public sealed record CallingChannel(string Name, double FrequencyHz, RadioMode Mode, double ToleranceHz);
 
+/// <summary>One CB, GMRS, or NOAA weather channel the page can tune with a click.</summary>
+public sealed record KnownChannel(string Name, string Label, double FrequencyHz, string Mode);
+
+/// <summary>A named list of fixed service channels under Scan and listen.</summary>
+public sealed record KnownChannelGroup(string Id, string Name, IReadOnlyList<KnownChannel> Channels);
+
 /// <summary>A slice of a band with one usual mode, such as "2 m CW" or "FM broadcast".</summary>
 public sealed record BandSegment(string Name, double StartHz, double EndHz, RadioMode PreferredMode);
 
@@ -103,6 +109,7 @@ public static class Region2BandPlan
             [
                 Call("2 m FT8", 144_174_000, RadioMode.Ft8, 3_600),
                 Call("2 m SSB calling", 144_200_000, RadioMode.Usb, 3_000),
+                Call("2 m APRS packet", 144_390_000, RadioMode.Packet, 7_500),
                 Call("2 m national FM simplex calling", 146_520_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("1.25m", "1.25 m", 222_000_000, 225_000_000,
@@ -191,6 +198,46 @@ public static class Region2BandPlan
         if (string.IsNullOrWhiteSpace(bandId))
             return null;
         return Bands.FirstOrDefault(b => b.Id.Equals(bandId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>CB, GMRS, and NOAA weather channel lists for the Known channels panel.</summary>
+    public static IReadOnlyList<KnownChannelGroup> KnownServiceChannels()
+    {
+        string[] ids = ["cb", "gmrs", "noaa"];
+        var groups = new List<KnownChannelGroup>();
+        foreach (string id in ids)
+        {
+            HamBand? band = Find(id);
+            if (band is null || band.Calling.Length == 0)
+                continue;
+            var channels = new List<KnownChannel>();
+            foreach (CallingChannel channel in band.Calling)
+            {
+                if (id == "gmrs" && channel.Name.EndsWith(" input", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                channels.Add(new KnownChannel(
+                    channel.Name,
+                    ShortChannelLabel(id, channel.Name),
+                    channel.FrequencyHz,
+                    channel.Mode.ToString().ToLowerInvariant()));
+            }
+
+            if (channels.Count > 0)
+                groups.Add(new KnownChannelGroup(band.Id, band.Name, channels));
+        }
+
+        return groups;
+    }
+
+    private static string ShortChannelLabel(string bandId, string name)
+    {
+        if (bandId == "noaa" && name.StartsWith("NOAA ", StringComparison.OrdinalIgnoreCase))
+            return name["NOAA ".Length..];
+        if (bandId == "cb" && name.StartsWith("CB ", StringComparison.OrdinalIgnoreCase))
+            return name["CB ".Length..];
+        if (bandId == "gmrs" && name.StartsWith("GMRS ", StringComparison.OrdinalIgnoreCase))
+            return name["GMRS ".Length..];
+        return name;
     }
 
     public static BandHint HintAt(double frequencyHz)

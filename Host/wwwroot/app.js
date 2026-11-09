@@ -84,7 +84,7 @@ function setBusy(value) {
     if (button.closest("dialog")) return;
     if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop" || button.id === "camp-stop") return;
     if (button.id === "record" || button.id === "record-transcript" || button.classList.contains("row-listen")) return;
-    if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa")) return;
+    if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa" || button.classList.contains("channel-tune"))) return;
     button.disabled = value;
   });
   applyRadioControls();
@@ -104,6 +104,9 @@ function applyRadioControls() {
   document.querySelector("#listen").disabled = !deviceOpen || (busy && !live);
   document.querySelector("#camp-go").disabled = !deviceOpen || (busy && !live);
   document.querySelector("#noaa").disabled = !deviceOpen || (busy && !live);
+  document.querySelectorAll(".channel-tune").forEach((button) => {
+    button.disabled = !deviceOpen || (busy && !live);
+  });
   document.querySelector("#stop").disabled = operatingRadio || !busy;
 }
 
@@ -215,6 +218,7 @@ let transcriptKey = "";
 function transcriptSource(kind) {
   if (kind === "morse") return "Morse decoder";
   if (kind === "ft8") return "FT8 decoder";
+  if (kind === "packet") return "Packet / APRS";
   if (kind === "speech") return "speech to text";
   if (kind === "note") return "receiver note";
   return kind || "receiver";
@@ -254,14 +258,14 @@ function renderTranscript(spans) {
   updateTranscriptButton();
   morse.replaceChildren();
   if (spans.length === 0) {
-    morse.textContent = "Morse, FT8, and speech appear here.";
+    morse.textContent = "Morse, FT8, packet, and speech appear here.";
     return;
   }
 
   spans.forEach((span, index) => {
     if (index > 0) morse.append("\n");
     const line = document.createElement("span");
-    line.className = span.kind === "morse" ? "morse" : "speech";
+    line.className = span.kind === "morse" ? "morse" : span.kind === "packet" ? "packet" : "speech";
     line.textContent = span.text;
     morse.append(line);
   });
@@ -319,6 +323,52 @@ async function loadBands() {
   const fallback = bands.find((item) => item.id === "2m" && item.tunable) || bands.find((item) => item.tunable);
   band.value = (preferred || keep || fallback)?.id || "";
   paintFoldSummaries();
+}
+
+async function loadKnownChannels() {
+  const groups = await api("/api/channels");
+  const root = document.querySelector("#known-channel-groups");
+  if (!root) return;
+  root.innerHTML = "";
+  for (const group of groups || []) {
+    const block = document.createElement("details");
+    block.className = "known-group";
+    const summary = document.createElement("summary");
+    summary.textContent = `${group.name} · ${group.channels.length}`;
+    const grid = document.createElement("div");
+    grid.className = "channel-grid";
+    for (const channel of group.channels) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "channel-tune ghost";
+      button.title = `${channel.name} · ${mhzText(channel.frequencyHz)} MHz`;
+      button.textContent = `${channel.label} · ${compactNumber(channel.frequencyHz / 1e6, 4)}`;
+      button.addEventListener("click", () => {
+        tuneKnownChannel(channel.frequencyHz, channel.mode, group.id).catch((ex) => showError(ex.message));
+      });
+      grid.append(button);
+    }
+    block.append(summary, grid);
+    root.append(block);
+  }
+  applyRadioControls();
+}
+
+async function tuneKnownChannel(frequencyHz, heard, bandId) {
+  showError("");
+  syncTuneFrequency(mhzText(frequencyHz));
+  if ([...band.options].some((option) => option.value === bandId))
+    band.value = bandId;
+  if ([...mode.options].some((option) => option.value === heard))
+    mode.value = heard;
+  suggestedMode = heard;
+  fillHearModes();
+  const hear = document.querySelector("#listen-mode");
+  if ([...hear.options].some((option) => option.value === heard))
+    hear.value = heard;
+  syncDmrFields();
+  paintFoldSummaries();
+  await listen(heard);
 }
 
 function compactNumber(value, places) {
@@ -531,7 +581,8 @@ function modeToken(value) {
     cw: "CW",
     ft8: "FT8",
     dmr: "DMR",
-    m17: "M17"
+    m17: "M17",
+    packet: "PKT"
   };
   return names[String(value || "").toLowerCase()] || "Audio";
 }
@@ -741,7 +792,8 @@ const hearModes = [
   ["cw", "CW"],
   ["ft8", "FT8"],
   ["dmr", "DMR"],
-  ["m17", "M17"]
+  ["m17", "M17"],
+  ["packet", "Packet (AX.25)"]
 ];
 let suggestedMode = "nbfm";
 let listeningDmrKey = "";
@@ -1326,6 +1378,7 @@ document.querySelector("#noaa").addEventListener("click", () => {
 
 restoreAntenna()
   .then(loadBands)
+  .then(loadKnownChannels)
   .then(loadRadios)
   .then(loadModel)
   .catch((ex) => showError(ex.message));
@@ -1368,18 +1421,40 @@ async function saveModel(clearKey) {
 
 async function listModels() {
   showError("");
+  await saveModel(false);
   const listed = await api("/api/llm/models");
+  const names = listed || [];
   const datalist = document.querySelector("#llm-models");
+  const picks = document.querySelector("#llm-model-picks");
+  const modelInput = document.querySelector("#llm-model");
   datalist.innerHTML = "";
-  for (const name of listed || []) {
+  picks.innerHTML = "";
+  picks.hidden = names.length === 0;
+  for (const name of names) {
     const option = document.createElement("option");
     option.value = name;
     datalist.append(option);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = name;
+    button.classList.toggle("active", modelInput.value === name);
+    button.addEventListener("click", () => {
+      modelInput.value = name;
+      for (const peer of picks.querySelectorAll("button"))
+        peer.classList.toggle("active", peer === button);
+      saveModel(false).catch((ex) => showError(ex.message));
+    });
+    picks.append(button);
   }
-  const count = (listed || []).length;
-  document.querySelector("#llm-note").textContent = count
-    ? `The endpoint offered ${count} model${count === 1 ? "" : "s"}. Pick one, then save.`
+  if (names.length && !modelInput.value.trim()) {
+    modelInput.value = names[0];
+    picks.querySelector("button")?.classList.add("active");
+    await saveModel(false);
+  }
+  document.querySelector("#llm-note").textContent = names.length
+    ? `Found ${names.length} model${names.length === 1 ? "" : "s"}. Click one to use it.`
     : "The endpoint listed no models.";
+  paintFoldSummaries();
 }
 
 function addTurn(kind, who, text, steps) {
@@ -1521,11 +1596,11 @@ const tips = {
   apply: "Saves this length and orientation. Bands near that length move to the top.",
   guess: "Listens at several spots and treats the loudest noise floor as the antenna’s natural frequency. Strength does not show which way a wire points.",
   model: `An ${wiki("Large_language_model", "instruct model")} that can run the same actions as these buttons.`,
-  endpoint: "The address of a server that speaks the OpenAI chat protocol, usually ending in /v1. A local server works here.",
-  "model-name": "The model name on that server.",
-  key: "Stored on this computer and sent only to the endpoint you saved. A local server often needs none.",
-  "save-model": "Stores the endpoint, model, and key.",
-  "list-models": "Asks the endpoint which models it has.",
+  endpoint: "OpenAI-compatible chat root. For Ollama you can enter http://host:11434; /v1 is added for you. Cloud APIs usually end in /v1.",
+  "model-name": "The model name on that server. List models fills this from the endpoint.",
+  key: "Stored on this computer and sent only to that endpoint. Ollama usually needs none.",
+  "save-model": "Stores the endpoint, model, and key without listing.",
+  "list-models": "Saves the endpoint, then asks it for models (OpenAI /v1/models, then Ollama /api/tags).",
   forget: "Clears the saved API key.",
   prompt: "Ask the model to scan, listen, or change the antenna. Stop cancels that work.",
   ask: "The sentence for the model, such as “Scan 2 m and tell me what you hear.”",
@@ -1535,7 +1610,7 @@ const tips = {
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, and ${wiki("M17_(amateur_radio)", "M17")}.`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, and ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}.`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
   "dmr-slot": "DMR timeslot 1 or 2. Any accepts both slots.",
@@ -1546,6 +1621,7 @@ const tips = {
   hear: "Mode to demodulate. Camp needs an explicit mode; it does not guess.",
   freq: "Frequency to listen to or camp on.",
   noaa: `Listens to one ${wiki("NOAA_Weather_Radio", "NOAA weather radio")} channel so you can tell the radio is working.`,
+  "known-channels": `Fixed ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, and ${wiki("NOAA_Weather_Radio", "NOAA weather")} channels. Start with NOAA: those stations are usually on the air, so a click is a quick check that a new SDR hears something. CB and GMRS use the same buttons when you want a published channel without scanning.`,
   signals: "Peaks from the last scan.",
   "col-mhz": `Frequency in megahertz. See ${wiki("Radio_frequency", "radio frequency")}.`,
   "col-mode": "The kind of signal the scan guessed.",

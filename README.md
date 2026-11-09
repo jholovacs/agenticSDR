@@ -14,13 +14,17 @@ Debian and Ubuntu: `bash packaging/build-deb.sh` writes `packaging/out/agenticsd
 
 ## Run
 
+On Windows, double-click **start** in the project folder to launch the host and open the page. Or:
+
 ```bash
 dotnet run --project Host
 ```
 
-Open http://127.0.0.1:5088 . Enter the antenna length and whether it is vertical or horizontal, or let the page guess the length from where the noise floor is strongest. A horizontal wire also takes the compass direction the wire runs, in degrees true. The matching bands move to the top of the list. A vertical is treated as a quarter-wave and a horizontal wire as a half-wave, including odd harmonics. AM broadcast, FM broadcast, NOAA weather, CB, GMRS, and DMR show up when that antenna and the radio can hear them. DMR is recognized by its framing; the voice codec is proprietary and is not decoded. Pick a band, scan, then listen. Audio is a WAV clip. CW shows decoded Morse. FT8, on a dial frequency such as 14.074 MHz, waits for the next 15-second slot and lists the decoded messages. Broadcast FM uses wideband demodulation.
+Open http://127.0.0.1:5088 . New to this? Read [GUIDE.md](GUIDE.md). A short path after **Start radio**: open **Scan and listen** → **Known channels** → **NOAA weather**, and click a WX channel. If you hear weather radio, the SDR path is working. The same panel lists CB and GMRS channels you can tune without scanning.
 
-Cursor can drive the same session. This repo includes `.cursor/mcp.json` pointing at `http://127.0.0.1:5088/mcp`. Start the host first. Tools, in order: `list_devices`, `open_device`, `list_ham_bands`, `scan_band`, `listen`, and `stop`.
+Enter the antenna length and whether it is vertical or horizontal, or let the page guess the length from where the noise floor is strongest. A horizontal wire also takes the compass direction the wire runs, in degrees true. The matching bands move to the top of the list. A vertical is treated as a quarter-wave and a horizontal wire as a half-wave, including odd harmonics. AM broadcast, FM broadcast, NOAA weather, CB, GMRS, and DMR show up when that antenna and the radio can hear them. DMR is recognized by its framing; the voice codec is proprietary and is not decoded. Pick a band, scan, then listen. Audio plays live. CW shows decoded Morse. FT8, on a dial frequency such as 14.074 MHz, waits for the next 15-second slot and lists the decoded messages. Broadcast FM uses wideband demodulation.
+
+Cursor and Antigravity can drive the same session. This repo includes `.cursor/mcp.json` and `.agents/mcp_config.json` pointing at `http://127.0.0.1:5088/mcp`. Start the host first. Tools, in order: `list_devices`, `open_device`, `list_ham_bands`, `scan_band`, `listen`, and `stop`.
 
 The page can also ask an instruct model that speaks the OpenAI chat protocol (`/v1/chat/completions`). Save the endpoint, model name, and API key on the page. The key stays in `Host/llm.json`, which is gitignored, and is sent only to that endpoint. See `Host/llm.example.json`. The model calls the same radio actions. **Stop** cancels them.
 

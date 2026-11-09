@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic SDR</title>
-    <link rel="stylesheet" href="/app.css?v=24">
+    <link rel="stylesheet" href="/app.css?v=27">
 </head>
 <body>
   <header class="face">
@@ -69,21 +69,25 @@
 
   <details class="panel fold" open data-fold="model">
     <summary data-tip="model"><span class="fold-title">Model</span><span id="model-summary" class="fold-aside"></span></summary>
+    <div class="fold-body">
+    <p class="fold-note">Point at an OpenAI-compatible chat server (Ollama, LM Studio, a cloud API). List the models it offers, pick one, then ask in Prompt.</p>
     <div class="controls">
     <label data-tip="endpoint">Endpoint
-      <input id="llm-base" type="url" placeholder="http://127.0.0.1:11434/v1" autocomplete="off">
+      <input id="llm-base" type="url" placeholder="http://10.10.26.10:11434" autocomplete="off">
     </label>
     <label data-tip="model-name">Model
       <input id="llm-model" list="llm-models" placeholder="llama3.2" autocomplete="off">
       <datalist id="llm-models"></datalist>
     </label>
     <label data-tip="key">API key
-      <input id="llm-key" type="password" autocomplete="off" placeholder="Optional for a local server">
+      <input id="llm-key" type="password" autocomplete="off" placeholder="Optional for Ollama">
     </label>
-    <span data-tip="save-model"><button id="llm-save" type="button">Save model</button></span>
-    <span data-tip="list-models"><button id="llm-models-btn" type="button" class="ghost">List models</button></span>
+    <span data-tip="list-models"><button id="llm-models-btn" type="button">List models</button></span>
+    <span data-tip="save-model"><button id="llm-save" type="button" class="ghost">Save</button></span>
     <span data-tip="forget"><button id="llm-forget" type="button" class="ghost">Forget key</button></span>
-    <p id="llm-note" class="antenna-note">An instruct model that speaks the OpenAI chat protocol can run the same actions as these buttons. Ask it in the prompt below.</p>
+    <div id="llm-model-picks" class="llm-picks" hidden></div>
+    <p id="llm-note" class="antenna-note">For Ollama, the endpoint can be just the host, such as http://10.10.26.10:11434.</p>
+    </div>
     </div>
   </details>
 
@@ -126,11 +130,17 @@
         <option value="ft8">FT8</option>
         <option value="dmr">DMR</option>
         <option value="m17">M17</option>
+        <option value="packet">Packet (AX.25)</option>
         <option value="raw">Raw</option>
       </select>
     </label>
     <span data-tip="noaa"><button id="noaa" type="button" class="ghost">NOAA check</button></span>
     </div>
+    <details class="known-channels" data-tip="known-channels">
+      <summary>Known channels</summary>
+      <p class="fold-note">New to this radio? Open NOAA weather and click a WX channel. Hearing the forecast means the SDR is working. CB and GMRS are fixed channel lists you can tune the same way, without scanning.</p>
+      <div id="known-channel-groups"></div>
+    </details>
   </details>
 
   <details class="panel fold" open data-fold="schedule">
@@ -156,6 +166,7 @@
             <option value="ft8">FT8</option>
             <option value="dmr">DMR</option>
             <option value="m17">M17</option>
+            <option value="packet">Packet (AX.25)</option>
             <option value="raw">Raw</option>
           </select>
         </label>
@@ -330,6 +341,6 @@
   </dialog>
 
   <script src="/lame.min.js?v=5"></script>
-  <script src="/app.js?v=28"></script>
+  <script src="/app.js?v=31"></script>
 </body>
 </html>

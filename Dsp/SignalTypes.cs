@@ -35,6 +35,9 @@ public enum RadioMode
     /// <summary>M17 digital voice on VHF or UHF. Open Codec2 speech with callsigns in the link setup.</summary>
     M17,
 
+    /// <summary>1200-baud AX.25 AFSK packet radio / APRS on VHF or UHF.</summary>
+    Packet,
+
     /// <summary>Wide discriminator audio, without the voice filter or de-emphasis.</summary>
     Raw
 }

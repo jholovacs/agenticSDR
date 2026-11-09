@@ -13,7 +13,7 @@ public static class ModeBandwidth
         RadioMode.Cw => new Pass(80, 800, 400, 500),
         RadioMode.Usb or RadioMode.Lsb => new Pass(1_000, 3_500, 2_700, 1_500),
         RadioMode.Am => new Pass(4_000, 12_000, 10_000, 10_000),
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 => new Pass(2_000, 16_000, 12_500, 12_500),
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet => new Pass(2_000, 16_000, 12_500, 12_500),
         RadioMode.Wbfm => new Pass(50_000, 250_000, 200_000, 200_000),
         RadioMode.Raw => new Pass(4_000, 40_000, 20_000, 12_500),
         _ => null

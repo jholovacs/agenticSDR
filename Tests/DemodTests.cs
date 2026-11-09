@@ -125,6 +125,18 @@ public class DemodTests
         Assert.Equal(Demodulator.OutputRate, demod.PlaybackRate);
     }
 
+    [Fact]
+    public void Packet_mode_demodulates_fm_audio_at_output_rate()
+    {
+        const double seconds = 0.2;
+        Complex[] iq = Tone(seconds, offsetHz: 0, envelope: null);
+        DemodResult result = Demodulator.Demodulate(iq, RadioMode.Packet, normalize: false);
+
+        int expected = (int)(seconds * Demodulator.OutputRate);
+        Assert.InRange(result.Audio.Length, (int)(expected * 0.8), (int)(expected * 1.05));
+        Assert.Equal(Demodulator.OutputRate, result.SampleRate);
+    }
+
     private static Complex[] Tone(double seconds, double offsetHz, Func<int, double>? envelope)
     {
         int n = (int)(seconds * Demodulator.InputRate);

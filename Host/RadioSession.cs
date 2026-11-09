@@ -449,8 +449,9 @@ public sealed class RadioSession(
                     throw new InvalidOperationException("This radio cannot tune enough of the dial to guess an antenna.");
 
                 double? savedGain = device.Capabilities.GainDb;
-                if (savedGain is > 8)
-                    device.SetGain(8);
+                double? probeGain = device.DirectSampling ? 8 : (savedGain is > 30 ? 30 : savedGain);
+                if (probeGain != savedGain)
+                    device.SetGain(probeGain);
                 var readings = new List<SignalStrength>(probes.Count);
                 try
                 {
@@ -466,7 +467,7 @@ public sealed class RadioSession(
                 }
                 finally
                 {
-                    if (savedGain is > 8)
+                    if (probeGain != savedGain)
                         device.SetGain(savedGain);
                 }
 
@@ -911,6 +912,8 @@ public sealed class RadioSession(
                     AppendMorse(decoded);
                 else if (mode == RadioMode.Ft8)
                     AppendFt8(decoded);
+                else if (mode == RadioMode.Packet)
+                    AppendPacket(decoded);
                 else if (mode == RadioMode.Dmr)
                     AppendNote(decoded);
                 else
@@ -1112,6 +1115,7 @@ public sealed class RadioSession(
         bool sideband = mode is RadioMode.Usb or RadioMode.Lsb;
         bool hearingMorse = false;
         int rate = demod.PlaybackRate;
+        var packetReader = mode == RadioMode.Packet ? new PacketReader(rate) : null;
         int remember = voice ? 6 * rate : 8 * rate;
         var nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         int ft8Slot = 15 * rate;
@@ -1338,6 +1342,14 @@ public sealed class RadioSession(
                     }
                 }
             }
+            else if (mode == RadioMode.Packet && packetReader is not null)
+            {
+                foreach (string packet in packetReader.Push(fresh, rate))
+                {
+                    framed = true;
+                    AppendPacket(packet);
+                }
+            }
         }
         }
         finally
@@ -1439,7 +1451,7 @@ public sealed class RadioSession(
     private const double WideFmListenGainDb = 12;
 
     private static bool EasedGain(RadioMode mode) =>
-        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Raw;
+        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Raw;
 
     private static void EaseWideFmGain(IRadioDevice device, RadioMode mode)
     {
@@ -1525,6 +1537,8 @@ public sealed class RadioSession(
     private void AppendSpeech(string text) => AppendSpan("speech", text);
 
     private void AppendFt8(string text) => AppendSpan("ft8", text);
+
+    private void AppendPacket(string text) => AppendSpan("packet", text);
 
     private void AppendNote(string text) => AppendSpan("note", text);
 
@@ -1766,6 +1780,8 @@ public sealed class RadioSession(
         RadioMode.Cw => $"CW clip ready: {decoded}",
         RadioMode.Ft8 when string.IsNullOrWhiteSpace(decoded) => "FT8 clip ready. No messages decoded.",
         RadioMode.Ft8 => $"FT8 clip ready. {decoded!.Count(ch => ch == '\n') + 1} message(s).",
+        RadioMode.Packet when string.IsNullOrWhiteSpace(decoded) => "Packet clip ready. No frames decoded.",
+        RadioMode.Packet => $"Packet clip ready. {decoded!.Count(ch => ch == '\n') + 1} frame(s).",
         _ when SpeechDecoder.IsVoice(mode) && !string.IsNullOrWhiteSpace(decoded) => $"Audio clip ready. {decoded}",
         _ => "Audio clip ready."
     };

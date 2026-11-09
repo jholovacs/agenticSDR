@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "agentic-sdr": {
+      "serverUrl": "http://127.0.0.1:5088/mcp"
+    }
+  }
+}
