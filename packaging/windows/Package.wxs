@@ -6,9 +6,9 @@
            UpgradeCode="7c4e9a18-6b2d-4f5a-9c31-2e8d4b7a1f60"
            Compressed="yes">
     <SummaryInformation Description="Receive-only amateur radio listener" />
-    <!-- Stable UpgradeCode + rising Version = in-place upgrade: stop service, replace files, keep ProgramData. -->
+    <!-- Stable UpgradeCode + rising Version = in-place upgrade: stop service, replace files, keep ProgramData.
+         Do not set AllowSameVersionUpgrades — that triggers ICE61 (Maximum version >= current). -->
     <MajorUpgrade Schedule="afterInstallInitialize"
-                  AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of Agentic SDR is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
