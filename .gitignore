@@ -9,8 +9,8 @@ llm.json
 schedule.json
 models/
 
-# Root native/ holds GPL librtlsdr (fetched), Lime builds, and toolchain caches — not committed.
-# Tracked: MIT crates m17voice/xaramonitor, and GPL-2 libm17 (required to build m17voice).
+# Root native/ holds Lime builds and toolchain caches — not committed.
+# Tracked: MIT crates, GPL-2 libm17, and Windows librtlsdr DLLs (rtlsdr + deps).
 /native/*
 !/native/m17voice/
 !/native/m17voice/**
@@ -18,6 +18,9 @@ models/
 !/native/xaramonitor/**
 !/native/libm17/
 !/native/libm17/**
+!/native/rtlsdr.dll
+!/native/pthreadVC2.dll
+!/native/msvcr100.dll
 native/**/target/
 native/libm17/build/
 

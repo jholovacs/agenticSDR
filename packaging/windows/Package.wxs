@@ -88,7 +88,7 @@
         <Control Id="Model" Type="Edit" X="20" Y="128" Width="330" Height="18" Property="LLMMODEL" />
         <Control Id="KeyLabel" Type="Text" X="20" Y="154" Width="330" Height="12" NoPrefix="yes" Text="API key (optional)" />
         <Control Id="Key" Type="Edit" X="20" Y="168" Width="330" Height="18" Property="LLMKEY" Password="yes" />
-        <Control Id="Note" Type="Text" X="20" Y="196" Width="330" Height="28" Transparent="yes" NoPrefix="yes" Text="The API installs as a Windows service. Next, the installer downloads librtlsdr and the small English speech model." />
+        <Control Id="Note" Type="Text" X="20" Y="196" Width="330" Height="28" Transparent="yes" NoPrefix="yes" Text="The API installs as a Windows service with librtlsdr included. Next, the installer downloads the small English speech model if needed." />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
           <Publish Event="NewDialog" Value="InstallDirDlg" />
         </Control>

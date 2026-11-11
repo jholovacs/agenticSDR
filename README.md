@@ -114,9 +114,11 @@ The C# host is MIT. M17/Codec2 and VarAC decode come from Rust crates under `nat
 bash tools/build-native.sh
 ```
 
-That writes `m17voice` / `xaramonitor` into `Host/native/` (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS). Windows DLLs are also committed there so MSI/dev builds work without Rust. Package CI rebuilds from source on Linux and macOS. `librtlsdr` is GPL and is not committed.
+That writes `m17voice` / `xaramonitor` into `Host/native/` (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS). Windows DLLs are also committed there so MSI/dev builds work without Rust. Package CI rebuilds from source on Linux and macOS.
 
-- Windows: `bash tools/fetch-native.sh` writes `rtlsdr.dll` into `native/` (or the MSI downloads it). If Windows still has the DVB-T driver on the dongle, install WinUSB with Zadig for `USB\VID_0BDA&PID_2838`.
+Windows **librtlsdr** (GPL) is committed under `native/` as `rtlsdr.dll` plus `pthreadVC2.dll` / `msvcr100.dll`, and the MSI ships those files. Refresh with `bash tools/fetch-native.sh` if needed.
+
+- Windows: if Windows still has the DVB-T driver on the dongle, install WinUSB with Zadig for `USB\VID_0BDA&PID_2838`.
 - Linux: `sudo apt install librtlsdr-dev` (or the `rtl-sdr` package).
 - macOS: `brew install librtlsdr`.
 

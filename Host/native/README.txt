@@ -9,6 +9,8 @@ packages rebuild from source:
   bash tools/build-native.sh
 
 Sources live in native/m17voice, native/xaramonitor, and native/libm17 (GPL-2 C
-stack linked into m17voice). GPL librtlsdr is not here — the MSI/deb download it,
-or run tools/fetch-native.sh into the repo-root native/ folder (that fetch clutter
-stays gitignored).
+stack linked into m17voice).
+
+GPL librtlsdr for Windows lives in the repo-root native/ folder as rtlsdr.dll
+(with pthreadVC2.dll and msvcr100.dll). Refresh with tools/fetch-native.sh.
+The MSI copies those next to the host. Linux/macOS use the system librtlsdr package.
