@@ -1,7 +1,5 @@
 bin/
 obj/
-# Root native/ holds GPL librtlsdr (fetched) and optional local Lime builds — not committed.
-/native/
 packaging/stage/
 packaging/out/
 *.user
@@ -11,8 +9,14 @@ llm.json
 schedule.json
 models/
 
-# Rust native builds
-native/xaramonitor/target/
+# Root native/ holds GPL librtlsdr (fetched), Lime builds, and toolchain caches — not committed.
+# MIT crates native/m17voice and native/xaramonitor ARE tracked.
+/native/*
+!/native/m17voice/
+!/native/m17voice/**
+!/native/xaramonitor/
+!/native/xaramonitor/**
+native/**/target/
 
 # Scratch listen captures left in the repo root while debugging
 /*.wav

@@ -1,0 +1,16 @@
+[package]
+name = "xara-phy"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+description = "Signal processing for a VARA-compatible HF/FM modem: coding, modulation, receivers and the turbo decoder."
+
+[features]
+fixed-turbo = []
+float-turbo = []
+
+[dependencies]
+num-complex = "0.4"
+rustfft = "6.4"

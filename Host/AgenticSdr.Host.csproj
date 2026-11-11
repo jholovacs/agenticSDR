@@ -22,6 +22,10 @@
   <ItemGroup>
     <None Include="native\m17voice.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\m17voice.dll')" />
     <None Include="native\xaramonitor.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\xaramonitor.dll')" />
+    <None Include="native\libm17voice.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libm17voice.so')" />
+    <None Include="native\libxaramonitor.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libxaramonitor.so')" />
+    <None Include="native\libm17voice.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libm17voice.dylib')" />
+    <None Include="native\libxaramonitor.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libxaramonitor.dylib')" />
   </ItemGroup>
 
 </Project>

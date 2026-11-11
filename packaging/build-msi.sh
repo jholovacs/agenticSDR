@@ -2,6 +2,8 @@
 # Publishes the Windows app and builds AgenticSdr-<version>.msi.
 # The MSI installs AgenticSdr.Host.exe as the AgenticSdr Windows service, asks for the
 # OpenAI endpoint/model/key (saved under ProgramData), then downloads librtlsdr and the speech model.
+# Same UpgradeCode every build: installing a newer (or same) MSI upgrades in place — service
+# stops/restarts, Program Files is replaced, ProgramData llm.json is kept.
 # VERSION defaults to 0.1.0 locally; CI sets 0.1.<run_number>.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"

@@ -30,7 +30,7 @@ Every merge to `main` publishes a new GitHub Release tagged **`v0.1.<run_number>
 
 Local builds default to version `0.1.0` unless you set `VERSION`. Packaging scripts:
 
-**Windows.** `bash packaging/build-msi.sh` writes `packaging/out/AgenticSdr-<version>.msi`. The installer asks for the OpenAI endpoint, model, and API key, then downloads librtlsdr and the small English speech model. A local OpenAI-compatible server works in the endpoint field. The program is installed under Program Files and runs as the **AgenticSdr** Windows service (auto-start, LocalSystem). The Start Menu shortcut opens http://127.0.0.1:5088. The key is stored in `%ProgramData%\AgenticSDR\llm.json` so the service can read it. LimeSuiteNG DLLs are included when `native/limesuiteng.dll` and `native/limesuiteng-legacyapi.dll` are already built. The MSI does not install a USB driver.
+**Windows.** `bash packaging/build-msi.sh` writes `packaging/out/AgenticSdr-<version>.msi`. The installer asks for the OpenAI endpoint, model, and API key, then downloads librtlsdr and the small English speech model. A local OpenAI-compatible server works in the endpoint field. The program is installed under Program Files and runs as the **AgenticSdr** Windows service (auto-start, LocalSystem). The Start Menu shortcut opens http://127.0.0.1:5088. The key is stored in `%ProgramData%\AgenticSDR\llm.json` so the service can read it. Installing a newer MSI upgrades in place (service restart, same folder, keeps `llm.json`). LimeSuiteNG DLLs are included when `native/limesuiteng.dll` and `native/limesuiteng-legacyapi.dll` are already built. The MSI does not install a USB driver.
 
 **Debian / Ubuntu.** `bash packaging/build-deb.sh` writes `packaging/out/agenticsdr_<version>_amd64.deb`. `sudo apt install ./…` asks the same three questions through debconf, depends on `librtlsdr0`, and downloads the speech model. The key is stored in `/etc/agenticsdr/llm.json`, readable only by root. `agenticsdr` starts the page.
 
@@ -108,7 +108,13 @@ The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM bro
 
 ## Native libraries
 
-The C# code is MIT. M17/Codec2 and VarAC decode ship as committed Windows DLLs under `Host/native/` (`m17voice.dll`, `xaramonitor.dll`) and are copied into published Windows builds. `librtlsdr` is GPL and is not committed.
+The C# code is MIT. M17/Codec2 and VarAC decode come from MIT Rust crates under `native/m17voice` and `native/xaramonitor`. Rebuild for your OS with:
+
+```bash
+bash tools/build-native.sh
+```
+
+That writes `m17voice` / `xaramonitor` into `Host/native/` (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS). Windows DLLs are also committed there so MSI/dev builds work without Rust. Package CI rebuilds from source on Linux and macOS. `librtlsdr` is GPL and is not committed.
 
 - Windows: `bash tools/fetch-native.sh` writes `rtlsdr.dll` into `native/` (or the MSI downloads it). If Windows still has the DVB-T driver on the dongle, install WinUSB with Zadig for `USB\VID_0BDA&PID_2838`.
 - Linux: `sudo apt install librtlsdr-dev` (or the `rtl-sdr` package).

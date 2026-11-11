@@ -19,8 +19,8 @@ public static class NativeDsp
     {
         string? file = libraryName.ToLowerInvariant() switch
         {
-            "m17voice" => OperatingSystem.IsWindows() ? "m17voice.dll" : "libm17voice.so",
-            "xaramonitor" => OperatingSystem.IsWindows() ? "xaramonitor.dll" : "libxaramonitor.so",
+            "m17voice" => NativeFile("m17voice"),
+            "xaramonitor" => NativeFile("xaramonitor"),
             _ => null
         };
         if (file is null)
@@ -34,6 +34,11 @@ public static class NativeDsp
 
         return IntPtr.Zero;
     }
+
+    private static string NativeFile(string stem) =>
+        OperatingSystem.IsWindows() ? $"{stem}.dll"
+        : OperatingSystem.IsMacOS() ? $"lib{stem}.dylib"
+        : $"lib{stem}.so";
 
     private static IEnumerable<string> CandidatePaths(string file)
     {

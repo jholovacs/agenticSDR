@@ -7,3 +7,4 @@ packaging/linux/debian/postrm text eol=lf
 packaging/linux/debian/templates text eol=lf
 packaging/linux/debian/control text eol=lf
 .github/workflows/* text eol=lf
+tools/*.sh text eol=lf

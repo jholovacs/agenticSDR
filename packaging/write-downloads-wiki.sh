@@ -71,7 +71,7 @@ Installers are built automatically on every merge to \`main\`. Version scheme: \
 | Platform | File | SHA-256 | Notes |
 | --- | --- | --- | --- |
 $(row "Debian / Ubuntu" "$deb" "\`sudo apt install ./…\` — asks for OpenAI endpoint; needs \`librtlsdr0\`")
-$(row "Windows x64" "$msi" "Installs the **AgenticSdr** service; Start Menu opens the page")
+$(row "Windows x64" "$msi" "Installs/upgrades the **AgenticSdr** service in place; Start Menu opens the page")
 $(row "macOS Apple Silicon" "$mac_arm" "Unzip, run \`./AgenticSdr.Host\`; \`brew install librtlsdr\`")
 $(row "macOS Intel" "$mac_x64" "Unzip, run \`./AgenticSdr.Host\`; \`brew install librtlsdr\`")
 

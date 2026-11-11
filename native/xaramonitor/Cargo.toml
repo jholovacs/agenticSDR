@@ -1,0 +1,16 @@
+[package]
+name = "xaramonitor"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+description = "Receive-only VARA HF monitor embedded for AgenticSDR (MIT xara phy/arq/monitor)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "xaramonitor"
+
+[dependencies]
+xara-phy = { path = "vendor/xara-phy" }
+xara-arq = { path = "vendor/xara-arq" }

@@ -23,11 +23,19 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - name: Install librtlsdr and build tools
+        run: sudo apt-get update && sudo apt-get install -y librtlsdr-dev build-essential
+      - name: Build MIT native libraries
+        run: bash tools/build-native.sh
       - name: Run unit tests
+        # Live RTL test runs but skips only when no USB dongle is present.
         run: dotnet test Tests/AgenticSdr.Tests.csproj -c Release --nologo
       - name: Show version for this build
         run: echo "VERSION=$VERSION"
@@ -37,15 +45,20 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
-      - name: Install dpkg-deb
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - name: Install dpkg-deb and build tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev build-essential
+      - name: Build MIT native libraries
+        run: bash tools/build-native.sh
       - name: Build .deb
         run: bash packaging/build-deb.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debian-amd64
           path: packaging/out/*.deb
@@ -56,14 +69,14 @@ jobs:
     needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
       - name: Build MSI
         shell: bash
         run: bash packaging/build-msi.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-msi
           path: |
@@ -76,13 +89,18 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - name: Build MIT native libraries
+        run: bash tools/build-native.sh
       - name: Build macOS packages
         run: bash packaging/build-mac.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-zips
           path: packaging/out/*.zip
@@ -93,8 +111,8 @@ jobs:
     needs: [debian, windows, macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -117,7 +135,7 @@ jobs:
           echo "---- Downloads.md (head) ----"
           head -n 40 wiki-out/Downloads.md
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
           name: v${{ env.VERSION }}
