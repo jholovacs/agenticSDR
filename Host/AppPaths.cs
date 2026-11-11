@@ -20,6 +20,12 @@ public static class AppPaths
 
     public static string WindowsSystemLlm() => Path.Combine(WindowsSystemDirectory(), "llm.json");
 
+    /// <summary>Written by MSI custom actions when setup steps fail or finish.</summary>
+    public static string SetupLog() =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(WindowsSystemDirectory(), "setup.log")
+            : Path.Combine(Path.GetTempPath(), "agenticsdr-setup.log");
+
     public static string UserSchedule()
     {
         string llm = UserLlm();

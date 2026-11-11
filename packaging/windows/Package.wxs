@@ -79,6 +79,9 @@
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <UI>
+      <!-- Replace stock MSI 1721/1722 text so a failed setup exe names the log file. -->
+      <Error Id="1721" Message="Agentic SDR setup could not start action [2]. Command: [4]. See %ProgramData%\AgenticSDR\setup.log or run msiexec /i AgenticSdr.msi /l*v %TEMP%\agenticsdr-msi.log" />
+      <Error Id="1722" Message="Agentic SDR setup action [2] failed. Command: [4]. See %ProgramData%\AgenticSDR\setup.log or run msiexec /i AgenticSdr.msi /l*v %TEMP%\agenticsdr-msi.log" />
       <Dialog Id="LlmDlg" Width="370" Height="270" Title="Agentic SDR">
         <Control Id="Title" Type="Text" X="20" Y="15" Width="330" Height="16" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}OpenAI connection" />
         <Control Id="Description" Type="Text" X="20" Y="36" Width="330" Height="32" Transparent="yes" NoPrefix="yes" Text="The page can ask a model that speaks the OpenAI chat protocol. A local server such as http://127.0.0.1:11434/v1 works too. The key stays on this computer and is sent only to that endpoint." />
@@ -106,32 +109,33 @@
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LlmDlg" Condition="NOT WIX_UPGRADE_DETECTED" Order="5" />
     </UI>
 
-    <!-- Write llm.json under ProgramData so the LocalSystem service can read it (fresh install only). -->
+    <!-- Deferred FileRef CAs: args only; msi flag enables setup.log and a message box on failure. -->
     <SetProperty Id="ApplyLlm"
-                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --set-llm --path &quot;[CommonDataFolder]llm.json&quot; --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
+                 Value="--set-llm --msi --path &quot;[CommonDataFolder]llm.json&quot; --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
                  Before="ApplyLlm"
                  Sequence="execute"
                  Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT REMOVE~=&quot;ALL&quot;" />
     <CustomAction Id="ApplyLlm"
-                  Directory="INSTALLFOLDER"
+                  FileRef="HostExe"
                   ExeCommand="[CustomActionData]"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
     <SetProperty Id="ApplyFetch"
-                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --home &quot;[INSTALLFOLDER]&quot;"
+                 Value="--fetch-native --msi --home &quot;[INSTALLFOLDER]&quot;"
                  Before="ApplyFetch"
                  Sequence="execute"
                  Condition="NOT REMOVE~=&quot;ALL&quot;" />
     <CustomAction Id="ApplyFetch"
-                  Directory="INSTALLFOLDER"
+                  FileRef="HostExe"
                   ExeCommand="[CustomActionData]"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="check" />
+                  Return="ignore" />
     <InstallExecuteSequence>
-      <!-- Finish setup before StartServices brings the API up. Never rewrite llm.json on upgrade (empty key would clear it). -->
+      <!-- Finish setup before StartServices. Never rewrite llm.json on upgrade (empty key would clear it). -->
       <Custom Action="ApplyLlm" After="InstallFiles" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT REMOVE~=&quot;ALL&quot;" />
+      <!-- After ApplyLlm so a fresh install writes llm.json before optional model download; still runs when ApplyLlm is skipped. -->
       <Custom Action="ApplyFetch" After="ApplyLlm" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
   </Package>

@@ -50,4 +50,37 @@ public class SetupTests
                 File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Msi_flag_is_accepted_alongside_set_llm()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-setup-" + Guid.NewGuid().ToString("N") + ".json");
+        string log = AppPaths.SetupLog();
+        try
+        {
+            if (File.Exists(log))
+                File.Delete(log);
+
+            bool handled = SetupCommands.TryHandle(
+            [
+                "--set-llm",
+                "--msi",
+                "--path", path,
+                "--base", "https://api.openai.com/v1",
+                "--model", "gpt-4o-mini",
+                "--key", "sk-msi"
+            ], out int code);
+
+            Assert.True(handled);
+            Assert.Equal(0, code);
+            Assert.Equal("sk-msi", new LlmStore(path).Read().ApiKey);
+            Assert.True(File.Exists(log));
+            Assert.Contains("Finished --set-llm", File.ReadAllText(log), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
 }
