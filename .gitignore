@@ -3,7 +3,6 @@ obj/
 /native/
 Host/native/libcodec2.dll
 Host/native/m17.dll
-Host/native/xaramonitor.dll
 packaging/stage/
 packaging/out/
 *.user
