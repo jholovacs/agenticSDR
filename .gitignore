@@ -1,8 +1,7 @@
 bin/
 obj/
+# Root native/ holds GPL librtlsdr (fetched) and optional local Lime builds — not committed.
 /native/
-Host/native/libcodec2.dll
-Host/native/m17.dll
 packaging/stage/
 packaging/out/
 *.user

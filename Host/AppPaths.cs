@@ -6,9 +6,19 @@ namespace AgenticSdr.Host;
 /// </summary>
 public static class AppPaths
 {
-    public const string SystemLlm = "/etc/agenticsdr/llm.json";
+    public const string LinuxSystemLlm = "/etc/agenticsdr/llm.json";
+
+    /// <summary>Kept for callers that still use the old Linux-only name.</summary>
+    public const string SystemLlm = LinuxSystemLlm;
 
     public static string ContentLlm(string contentRoot) => Path.Combine(contentRoot, "llm.json");
+
+    public static string WindowsSystemDirectory() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "AgenticSDR");
+
+    public static string WindowsSystemLlm() => Path.Combine(WindowsSystemDirectory(), "llm.json");
 
     public static string UserSchedule()
     {
@@ -29,6 +39,13 @@ public static class AppPaths
         string content = Path.Combine(contentRoot, "callsigns.json");
         if (File.Exists(content))
             return content;
+        if (OperatingSystem.IsWindows())
+        {
+            string system = Path.Combine(WindowsSystemDirectory(), "callsigns.json");
+            if (File.Exists(system))
+                return system;
+        }
+
         return UserCallsignCache();
     }
 
@@ -37,6 +54,13 @@ public static class AppPaths
         string content = Path.Combine(contentRoot, "schedule.json");
         if (File.Exists(content))
             return content;
+        if (OperatingSystem.IsWindows())
+        {
+            string system = Path.Combine(WindowsSystemDirectory(), "schedule.json");
+            if (File.Exists(system))
+                return system;
+        }
+
         return UserSchedule();
     }
 
@@ -64,8 +88,15 @@ public static class AppPaths
         string user = UserLlm();
         if (File.Exists(user))
             return user;
-        if (OperatingSystem.IsLinux() && File.Exists(SystemLlm))
-            return SystemLlm;
+        if (OperatingSystem.IsWindows())
+        {
+            string windowsSystem = WindowsSystemLlm();
+            if (File.Exists(windowsSystem))
+                return windowsSystem;
+        }
+        else if (OperatingSystem.IsLinux() && File.Exists(LinuxSystemLlm))
+            return LinuxSystemLlm;
+
         return user;
     }
 }

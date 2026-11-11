@@ -4,7 +4,9 @@
     <OutputType>Package</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
     <PublishDir>$(MSBuildThisFileDirectory)..\stage\win-x64\</PublishDir>
-    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+    <!-- Four-part a.b.c.d; packaging/build-msi.sh passes ProductVersion from VERSION. -->
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0.0</ProductVersion>
+    <DefineConstants>PublishDir=$(PublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />

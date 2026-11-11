@@ -1,0 +1,9 @@
+# Shell and packaging scripts must stay LF so Linux/macOS CI shebangs work.
+*.sh text eol=lf
+*.desktop text eol=lf
+packaging/linux/debian/config text eol=lf
+packaging/linux/debian/postinst text eol=lf
+packaging/linux/debian/postrm text eol=lf
+packaging/linux/debian/templates text eol=lf
+packaging/linux/debian/control text eol=lf
+.github/workflows/* text eol=lf

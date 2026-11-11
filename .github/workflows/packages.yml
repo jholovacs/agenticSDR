@@ -1,0 +1,155 @@
+name: Packages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Every workflow run on main gets a new patch: 0.1.<run_number>
+  VERSION: 0.1.${{ github.run_number }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Run unit tests
+        run: dotnet test Tests/AgenticSdr.Tests.csproj -c Release --nologo
+      - name: Show version for this build
+        run: echo "VERSION=$VERSION"
+
+  debian:
+    name: Debian .deb
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Install dpkg-deb
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - name: Build .deb
+        run: bash packaging/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-amd64
+          path: packaging/out/*.deb
+          if-no-files-found: error
+
+  windows:
+    name: Windows MSI
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Build MSI
+        shell: bash
+        run: bash packaging/build-msi.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: |
+            packaging/out/AgenticSdr-*.msi
+            packaging/out/AgenticSdr.msi
+          if-no-files-found: error
+
+  macos:
+    name: macOS zips
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Build macOS packages
+        run: bash packaging/build-mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-zips
+          path: packaging/out/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish versioned release
+    needs: [debian, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Flatten packages into dist/
+        run: |
+          # download-artifact may nest by artifact name; collect everything at dist/
+          mkdir -p dist-flat
+          find dist -type f \( -name '*.deb' -o -name '*.msi' -o -name '*.zip' \) -exec cp -f {} dist-flat/ \;
+          rm -rf dist
+          mv dist-flat dist
+          ls -la dist
+      - name: Checksums and wiki pages
+        run: |
+          COMMIT="${GITHUB_SHA}"
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          COMMIT="$COMMIT" REPO_URL="$REPO_URL" bash packaging/write-downloads-wiki.sh dist wiki-out
+          cp -f dist/SHA256SUMS.txt wiki-out/ || true
+          echo "---- SHA256SUMS ----"
+          cat dist/SHA256SUMS.txt
+          echo "---- Downloads.md (head) ----"
+          head -n 40 wiki-out/Downloads.md
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          body_path: wiki-out/Downloads.md
+          files: |
+            dist/*.deb
+            dist/*.msi
+            dist/*.zip
+            dist/SHA256SUMS.txt
+      - name: Publish Downloads wiki
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wiki_dir="wiki-repo"
+          rm -rf "$wiki_dir"
+          # GitHub only creates *.wiki.git after the first wiki page exists in the UI.
+          if ! git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.wiki.git" "$wiki_dir"; then
+            echo "::warning::Wiki git remote missing. Create one page at https://github.com/${{ github.repository }}/wiki once, then re-run this job."
+            exit 1
+          fi
+          cp -f wiki-out/Downloads.md wiki-out/Home.md "$wiki_dir/"
+          git -C "$wiki_dir" config user.name "github-actions[bot]"
+          git -C "$wiki_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki_dir" add Home.md Downloads.md
+          if git -C "$wiki_dir" diff --staged --quiet; then
+            echo "Wiki already up to date."
+          else
+            git -C "$wiki_dir" commit -m "Downloads for v${VERSION}"
+            git -C "$wiki_dir" push origin HEAD:master
+          fi

@@ -2,7 +2,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Agentic SDR"
            Manufacturer="Jeremy Holovacs"
-           Version="0.1.0.0"
+           Version="$(var.ProductVersion)"
            UpgradeCode="7c4e9a18-6b2d-4f5a-9c31-2e8d4b7a1f60"
            Compressed="yes">
     <SummaryInformation Description="Receive-only amateur radio listener" />
@@ -18,24 +18,59 @@
       <Directory Id="INSTALLFOLDER" Name="AgenticSDR" />
     </StandardDirectory>
 
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="CommonDataFolder" Name="AgenticSDR">
+        <Component Id="CommonDataDir" Guid="a8c3e5f1-2b47-4d90-9e16-7f3a5c8d1b02">
+          <CreateFolder />
+          <RemoveFolder Id="RemoveCommonData" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\AgenticSDR" Name="commonData" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="StartMenu" Guid="b1e6c4a2-8d37-4f90-a15c-6e2b9d0f4c77">
+        <!-- The API runs as a Windows service; the shortcut only opens the local page. -->
         <Shortcut Id="StartShortcut"
                   Name="Agentic SDR"
-                  Description="Receive-only amateur radio listener"
-                  Target="[INSTALLFOLDER]AgenticSdr.Host.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  Description="Open the Agentic SDR page (API runs as a Windows service)"
+                  Target="[WindowsFolder]explorer.exe"
+                  Arguments="http://127.0.0.1:5088" />
         <RemoveFolder Id="RemoveStartMenu" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\AgenticSDR" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <Files Include="$(var.PublishDir)**" />
+      <Files Include="$(var.PublishDir)**">
+        <!-- Host exe is authored below with ServiceInstall. -->
+        <Exclude Files="$(var.PublishDir)AgenticSdr.Host.exe" />
+      </Files>
     </ComponentGroup>
+
+    <Component Id="HostService" Directory="INSTALLFOLDER" Guid="d4f1a9c7-6e28-4b3f-a0d5-9c1e7b4f2a86">
+      <File Id="HostExe" Source="$(var.PublishDir)AgenticSdr.Host.exe" KeyPath="yes" />
+      <ServiceInstall Id="AgenticSdrService"
+                      Name="AgenticSdr"
+                      DisplayName="Agentic SDR"
+                      Description="Receive-only amateur radio API and web UI on http://127.0.0.1:5088"
+                      Type="ownProcess"
+                      Start="auto"
+                      Account="LocalSystem"
+                      ErrorControl="normal"
+                      Vital="yes" />
+      <ServiceControl Id="AgenticSdrServiceControl"
+                      Name="AgenticSdr"
+                      Start="install"
+                      Stop="both"
+                      Remove="uninstall"
+                      Wait="yes" />
+    </Component>
 
     <Feature Id="Main" Title="Agentic SDR" Level="1">
       <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="HostService" />
+      <ComponentRef Id="CommonDataDir" />
       <ComponentRef Id="StartMenu" />
     </Feature>
 
@@ -50,7 +85,7 @@
         <Control Id="Model" Type="Edit" X="20" Y="128" Width="330" Height="18" Property="LLMMODEL" />
         <Control Id="KeyLabel" Type="Text" X="20" Y="154" Width="330" Height="12" NoPrefix="yes" Text="API key (optional)" />
         <Control Id="Key" Type="Edit" X="20" Y="168" Width="330" Height="18" Property="LLMKEY" Password="yes" />
-        <Control Id="Note" Type="Text" X="20" Y="196" Width="330" Height="28" Transparent="yes" NoPrefix="yes" Text="Next, the installer downloads librtlsdr and the small English speech model." />
+        <Control Id="Note" Type="Text" X="20" Y="196" Width="330" Height="28" Transparent="yes" NoPrefix="yes" Text="The API installs as a Windows service. Next, the installer downloads librtlsdr and the small English speech model." />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
           <Publish Event="NewDialog" Value="InstallDirDlg" />
         </Control>
@@ -65,8 +100,9 @@
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LlmDlg" Order="5" />
     </UI>
 
+    <!-- Write llm.json under ProgramData so the LocalSystem service can read it. -->
     <SetProperty Id="ApplyLlm"
-                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --set-llm --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --set-llm --path &quot;[CommonDataFolder]llm.json&quot; --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
                  Before="ApplyLlm"
                  Sequence="execute"
                  Condition="NOT REMOVE~=&quot;ALL&quot;" />
@@ -74,7 +110,7 @@
                   Directory="INSTALLFOLDER"
                   ExeCommand="[CustomActionData]"
                   Execute="deferred"
-                  Impersonate="yes"
+                  Impersonate="no"
                   Return="check" />
     <SetProperty Id="ApplyFetch"
                  Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --home &quot;[INSTALLFOLDER]&quot;"
@@ -88,6 +124,7 @@
                   Impersonate="no"
                   Return="check" />
     <InstallExecuteSequence>
+      <!-- Finish setup before StartServices brings the API up. -->
       <Custom Action="ApplyLlm" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="ApplyFetch" After="ApplyLlm" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>

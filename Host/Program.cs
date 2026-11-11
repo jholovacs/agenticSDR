@@ -11,6 +11,7 @@ if (SetupCommands.TryHandle(args, out int setupCode))
     return setupCode;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseWindowsService(options => options.ServiceName = "AgenticSdr");
 builder.WebHost.UseUrls("http://127.0.0.1:5088");
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
