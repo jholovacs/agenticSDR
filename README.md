@@ -108,7 +108,7 @@ The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM bro
 
 ## Native libraries
 
-The C# code is MIT. M17/Codec2 and VarAC decode come from MIT Rust crates under `native/m17voice` and `native/xaramonitor`. Rebuild for your OS with:
+The C# host is MIT. M17/Codec2 and VarAC decode come from Rust crates under `native/m17voice` and `native/xaramonitor` (m17voice links GPL-2 `native/libm17`). Rebuild for your OS with:
 
 ```bash
 bash tools/build-native.sh

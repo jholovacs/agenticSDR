@@ -10,13 +10,16 @@ schedule.json
 models/
 
 # Root native/ holds GPL librtlsdr (fetched), Lime builds, and toolchain caches — not committed.
-# MIT crates native/m17voice and native/xaramonitor ARE tracked.
+# Tracked: MIT crates m17voice/xaramonitor, and GPL-2 libm17 (required to build m17voice).
 /native/*
 !/native/m17voice/
 !/native/m17voice/**
 !/native/xaramonitor/
 !/native/xaramonitor/**
+!/native/libm17/
+!/native/libm17/**
 native/**/target/
+native/libm17/build/
 
 # Scratch listen captures left in the repo root while debugging
 /*.wav
