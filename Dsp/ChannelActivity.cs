@@ -12,7 +12,7 @@ public static class ChannelActivity
     {
         RadioMode.Wbfm => 180_000,
         RadioMode.Am => 10_000,
-        RadioMode.Usb or RadioMode.Lsb or RadioMode.Ft8 => 3_000,
+        RadioMode.Usb or RadioMode.Lsb or RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac => 3_000,
         RadioMode.Cw => 800,
         RadioMode.Raw => 25_000,
         _ => 12_500

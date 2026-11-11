@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Host;
@@ -26,7 +27,7 @@ public sealed record AgentHistoryTurn(string? Role, string? Content);
 /// The radio actions an instruct model may request. They are the same actions as the buttons and the MCP tools.
 /// The model does not tune the radio itself. It names a tool, and this class runs it.
 /// </summary>
-public sealed class AgentTools(RadioSession session, CampBook camp)
+public sealed class AgentTools(RadioSession session, CampBook camp, ClipStore clips)
 {
     public static readonly JsonArray Schema = JsonNode.Parse(
         """
@@ -42,7 +43,9 @@ public sealed class AgentTools(RadioSession session, CampBook camp)
           {"type":"function","function":{"name":"guess_antenna","description":"Guess the antenna from where the noise floor is strongest. Compass direction cannot be read this way.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"scan_band","description":"Scan one band. bandId examples: 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, dmr.","parameters":{"type":"object","properties":{"bandId":{"type":"string"}},"required":["bandId"]}}},
           {"type":"function","function":{"name":"inspect_signal","description":"Measure one frequency in Hz.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"}},"required":["frequencyHz"]}}},
-          {"type":"function","function":{"name":"listen","description":"Demodulate one frequency for a few seconds. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, or dmr. CW returns Morse. FT8 uses 15 seconds. AM, FM, and sideband return a speech transcript. DMR voice is not decoded.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"},"mode":{"type":"string"},"seconds":{"type":"number"}},"required":["frequencyHz"]}}},
+          {"type":"function","function":{"name":"listen","description":"Demodulate one frequency for a few seconds. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, dmr, or packet. CW returns Morse. Digimodes return text when decoded. Scan activity is not a decode.","parameters":{"type":"object","properties":{"frequencyHz":{"type":"number"},"mode":{"type":"string"},"seconds":{"type":"number"}},"required":["frequencyHz"]}}},
+          {"type":"function","function":{"name":"list_clips","description":"List recent listen clips with clipId values for analyze_clip.","parameters":{"type":"object","properties":{"limit":{"type":"integer"}}}}},
+          {"type":"function","function":{"name":"analyze_clip","description":"Diagnose a digimode listen WAV: energy width, FT8 Costas/LDPC, JS8 count, VarAC status, decoder self-test, and hints. Pass clipId from listen, or omit for the latest clip. Does not retune.","parameters":{"type":"object","properties":{"clipId":{"type":"string"},"mode":{"type":"string","description":"Optional ft8, js8, or varac hint"}}}}},
           {"type":"function","function":{"name":"stop","description":"Cancel the scan or listen in progress. In camp mode this pauses the schedule until Listen or Camp is chosen again.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"set_operating_mode","description":"Choose explore or camp. Explore scans and listens with the audio on. Camp tunes the schedule and keeps the audio off until the channel is active.","parameters":{"type":"object","properties":{"mode":{"type":"string","description":"explore or camp"}},"required":["mode"]}}},
           {"type":"function","function":{"name":"get_schedule","description":"The camp schedule, the current mode, and which entry would use the radio now.","parameters":{"type":"object","properties":{}}}},
@@ -60,7 +63,7 @@ public sealed class AgentTools(RadioSession session, CampBook camp)
     public static bool Known(string name) =>
         name is "list_devices" or "open_device" or "close_device" or "get_status" or "get_capabilities"
             or "list_ham_bands" or "get_antenna" or "set_antenna" or "guess_antenna"
-            or "scan_band" or "inspect_signal" or "listen" or "stop"
+            or "scan_band" or "inspect_signal" or "listen" or "list_clips" or "analyze_clip" or "stop"
             or "set_operating_mode" or "get_schedule" or "add_schedule_entry" or "update_schedule_entry"
             or "remove_schedule_entry" or "camp_now" or "clear_camp_now"
             or "set_schedule_policy" or "follow_schedule" or "ignore_schedule";
@@ -130,6 +133,59 @@ public sealed class AgentTools(RadioSession session, CampBook camp)
                         cancellationToken);
                     string heard = report.Text ?? report.Morse ?? $"{report.Seconds:0} s of {report.Mode}.";
                     return new ToolOutcome(Json(report), Summary: heard, ListenText: report.Text ?? report.Morse);
+                }
+                case "list_clips":
+                {
+                    int limit = IntArg(args, "limit") ?? 8;
+                    var listed = clips.Recent(limit).Select(clip => new
+                    {
+                        clipId = clip.Id,
+                        frequencyHz = clip.FrequencyHz,
+                        mode = clip.Mode,
+                        hasText = !string.IsNullOrWhiteSpace(clip.Morse),
+                        audioUri = $"audio://clips/{clip.Id}"
+                    }).ToList();
+                    return Text(Json(listed), listed.Count == 1 ? "1 clip." : $"{listed.Count} clips.");
+                }
+                case "analyze_clip":
+                {
+                    string? id = TextArg(args, "clipId");
+                    AudioClip? clip = string.IsNullOrWhiteSpace(id) || id.Equals("latest", StringComparison.OrdinalIgnoreCase)
+                        ? clips.Latest()
+                        : clips.TryGet(id, out AudioClip? found) ? found : null;
+                    if (clip is null)
+                        throw new ArgumentException(string.IsNullOrWhiteSpace(id)
+                            ? "No listen clips yet. Call listen first."
+                            : $"No audio clip '{id}'.");
+                    string hint = TextArg(args, "mode") ?? clip.Mode;
+                    DigiAnalysisReport report = DigiClipAnalyzer.AnalyzeWav(clip.Wav, hint);
+                    var payload = new
+                    {
+                        clipId = clip.Id,
+                        frequencyHz = clip.FrequencyHz,
+                        mode = clip.Mode,
+                        report.SampleRate,
+                        report.DurationSeconds,
+                        report.Rms,
+                        report.Peak,
+                        report.HotBins200To3000,
+                        report.DominantPeakHz,
+                        report.DominantWidthHz,
+                        report.ToneEntropy,
+                        report.Ft8Count,
+                        report.Ft8BestSync,
+                        report.Ft8LdpcOk,
+                        report.Js8Count,
+                        report.VaracMonitorAvailable,
+                        report.VaracStatus,
+                        report.SelfTestOk,
+                        report.Messages,
+                        report.Hints
+                    };
+                    string summary = report.Messages.Count > 0
+                        ? $"Decoded {report.Messages.Count} digi line(s)."
+                        : (report.Hints.Count > 0 ? report.Hints[0] : "No digi text in that clip.");
+                    return Text(Json(payload), summary);
                 }
                 case "stop":
                     if (camp.Mode == "camp")

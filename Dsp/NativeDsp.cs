@@ -17,10 +17,16 @@ public static class NativeDsp
 
     private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (!libraryName.Equals("m17voice", StringComparison.OrdinalIgnoreCase))
+        string? file = libraryName.ToLowerInvariant() switch
+        {
+            "m17voice" => OperatingSystem.IsWindows() ? "m17voice.dll" : "libm17voice.so",
+            "xaramonitor" => OperatingSystem.IsWindows() ? "xaramonitor.dll" : "libxaramonitor.so",
+            _ => null
+        };
+        if (file is null)
             return IntPtr.Zero;
 
-        foreach (string path in CandidatePaths())
+        foreach (string path in CandidatePaths(file))
         {
             if (NativeLibrary.TryLoad(path, out IntPtr handle))
                 return handle;
@@ -29,9 +35,8 @@ public static class NativeDsp
         return IntPtr.Zero;
     }
 
-    private static IEnumerable<string> CandidatePaths()
+    private static IEnumerable<string> CandidatePaths(string file)
     {
-        string file = OperatingSystem.IsWindows() ? "m17voice.dll" : "libm17voice.so";
         string baseDir = AppContext.BaseDirectory;
         yield return Path.Combine(baseDir, file);
         yield return Path.Combine(baseDir, "native", file);
@@ -40,6 +45,7 @@ public static class NativeDsp
         {
             yield return Path.Combine(cwd, file);
             yield return Path.Combine(cwd, "native", file);
+            yield return Path.Combine(cwd, "Host", "native", file);
         }
     }
 }

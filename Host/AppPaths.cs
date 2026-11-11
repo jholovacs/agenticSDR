@@ -17,6 +17,21 @@ public static class AppPaths
         return Path.Combine(directory ?? "", "schedule.json");
     }
 
+    public static string UserCallsignCache()
+    {
+        string llm = UserLlm();
+        string? directory = Path.GetDirectoryName(llm);
+        return Path.Combine(directory ?? "", "callsigns.json");
+    }
+
+    public static string SelectCallsignCache(string contentRoot)
+    {
+        string content = Path.Combine(contentRoot, "callsigns.json");
+        if (File.Exists(content))
+            return content;
+        return UserCallsignCache();
+    }
+
     public static string SelectSchedule(string contentRoot)
     {
         string content = Path.Combine(contentRoot, "schedule.json");

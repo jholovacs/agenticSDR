@@ -221,19 +221,34 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 dialog p { margin: 12px 0; color: var(--muted); }
 
-.progress {
-  height: 4px;
-  margin: 12px 20px 0;
+.busy-panel {
+  width: min(24rem, calc(100vw - 2rem));
+  text-align: left;
+}
+.busy-panel h2 { margin: 0; font-size: 1.15rem; }
+.busy-panel #busy-detail {
+  margin: 10px 0 14px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.busy-meter {
+  height: 6px;
   background: #2a241d;
   border-radius: 99px;
   overflow: hidden;
 }
-
-#bar {
+#busy-bar {
   display: block;
   height: 100%;
   width: 0;
   background: linear-gradient(90deg, var(--amber), var(--green));
+  transition: width 0.2s ease;
+}
+.busy-percent {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .layout {
@@ -433,7 +448,10 @@ pre {
 
 pre .morse { color: var(--amber); }
 pre .packet { color: #38bdf8; }
-pre .speech, pre .ft8, pre .note { color: var(--green); }
+pre .ft8 { color: #7dd3c0; white-space: pre-wrap; }
+pre .rds { color: #c4b5fd; }
+pre .speech { color: var(--green); }
+pre .note { color: #86efac; }
 
 .empty { margin-top: 12px; }
 

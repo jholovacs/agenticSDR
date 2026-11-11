@@ -62,8 +62,10 @@ SoapySDR is the path for radios that are not RTL2832U dongles. This program does
 
 Optional repeater names: set `Sdr:Latitude` and `Sdr:Longitude`, or a Maidenhead `Sdr:Grid`, in `Host/appsettings.json`. If the lookup fails, hits still carry the band-plan label.
 
+Optional digimode callsign references: `Sdr:CallsignLookup` (default `true`) looks up decoded calls in the background via free [HamDB](https://hamdb.org/api) and [HamQTH DXCC](https://www.hamqth.com/developers) (no API key). Results are cached under the user config folder as `callsigns.json`. Failures stay silent; decode never waits on the network. DXCC entity data is provided by HamQTH.com.
+
 ## Bands
 
-The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM broadcast, and NOAA weather when the antenna can hear them. A scan reports frequency, a mode guess (NBFM, WBFM, AM, USB, LSB, CW, or FT8 near a known dial frequency), bandwidth, SNR, and a source label such as a calling frequency or band segment. Transmit, other digital modes, and encrypted traffic are out of scope. Those words are defined in [GUIDE.md](GUIDE.md).
+The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM broadcast, and NOAA weather when the antenna can hear them. A scan reports frequency, a mode guess (NBFM, WBFM, AM, USB, LSB, CW, or digimodes near a known dial such as FT8, JS8, Olivia, JTTY, or VarAC), bandwidth, SNR, and a source label such as a calling frequency or band segment. VarAC text decode uses the bundled MIT xaramonitor library (from xara). Transmit and encrypted traffic are out of scope. Those words are defined in [GUIDE.md](GUIDE.md).
 
 `dotnet test` covers the spectrum classifier, demodulator, Morse decoder, FT8 codec, and band plan. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.

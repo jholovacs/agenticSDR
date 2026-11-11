@@ -42,14 +42,19 @@ public class BandPlanTests
     }
 
     [Fact]
-    public void Known_service_channels_list_cb_gmrs_and_noaa()
+    public void Known_service_channels_list_cb_gmrs_noaa_and_digi()
     {
         IReadOnlyList<KnownChannelGroup> groups = Region2BandPlan.KnownServiceChannels();
-        Assert.Equal(["cb", "gmrs", "noaa"], groups.Select(group => group.Id).ToArray());
+        Assert.Equal(["cb", "gmrs", "noaa", "ft8", "js8", "olivia", "jtty", "varac"], groups.Select(group => group.Id).ToArray());
         Assert.Contains(groups.Single(group => group.Id == "cb").Channels, channel => channel.Label == "19 highway" && channel.FrequencyHz == 27_185_000 && channel.Mode == "am");
         Assert.Contains(groups.Single(group => group.Id == "noaa").Channels, channel => channel.Label == "WX1" && channel.FrequencyHz == 162_550_000 && channel.Mode == "nbfm");
         Assert.DoesNotContain(groups.Single(group => group.Id == "gmrs").Channels, channel => channel.Name.Contains("input", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(22, groups.Single(group => group.Id == "gmrs").Channels.Count);
+        Assert.Contains(groups.Single(group => group.Id == "ft8").Channels, channel => channel.FrequencyHz == 28_074_000 && channel.Mode == "ft8" && channel.Label.Contains("10 m", StringComparison.Ordinal));
+        Assert.Contains(groups.Single(group => group.Id == "js8").Channels, channel => channel.FrequencyHz == 28_078_000 && channel.Mode == "js8");
+        Assert.Contains(groups.Single(group => group.Id == "olivia").Channels, channel => channel.Mode == "olivia");
+        Assert.Contains(groups.Single(group => group.Id == "jtty").Channels, channel => channel.Mode == "jtty");
+        Assert.Contains(groups.Single(group => group.Id == "varac").Channels, channel => channel.FrequencyHz == 14_105_000 && channel.Mode == "varac");
     }
 
     [Fact]
@@ -81,6 +86,17 @@ public class LocationTests
         Assert.True(Maidenhead.TryParse("JJ00", out double latitude, out double longitude));
         Assert.Equal(0.5, latitude, 3);
         Assert.Equal(1, longitude, 3);
+    }
+
+    [Theory]
+    [InlineData("FN42", "Boston")]
+    [InlineData("FN13", "upstate New York")]
+    [InlineData("EK09", "Mexico City")]
+    [InlineData("OM89", "Beijing")]
+    [InlineData("OM50", "central China")]
+    public void Grid_squares_name_a_plain_region(string grid, string place)
+    {
+        Assert.Equal(place, Maidenhead.Describe(grid));
     }
 
     [Fact]

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic SDR</title>
-    <link rel="stylesheet" href="/app.css?v=27">
+    <link rel="stylesheet" href="/app.css?v=31">
 </head>
 <body>
   <header class="face">
@@ -128,6 +128,10 @@
         <option value="lsb">LSB</option>
         <option value="cw">CW</option>
         <option value="ft8">FT8</option>
+        <option value="js8">JS8</option>
+        <option value="olivia">Olivia</option>
+        <option value="jtty">JTTY</option>
+        <option value="varac">VarAC</option>
         <option value="dmr">DMR</option>
         <option value="m17">M17</option>
         <option value="packet">Packet (AX.25)</option>
@@ -138,7 +142,7 @@
     </div>
     <details class="known-channels" data-tip="known-channels">
       <summary>Known channels</summary>
-      <p class="fold-note">New to this radio? Open NOAA weather and click a WX channel. Hearing the forecast means the SDR is working. CB and GMRS are fixed channel lists you can tune the same way, without scanning.</p>
+      <p class="fold-note">New to this radio? Open NOAA weather and click a WX channel. Hearing the forecast means the SDR is working. CB, GMRS, and digimode dials (FT8, JS8, Olivia, JTTY, VarAC such as 10 m · 28.074) are fixed lists you can tune the same way, without scanning.</p>
       <div id="known-channel-groups"></div>
     </details>
   </details>
@@ -164,6 +168,10 @@
             <option value="lsb">SSB LSB</option>
             <option value="cw">CW</option>
             <option value="ft8">FT8</option>
+            <option value="js8">JS8</option>
+            <option value="olivia">Olivia</option>
+            <option value="jtty">JTTY</option>
+            <option value="varac">VarAC</option>
             <option value="dmr">DMR</option>
             <option value="m17">M17</option>
             <option value="packet">Packet (AX.25)</option>
@@ -221,8 +229,6 @@
       <p id="schedule-empty" class="empty">Nothing scheduled.</p>
     </div>
   </details>
-
-  <div class="progress" aria-hidden="true"><span id="bar"></span></div>
 
   <main class="layout">
     <details class="panel fold" open data-fold="signals">
@@ -294,6 +300,15 @@
           <input id="dmr-tg" inputmode="numeric" placeholder="Any">
         </label>
       </div>
+      <div id="wbfm-fields" class="dmr-fields" hidden>
+        <label data-tip="wbfm-program">Secondary channel
+          <select id="wbfm-program">
+            <option value="main">Main (stereo)</option>
+            <option value="sca67">SCA 67 kHz</option>
+            <option value="sca92">SCA 92 kHz</option>
+          </select>
+        </label>
+      </div>
       <p id="live-state" class="source" hidden>Playing as the signal arrives.</p>
       <p id="camp-now" class="source camp-only" hidden></p>
       <label id="camp-policy-row" class="camp-only" data-tip="schedule-policy" hidden>When a scheduled time starts
@@ -340,7 +355,17 @@
     </div>
   </dialog>
 
+  <dialog id="busy-panel" class="busy-panel">
+    <h2 id="busy-title">Working</h2>
+    <p id="busy-detail">The radio is busy.</p>
+    <div class="busy-meter" aria-hidden="true"><span id="busy-bar"></span></div>
+    <p id="busy-percent" class="busy-percent"></p>
+    <div class="signal-actions">
+      <button id="busy-stop" type="button">Stop</button>
+    </div>
+  </dialog>
+
   <script src="/lame.min.js?v=5"></script>
-  <script src="/app.js?v=31"></script>
+  <script src="/app.js?v=37"></script>
 </body>
 </html>

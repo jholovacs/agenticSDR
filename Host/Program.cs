@@ -28,6 +28,18 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton(sp =>
 {
+    var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    http.DefaultRequestHeaders.UserAgent.ParseAdd("AgenticSdr/0.1 (local amateur-radio receiver)");
+    var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+    var options = sp.GetRequiredService<SdrOptions>();
+    return new CallsignLookup(
+        http,
+        sp.GetRequiredService<ILogger<CallsignLookup>>(),
+        AppPaths.SelectCallsignCache(env.ContentRootPath),
+        options.CallsignLookup);
+});
+builder.Services.AddSingleton(sp =>
+{
     var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
     return new LlmStore(AppPaths.SelectLlm(env.ContentRootPath));
 });
@@ -44,6 +56,7 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<LlmStore>(),
         sp.GetRequiredService<RadioSession>(),
         sp.GetRequiredService<CampBook>(),
+        sp.GetRequiredService<ClipStore>(),
         http);
 });
 builder.Services.AddSingleton(sp => new SpeechDecoder(sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().ContentRootPath));

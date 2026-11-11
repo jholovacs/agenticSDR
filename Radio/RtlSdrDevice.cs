@@ -155,8 +155,9 @@ public sealed class RtlSdrDevice : IRadioDevice
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         int mode = RadioLimits.DirectSamplingModeFor(frequencyHz);
-        // The driver switches sampling mode itself when center frequency is set,
-        // as long as direct-sampling mode stays on automatic (0).
+        // librtlsdr: 0 = tuner, 1 = I-ADC, 2 = Q-ADC. Open() parks with sampling off;
+        // HF below 24 MHz must explicitly enable Q-branch or the R820T hears nothing useful.
+        Check(RtlSdrNative.rtlsdr_set_direct_sampling(_handle, mode), "set_direct_sampling");
         Check(RtlSdrNative.rtlsdr_set_center_freq(_handle, (uint)Math.Round(frequencyHz)), "set_center_freq");
         CenterFrequencyHz = frequencyHz;
         DirectSampling = mode != 0;

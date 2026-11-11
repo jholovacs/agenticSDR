@@ -8,6 +8,14 @@ namespace AgenticSdr.Dsp;
 /// </summary>
 public sealed record Ft8Message(string Text, double AudioHz, double TimeSeconds, double SnrDb);
 
+/// <summary>Decode outcome plus sync/LDPC counters for empty-slot diagnosis.</summary>
+public sealed record Ft8DecodeStats(
+    IReadOnlyList<Ft8Message> Messages,
+    int CandidatesTried,
+    int LdpcAccepted,
+    float BestSyncScore,
+    double AudioSeconds);
+
 /// <summary>
 /// Finds FT8 messages in audio. FT8 is a slow digital mode: 15-second transmissions built from eight tones.
 /// Audio shorter than about 10 seconds returns nothing, because a whole message has not arrived.
@@ -23,13 +31,98 @@ public static class Ft8Decoder
     private const int MinBin = 32;
     private const int MaxBin = 481;
     private const int NumBins = MaxBin - MinBin;
+    /// <summary>How many Costas hits to try with LDPC. A busy band needs far more than a handful.</summary>
+    private const int MaxCandidates = 200;
+    private const float MinSyncScore = 1.6f;
+    private const int DecodePasses = 2;
 
+    /// <summary>
+    /// Formats decoded FT8 for the page. Each line shows strength, tone pitch, the message, and a plain-language reading.
+    /// </summary>
     public static string Format(IReadOnlyList<Ft8Message> messages)
     {
         if (messages.Count == 0)
             return "";
-        return string.Join("\n", messages.Select(message =>
-            $"{message.SnrDb,4:0} dB  {message.AudioHz,6:0} Hz  {message.Text}"));
+
+        var lines = new List<string> { "FT8" };
+        foreach (Ft8Message message in messages)
+            lines.Add(FormatOne(message));
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatOne(Ft8Message message)
+    {
+        string head = $"{message.SnrDb,4:0} dB  {message.AudioHz,6:0} Hz  {message.Text}";
+        string meaning = Explain(message.Text);
+        return string.IsNullOrEmpty(meaning) ? head : $"{head}\n           {meaning}";
+    }
+
+    /// <summary>Plain-language reading of a standard FT8 line for beginners.</summary>
+    public static string Explain(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        string[] parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return "";
+
+        if (parts[0].Equals("CQ", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parts.Length >= 3 && parts[1].Equals("DX", StringComparison.OrdinalIgnoreCase))
+                return $"{parts[2]} is calling for a long-distance (DX) contact.";
+            if (parts.Length >= 3 && IsGrid(parts[^1]))
+                return $"{parts[^2]} is calling anyone from {GridPhrase(parts[^1])}.";
+            if (parts.Length >= 2)
+                return $"{parts[^1]} is calling anyone (CQ).";
+            return "A station is calling anyone (CQ).";
+        }
+
+        if (parts.Length == 2 && parts[0].Equals("TU", StringComparison.OrdinalIgnoreCase) && parts[1] == "73")
+            return "Thank you, and goodbye (73).";
+
+        if (parts.Length >= 3)
+        {
+            string a = parts[0];
+            string b = parts[1];
+            string rest = parts[2];
+            if (rest is "RR73" or "RRR")
+                return $"{b} confirms the exchange with {a} and is signing off.";
+            if (rest == "73")
+                return $"{b} is saying goodbye (73) to {a}.";
+            if (IsReport(rest, out string report))
+                return $"{b} is answering {a} with signal report {report} dB.";
+            if (rest.StartsWith('R') && IsReport(rest[1..], out string confirmed))
+                return $"{b} confirms to {a} with report {confirmed} dB.";
+            if (IsGrid(rest))
+                return $"{b} is working {a} and reports {GridPhrase(rest)}.";
+        }
+
+        if (parts.Length == 2)
+            return $"{parts[1]} is addressing {parts[0]}.";
+
+        return "Free-text or nonstandard FT8 message.";
+    }
+
+    private static string GridPhrase(string grid)
+    {
+        string? place = Maidenhead.Describe(grid);
+        return place is null ? $"grid {grid}" : $"grid {grid} ({place})";
+    }
+
+    private static bool IsGrid(string token) =>
+        token.Length is 4 or 6
+        && char.IsLetter(token[0]) && char.IsLetter(token[1])
+        && char.IsDigit(token[2]) && char.IsDigit(token[3]);
+
+    private static bool IsReport(string token, out string report)
+    {
+        report = token;
+        if (token.Length is < 2 or > 3)
+            return false;
+        if (token[0] is '+' or '-')
+            return int.TryParse(token, out _);
+        return false;
     }
 
     public static void Modulate(Span<float> audio, int sampleRate, string text, double audioHz, double startSeconds)
@@ -58,24 +151,102 @@ public static class Ft8Decoder
         }
     }
 
-    public static IReadOnlyList<Ft8Message> Decode(ReadOnlySpan<float> audio, int sampleRate, Ft8Callsigns? calls = null)
+    public static IReadOnlyList<Ft8Message> Decode(ReadOnlySpan<float> audio, int sampleRate, Ft8Callsigns? calls = null) =>
+        DecodeDetailed(audio, sampleRate, calls).Messages;
+
+    /// <summary>Same as Decode, plus sync/LDPC counters for diagnosing empty slots.</summary>
+    public static Ft8DecodeStats DecodeDetailed(ReadOnlySpan<float> audio, int sampleRate, Ft8Callsigns? calls = null)
     {
         if (audio.Length == 0 || sampleRate < 4_000)
-            return [];
+            return new Ft8DecodeStats([], 0, 0, 0, 0);
 
         float[] wave = To12K(audio, sampleRate);
         if (wave.Length < SampleRate * 10)
-            return [];
+            return new Ft8DecodeStats([], 0, 0, 0, wave.Length / (double)SampleRate);
 
-        Waterfall waterfall = BuildWaterfall(wave);
-        List<Candidate> candidates = FindCandidates(waterfall);
         calls ??= Ft8Callsigns.Shared;
-        var packed = new List<Decoded>();
-        foreach (Candidate candidate in candidates)
+        Ft8DecodeStats best = DecodeWave(wave, calls);
+        if (best.Messages.Count > 0)
+            return best;
+
+        // Rescue only when Costas almost locked — full ppm/Hilbert sweeps on noise are too slow for live listen.
+        if (best.BestSyncScore >= 6f)
         {
-            if (!TryPayload(waterfall, candidate, out byte[] payload))
-                continue;
-            packed.Add(new Decoded(payload, candidate));
+            ReadOnlySpan<double> ppms = [-40, -20, 20, 40];
+            ReadOnlySpan<double> shifts = [-25, -12.5, 12.5, 25];
+            ReadOnlySpan<int> pads = [Hop / 2, Hop];
+            foreach (double ppm in ppms)
+            {
+                best = Prefer(best, DecodeWave(StretchPpm(wave, ppm), calls));
+                if (best.Messages.Count > 0)
+                    return best;
+            }
+
+            foreach (double df in shifts)
+            {
+                best = Prefer(best, DecodeWave(HilbertShift(wave, df), calls));
+                if (best.Messages.Count > 0)
+                    return best;
+            }
+
+            foreach (int pad in pads)
+            {
+                best = Prefer(best, DecodeWave(PadFront(wave, pad), calls));
+                if (best.Messages.Count > 0)
+                    return best;
+            }
+
+            best = Prefer(best, DecodeWave(wave, calls, mirrorTones: true));
+        }
+
+        return best;
+    }
+
+    private static Ft8DecodeStats Prefer(Ft8DecodeStats a, Ft8DecodeStats b)
+    {
+        if (b.Messages.Count > a.Messages.Count)
+            return b;
+        if (b.Messages.Count == a.Messages.Count && b.LdpcAccepted > a.LdpcAccepted)
+            return b;
+        if (b.Messages.Count == a.Messages.Count && b.LdpcAccepted == a.LdpcAccepted && b.BestSyncScore > a.BestSyncScore)
+            return b;
+        return a;
+    }
+
+    private static Ft8DecodeStats DecodeWave(float[] wave, Ft8Callsigns calls, bool mirrorTones = false)
+    {
+        Waterfall waterfall = BuildWaterfall(wave);
+        var packed = new List<Decoded>();
+        var seenPayload = new HashSet<string>(StringComparer.Ordinal);
+        int candidatesTried = 0;
+        int ldpcPass = 0;
+        float bestSync = 0;
+
+        for (int pass = 0; pass < DecodePasses; pass++)
+        {
+            List<Candidate> candidates = FindCandidates(waterfall, mirrorTones);
+            int foundThisPass = 0;
+            foreach (Candidate rough in candidates)
+            {
+                Candidate candidate = RefineCandidate(waterfall, rough, mirrorTones);
+                candidatesTried++;
+                if (candidate.Score > bestSync)
+                    bestSync = candidate.Score;
+                if (!TryPayload(waterfall, candidate, out byte[] payload, mirrorTones))
+                    continue;
+
+                ldpcPass++;
+                string key = Convert.ToHexString(payload);
+                if (!seenPayload.Add(key))
+                    continue;
+
+                packed.Add(new Decoded(payload, candidate));
+                waterfall.Blank(candidate);
+                foundThisPass++;
+            }
+
+            if (foundThisPass == 0)
+                break;
         }
 
         foreach (Decoded item in packed)
@@ -85,10 +256,71 @@ public static class Ft8Decoder
         foreach (Decoded item in packed)
             AddMessage(messages, item, calls);
 
-        return messages
+        IReadOnlyList<Ft8Message> ordered = messages
             .OrderBy(message => message.TimeSeconds)
             .ThenBy(message => message.AudioHz)
             .ToList();
+        return new Ft8DecodeStats(ordered, candidatesTried, ldpcPass, bestSync, wave.Length / (double)SampleRate);
+    }
+
+    private static float[] StretchPpm(float[] wave, double ppm)
+    {
+        double factor = 1.0 + ppm * 1e-6;
+        int count = Math.Max(1, (int)(wave.Length / factor));
+        var output = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            double position = i * factor;
+            int left = (int)position;
+            int right = Math.Min(left + 1, wave.Length - 1);
+            float mix = (float)(position - left);
+            output[i] = wave[left] * (1 - mix) + wave[right] * mix;
+        }
+
+        return output;
+    }
+
+    /// <summary>Frequency-shift real audio via a cheap analytic (Hilbert) mix so Costas bins move intact.</summary>
+    private static float[] HilbertShift(float[] wave, double shiftHz)
+    {
+        if (Math.Abs(shiftHz) < 1e-9)
+            return wave;
+
+        // FIR Hilbert (odd taps): delay real by (N-1)/2, imag is Hilbert.
+        ReadOnlySpan<float> taps = [0.0025f, 0, 0.0124f, 0, 0.0375f, 0, 0.0834f, 0, 0.186f, 0, 0.627f, 0, -0.627f, 0, -0.186f, 0, -0.0834f, 0, -0.0375f, 0, -0.0124f, 0, -0.0025f];
+        int n = taps.Length;
+        int delay = n / 2;
+        var output = new float[wave.Length];
+        double step = 2 * Math.PI * shiftHz / SampleRate;
+        double phase = 0;
+        for (int i = 0; i < wave.Length; i++)
+        {
+            double imag = 0;
+            for (int t = 0; t < n; t++)
+            {
+                int at = i - t;
+                if ((uint)at < (uint)wave.Length)
+                    imag += wave[at] * taps[t];
+            }
+
+            int reAt = i - delay;
+            double real = (uint)reAt < (uint)wave.Length ? wave[reAt] : 0;
+            output[i] = (float)(real * Math.Cos(phase) - imag * Math.Sin(phase));
+            phase += step;
+            if (phase > Math.PI)
+                phase -= 2 * Math.PI;
+            else if (phase < -Math.PI)
+                phase += 2 * Math.PI;
+        }
+
+        return output;
+    }
+
+    private static float[] PadFront(float[] wave, int pad)
+    {
+        var output = new float[wave.Length + pad];
+        Array.Copy(wave, 0, output, pad, wave.Length);
+        return output;
     }
 
     private static void AddMessage(List<Ft8Message> messages, Decoded item, Ft8Callsigns calls)
@@ -100,14 +332,18 @@ public static class Ft8Decoder
         double hz = (item.Candidate.Bin + item.Candidate.FreqSub / (double)FreqOsr) / 0.16;
         double time = item.Candidate.Time * Hop / (double)SampleRate;
         var message = new Ft8Message(text, hz, time, item.Candidate.Score);
-        int index = messages.FindIndex(existing => Math.Abs(existing.AudioHz - hz) < 20 && Math.Abs(existing.TimeSeconds - time) < 0.3);
+        // Only merge the same text at nearly the same tone — different stations a few dozen Hz apart stay separate.
+        int index = messages.FindIndex(existing =>
+            existing.Text == text
+            && Math.Abs(existing.AudioHz - hz) < 50
+            && Math.Abs(existing.TimeSeconds - time) < 0.5);
         if (index < 0)
             messages.Add(message);
         else if (message.SnrDb > messages[index].SnrDb)
             messages[index] = message;
     }
 
-    private static bool TryPayload(Waterfall waterfall, Candidate candidate, out byte[] payload)
+    private static bool TryPayload(Waterfall waterfall, Candidate candidate, out byte[] payload, bool mirrorTones = false)
     {
         payload = new byte[10];
         Span<float> llr = stackalloc float[Ft8Tables.LdpcN];
@@ -118,7 +354,10 @@ public static class Ft8Decoder
             int symbol = k + (k < 29 ? 7 : 14);
             int step = candidate.Time + symbol * TimeOsr;
             for (int j = 0; j < 8; j++)
-                powers[j] = waterfall.At(step, candidate.FreqSub, candidate.Bin + gray[j]);
+            {
+                int tone = mirrorTones ? 7 - gray[j] : gray[j];
+                powers[j] = waterfall.At(step, candidate.FreqSub, candidate.Bin + tone);
+            }
 
             llr[3 * k] = Max4(powers[4], powers[5], powers[6], powers[7]) - Max4(powers[0], powers[1], powers[2], powers[3]);
             llr[3 * k + 1] = Max4(powers[2], powers[3], powers[6], powers[7]) - Max4(powers[0], powers[1], powers[4], powers[5]);
@@ -148,9 +387,12 @@ public static class Ft8Decoder
             llr[i] *= scale;
     }
 
-    private static List<Candidate> FindCandidates(Waterfall waterfall)
+    private static List<Candidate> FindCandidates(Waterfall waterfall, bool mirrorTones = false)
     {
         int last = waterfall.Steps - 79 * TimeOsr;
+        if (last < 0)
+            return [];
+
         var ranked = new List<Candidate>();
         for (int freqSub = 0; freqSub < FreqOsr; freqSub++)
         {
@@ -158,8 +400,8 @@ public static class Ft8Decoder
             {
                 for (int time = 0; time <= last; time++)
                 {
-                    float score = SyncScore(waterfall, time, freqSub, bin);
-                    if (score < 4)
+                    float score = SyncScore(waterfall, time, freqSub, bin, mirrorTones);
+                    if (score < MinSyncScore)
                         continue;
                     ranked.Add(new Candidate(time, freqSub, bin, score));
                 }
@@ -177,40 +419,82 @@ public static class Ft8Decoder
             if (near)
                 continue;
             kept.Add(candidate);
-            if (kept.Count == 24)
+            if (kept.Count == MaxCandidates)
                 break;
         }
 
         return kept;
     }
 
-    private static float SyncScore(Waterfall waterfall, int time, int freqSub, int bin)
+    /// <summary>
+    /// Polish a coarse Costas hit: search nearby time steps and tone bins before LDPC.
+    /// On-air captures often sit between the coarse grid; unrefined LLRs then fail the CRC.
+    /// </summary>
+    private static Candidate RefineCandidate(Waterfall waterfall, Candidate rough, bool mirrorTones = false)
     {
-        ReadOnlySpan<byte> costas = Ft8Tables.Costas;
-        float sum = 0;
-        int count = 0;
-        for (int group = 0; group < 3; group++)
+        int last = waterfall.Steps - 79 * TimeOsr;
+        Candidate best = rough;
+        for (int dt = -TimeOsr; dt <= TimeOsr; dt++)
         {
-            for (int k = 0; k < 7; k++)
+            int time = rough.Time + dt;
+            if (time < 0 || time > last)
+                continue;
+            for (int db = -1; db <= 1; db++)
             {
-                int step = time + (group * 36 + k) * TimeOsr;
-                int tone = costas[k];
-                float power = waterfall.At(step, freqSub, bin + tone);
-                if (tone > 0)
+                int bin = rough.Bin + db;
+                if (bin < MinBin || bin > MaxBin - 8)
+                    continue;
+                for (int freqSub = 0; freqSub < FreqOsr; freqSub++)
                 {
-                    sum += power - waterfall.At(step, freqSub, bin + tone - 1);
-                    count++;
-                }
-
-                if (tone < 7)
-                {
-                    sum += power - waterfall.At(step, freqSub, bin + tone + 1);
-                    count++;
+                    float score = SyncScore(waterfall, time, freqSub, bin, mirrorTones);
+                    if (score > best.Score)
+                        best = new Candidate(time, freqSub, bin, score);
                 }
             }
         }
 
-        return count == 0 ? 0 : sum / count;
+        return best;
+    }
+
+    /// <summary>
+    /// Costas sync quality: how far each sync tone sits above the other seven bins in that symbol.
+    /// Uses the better of the full three-group average and the best single Costas group so a
+    /// clipped slot edge still ranks the message.
+    /// </summary>
+    private static float SyncScore(Waterfall waterfall, int time, int freqSub, int bin, bool mirrorTones = false)
+    {
+        ReadOnlySpan<byte> costas = Ft8Tables.Costas;
+        float total = 0;
+        float bestGroup = float.NegativeInfinity;
+        for (int group = 0; group < 3; group++)
+        {
+            float groupSum = 0;
+            for (int k = 0; k < 7; k++)
+            {
+                int step = time + (group * 36 + k) * TimeOsr;
+                int tone = mirrorTones ? 7 - costas[k] : costas[k];
+                float peak = waterfall.At(step, freqSub, bin + tone);
+                float others = 0;
+                for (int j = 0; j < 8; j++)
+                {
+                    if (j == tone)
+                        continue;
+                    others += waterfall.At(step, freqSub, bin + j);
+                }
+
+                groupSum += peak - others / 7f;
+            }
+
+            groupSum /= 7f;
+            total += groupSum;
+            if (groupSum > bestGroup)
+                bestGroup = groupSum;
+        }
+
+        float average = total / 3f;
+        // Prefer a strong single Costas array when the slot was clipped, but keep the full average
+        // as the usual score so random noise groups do not dominate.
+        return Math.Max(average, 0.85f * bestGroup + 0.15f * average);
     }
 
     private static Waterfall BuildWaterfall(float[] wave)
@@ -292,6 +576,22 @@ public static class Ft8Decoder
             if ((uint)step >= (uint)Steps || (uint)freqSub >= FreqOsr || (uint)index >= NumBins)
                 return -120;
             return magnitude[(step * FreqOsr + freqSub) * NumBins + index];
+        }
+
+        /// <summary>Knock down a decoded signal so a later pass can hear weaker neighbors.</summary>
+        public void Blank(Candidate candidate)
+        {
+            for (int symbol = 0; symbol < 79; symbol++)
+            {
+                int step = candidate.Time + symbol * TimeOsr;
+                for (int j = 0; j < 8; j++)
+                {
+                    int index = candidate.Bin + j - MinBin;
+                    if ((uint)step >= (uint)Steps || (uint)candidate.FreqSub >= FreqOsr || (uint)index >= NumBins)
+                        continue;
+                    magnitude[(step * FreqOsr + candidate.FreqSub) * NumBins + index] = -120;
+                }
+            }
         }
     }
 

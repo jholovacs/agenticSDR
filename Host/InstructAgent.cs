@@ -9,10 +9,10 @@ namespace AgenticSdr.Host;
 /// Talks to an instruct model with the OpenAI chat-completions protocol, then runs any tool the model requests.
 /// A server that rejects the tools field is asked again in plain text, which older instruct models can follow.
 /// </summary>
-public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook camp, HttpClient http)
+public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook camp, ClipStore clips, HttpClient http)
 {
     private const int MaxRounds = 6;
-    private readonly AgentTools _tools = new(session, camp);
+    private readonly AgentTools _tools = new(session, camp, clips);
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
     {
@@ -348,7 +348,7 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
 
     private const string SystemPrompt =
         """
-        You operate a receive-only software-defined radio for a beginner. Use the tools to look at the radio. Do not invent frequencies, callsigns, or signals. Frequencies for listen and inspect are in hertz. Band ids include 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, and dmr. Prefer a band the antenna recommends. DMR voice uses a proprietary codec and is not decoded. Explore mode scans and listens with the audio on. Camp mode tunes a frequency and keeps the speaker quiet until that channel is active. camp_now camps right away; a schedule is optional. Times are local HH:mm. Leave start and end empty for a watch that runs only when nothing else is scheduled, and allow only one of those. New entries that overlap are rejected. set_schedule_policy, follow_schedule, and ignore_schedule choose whether a timed entry may take the radio from an explicit camp. Explain the result in plain language. If you cannot call tools directly, reply with only a JSON object of the form {"tool":"scan_band","arguments":{"bandId":"2m"}} and nothing else.
+        You operate a receive-only software-defined radio for a beginner. Use the tools to look at the radio. Do not invent frequencies, callsigns, or signals. Frequencies for listen and inspect are in hertz. Band ids include 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, and dmr. Prefer a band the antenna recommends. DMR voice uses a proprietary codec and is not decoded. Digimode scan hits (FT8, JS8, Olivia, JTTY, VarAC) mean channel occupancy only — not that text decoded. When listen returns empty digi text, call analyze_clip with that clipId (or omit clipId for the latest clip) and explain the hints. list_clips lists recent captures. Explore mode scans and listens with the audio on. Camp mode tunes a frequency and keeps the speaker quiet until that channel is active. camp_now camps right away; a schedule is optional. Times are local HH:mm. Leave start and end empty for a watch that runs only when nothing else is scheduled, and allow only one of those. New entries that overlap are rejected. set_schedule_policy, follow_schedule, and ignore_schedule choose whether a timed entry may take the radio from an explicit camp. Explain the result in plain language. If you cannot call tools directly, reply with only a JSON object of the form {"tool":"scan_band","arguments":{"bandId":"2m"}} and nothing else.
         """;
 
     private sealed record ToolCall(string Id, string Name, string Arguments);

@@ -12,10 +12,26 @@ public static class ModeClassifier
         RadioMode mode = RadioMode.Unknown;
         double confidence = 0.3;
 
-        if (hint?.PreferredMode == RadioMode.Ft8 && bw < 3_000 && peak.SnrDb >= 6)
+        // Digi dial hints mean “this looks like the published watering hole,” not decode certainty.
+        if ((hint?.PreferredMode is RadioMode.Ft8 or RadioMode.Js8) && bw < 3_600 && peak.SnrDb >= 0)
         {
-            mode = RadioMode.Ft8;
-            confidence = 0.7;
+            mode = hint.PreferredMode;
+            confidence = peak.SnrDb >= 6 ? 0.48 : 0.40;
+        }
+        else if (hint?.PreferredMode == RadioMode.Olivia && bw < 2_500 && peak.SnrDb >= 0)
+        {
+            mode = RadioMode.Olivia;
+            confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
+        }
+        else if (hint?.PreferredMode == RadioMode.Jtty && bw < 3_000 && peak.SnrDb >= 0)
+        {
+            mode = RadioMode.Jtty;
+            confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
+        }
+        else if (hint?.PreferredMode == RadioMode.Varac && bw < 3_200 && peak.SnrDb >= 0)
+        {
+            mode = RadioMode.Varac;
+            confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
         }
         else if (bw < 1_000 && peak.SnrDb >= 8)
         {
@@ -69,8 +85,11 @@ public static class ModeClassifier
             confidence = 0.4;
         }
 
-        if (hint is not null && hint.PreferredMode == mode && mode != RadioMode.Unknown)
+        bool digiMode = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+        if (hint is not null && hint.PreferredMode == mode && mode != RadioMode.Unknown && !digiMode)
             confidence = Math.Min(0.95, confidence + 0.1);
+        else if (hint is not null && hint.PreferredMode == mode && digiMode)
+            confidence = Math.Min(0.55, confidence + 0.04);
 
         if (peak.PossibleImage)
             confidence = Math.Min(confidence, 0.6);
@@ -101,12 +120,16 @@ public static class ModeClassifier
             "lsb" => RadioMode.Lsb,
             "cw" or "morse" => RadioMode.Cw,
             "ft8" => RadioMode.Ft8,
+            "js8" or "js8call" => RadioMode.Js8,
+            "olivia" => RadioMode.Olivia,
+            "jtty" => RadioMode.Jtty,
+            "varac" or "vara" or "xara" or "zara" => RadioMode.Varac,
             "wbfm" or "wfm" or "fmwb" => RadioMode.Wbfm,
             "dmr" => RadioMode.Dmr,
             "m17" => RadioMode.M17,
             "packet" or "ax25" or "aprs" or "afsk" or "pkt" => RadioMode.Packet,
             "raw" => RadioMode.Raw,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, wbfm, dmr, m17, packet, or raw.")
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, wbfm, dmr, m17, packet, or raw.")
         };
     }
 }

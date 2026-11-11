@@ -119,13 +119,14 @@ public static class WebApi
         });
         app.MapGet("/api/camp/audio", async (HttpContext http, RadioSession session, CancellationToken ct) =>
         {
-            if (!session.TryJoinCamp(out ChannelReader<byte[]>? reader, out int sampleRate, out CampTune? tune) || reader is null || tune is null)
+            if (!session.TryJoinCamp(out ChannelReader<byte[]>? reader, out int sampleRate, out int channels, out CampTune? tune) || reader is null || tune is null)
             {
                 http.Response.StatusCode = 404;
                 return;
             }
 
             http.Response.Headers["X-Audio-Rate"] = sampleRate.ToString(CultureInfo.InvariantCulture);
+            http.Response.Headers["X-Audio-Channels"] = channels.ToString(CultureInfo.InvariantCulture);
             http.Response.Headers["X-Tune-Hz"] = tune.FrequencyHz.ToString(CultureInfo.InvariantCulture);
             http.Response.Headers["X-Mode"] = tune.Mode;
             http.Response.ContentType = "application/octet-stream";
@@ -210,12 +211,54 @@ public static class WebApi
         app.MapPost("/api/inspect", async (InspectBody body, RadioSession session, CancellationToken ct) =>
             await Run(() => session.InspectAsync(body.FrequencyHz, ct)));
         app.MapPost("/api/listen", async (ListenBody body, RadioSession session, CancellationToken ct) =>
-            await Run(() => session.ListenAsync(body.FrequencyHz, body.Mode, body.Seconds ?? 8, ct)));
-        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, HttpContext http, RadioSession session, CancellationToken ct) =>
+            await Run(() => session.ListenAsync(body.FrequencyHz, body.Mode, body.Seconds ?? 8, ct, body.WbfmProgram)));
+        app.MapGet("/api/clips", (ClipStore clips, int? limit) =>
+            Results.Ok(clips.Recent(limit ?? 8).Select(clip => new
+            {
+                clipId = clip.Id,
+                frequencyHz = clip.FrequencyHz,
+                mode = clip.Mode,
+                hasText = !string.IsNullOrWhiteSpace(clip.Morse),
+                audioUrl = $"/audio/{clip.Id}.wav",
+                audioUri = $"audio://clips/{clip.Id}"
+            })));
+        app.MapGet("/api/analyze/{clipId}", (string clipId, string? mode, ClipStore clips) =>
+        {
+            AudioClip? clip = clipId.Equals("latest", StringComparison.OrdinalIgnoreCase)
+                ? clips.Latest()
+                : clips.TryGet(clipId, out AudioClip? found) ? found : null;
+            if (clip is null)
+                return Results.NotFound(new { error = "No audio clip." });
+            DigiAnalysisReport report = DigiClipAnalyzer.AnalyzeWav(clip.Wav, mode ?? clip.Mode);
+            return Results.Ok(new
+            {
+                clipId = clip.Id,
+                frequencyHz = clip.FrequencyHz,
+                mode = clip.Mode,
+                report.SampleRate,
+                report.DurationSeconds,
+                report.Rms,
+                report.Peak,
+                report.HotBins200To3000,
+                report.DominantPeakHz,
+                report.DominantWidthHz,
+                report.ToneEntropy,
+                report.Ft8Count,
+                report.Ft8BestSync,
+                report.Ft8LdpcOk,
+                report.Js8Count,
+                report.VaracMonitorAvailable,
+                report.VaracStatus,
+                report.SelfTestOk,
+                report.Messages,
+                report.Hints
+            });
+        });
+        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, string? wbfmProgram, HttpContext http, RadioSession session, CancellationToken ct) =>
         {
             try
             {
-                await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct);
+                await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct, wbfmProgram);
             }
             catch (OperationCanceledException)
             {
@@ -347,7 +390,7 @@ public sealed record ScanBody(string BandId);
 /// <summary>Body of POST /api/inspect. FrequencyHz is the frequency to measure, in hertz.</summary>
 public sealed record InspectBody(double FrequencyHz);
 /// <summary>Body of POST /api/listen. Mode is auto, nbfm, wbfm, am, usb, lsb, cw, or ft8. Seconds is capped at 20, and FT8 always uses 15.</summary>
-public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds);
+public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds, string? WbfmProgram = null);
 /// <summary>Body of POST /api/agent. Message is the question. History is earlier user and assistant sentences, not tool results.</summary>
 public sealed record AgentBody(string? Message, IReadOnlyList<AgentHistoryTurn>? History);
 /// <summary>Body of PUT /api/camp/mode. Mode is explore or camp.</summary>

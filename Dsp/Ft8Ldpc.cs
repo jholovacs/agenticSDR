@@ -49,7 +49,31 @@ internal static class Ft8Ldpc
     public static bool TryDecode(ReadOnlySpan<float> logLikelihood, Span<byte> payload)
     {
         Span<byte> plain = stackalloc byte[Ft8Tables.LdpcN];
-        if (!BeliefPropagation(logLikelihood, plain, iterations: 25))
+        Span<float> llr = stackalloc float[Ft8Tables.LdpcN];
+        logLikelihood.CopyTo(llr);
+
+        if (TryDecodeOnce(llr, plain, payload, iterations: 50))
+            return true;
+
+        // Soft OSD: flip the weakest channel bits and retry BP+CRC.
+        Span<int> weak = stackalloc int[6];
+        FindWeakest(llr, weak);
+        for (int n = 1; n <= weak.Length; n++)
+        {
+            llr.Clear();
+            logLikelihood.CopyTo(llr);
+            for (int i = 0; i < n; i++)
+                llr[weak[i]] = -llr[weak[i]];
+            if (TryDecodeOnce(llr, plain, payload, iterations: 40))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryDecodeOnce(Span<float> logLikelihood, Span<byte> plain, Span<byte> payload, int iterations)
+    {
+        if (!BeliefPropagation(logLikelihood, plain, iterations))
             return false;
 
         Span<byte> a91 = stackalloc byte[Ft8Tables.LdpcKBytes];
@@ -59,6 +83,31 @@ internal static class Ft8Ldpc
 
         a91[..10].CopyTo(payload);
         return true;
+    }
+
+    private static void FindWeakest(ReadOnlySpan<float> llr, Span<int> weak)
+    {
+        Span<float> mag = stackalloc float[weak.Length];
+        mag.Fill(float.PositiveInfinity);
+        weak.Fill(0);
+        for (int i = 0; i < llr.Length; i++)
+        {
+            float a = Math.Abs(llr[i]);
+            for (int s = 0; s < weak.Length; s++)
+            {
+                if (a >= mag[s])
+                    continue;
+                for (int k = weak.Length - 1; k > s; k--)
+                {
+                    mag[k] = mag[k - 1];
+                    weak[k] = weak[k - 1];
+                }
+
+                mag[s] = a;
+                weak[s] = i;
+                break;
+            }
+        }
     }
 
     public static bool CrcMatches(Span<byte> a91)

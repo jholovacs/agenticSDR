@@ -44,31 +44,63 @@ public static class Region2BandPlan
             [Call("160 m FT8", 1_840_000, RadioMode.Ft8, 3_600)]),
         Band("80m", "80 m", 3_500_000, 4_000_000,
             [Seg("80 m CW", 3_500_000, 3_600_000, RadioMode.Cw), Seg("80 m LSB", 3_600_000, 4_000_000, RadioMode.Lsb)],
-            [Call("80 m FT8", 3_573_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("80 m FT8", 3_573_000, RadioMode.Ft8, 3_600),
+                Call("80 m JS8", 3_578_000, RadioMode.Js8, 3_600),
+                Call("80 m Olivia", 3_583_000, RadioMode.Olivia, 1_500),
+                Call("80 m VarAC", 3_595_000, RadioMode.Varac, 2_500)
+            ]),
         Band("60m", "60 m", 5_330_500, 5_406_500,
             [Seg("60 m USB channelized", 5_330_500, 5_406_500, RadioMode.Usb)],
             [Call("60 m FT8", 5_357_000, RadioMode.Ft8, 3_600)]),
         Band("40m", "40 m", 7_000_000, 7_300_000,
             [Seg("40 m CW", 7_000_000, 7_125_000, RadioMode.Cw), Seg("40 m LSB", 7_125_000, 7_300_000, RadioMode.Lsb)],
-            [Call("40 m FT8", 7_074_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("40 m FT8", 7_074_000, RadioMode.Ft8, 3_600),
+                Call("40 m JS8", 7_078_000, RadioMode.Js8, 3_600),
+                Call("40 m Olivia", 7_073_000, RadioMode.Olivia, 1_500),
+                Call("40 m JTTY", 7_090_000, RadioMode.Jtty, 2_500),
+                Call("40 m VarAC", 7_105_000, RadioMode.Varac, 2_500)
+            ]),
         Band("30m", "30 m", 10_100_000, 10_150_000,
             [Seg("30 m CW", 10_100_000, 10_150_000, RadioMode.Cw)],
-            [Call("30 m FT8", 10_136_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("30 m FT8", 10_136_000, RadioMode.Ft8, 3_600),
+                Call("30 m JS8", 10_130_000, RadioMode.Js8, 3_600),
+                Call("30 m VarAC", 10_133_000, RadioMode.Varac, 2_500)
+            ]),
         Band("20m", "20 m", 14_000_000, 14_350_000,
             [Seg("20 m CW", 14_000_000, 14_150_000, RadioMode.Cw), Seg("20 m USB", 14_150_000, 14_350_000, RadioMode.Usb)],
             [
                 Call("20 m FT8", 14_074_000, RadioMode.Ft8, 3_600),
+                Call("20 m JS8", 14_078_000, RadioMode.Js8, 3_600),
+                Call("20 m Olivia", 14_072_300, RadioMode.Olivia, 1_500),
+                Call("20 m JTTY", 14_090_000, RadioMode.Jtty, 2_500),
+                Call("20 m VarAC", 14_105_000, RadioMode.Varac, 2_500),
                 Call("20 m USB net", 14_300_000, RadioMode.Usb, 5_000)
             ]),
         Band("17m", "17 m", 18_068_000, 18_168_000,
             [Seg("17 m CW", 18_068_000, 18_095_000, RadioMode.Cw), Seg("17 m USB", 18_095_000, 18_168_000, RadioMode.Usb)],
-            [Call("17 m FT8", 18_100_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("17 m FT8", 18_100_000, RadioMode.Ft8, 3_600),
+                Call("17 m JS8", 18_104_000, RadioMode.Js8, 3_600),
+                Call("17 m VarAC", 18_107_000, RadioMode.Varac, 2_500)
+            ]),
         Band("15m", "15 m", 21_000_000, 21_450_000,
             [Seg("15 m CW", 21_000_000, 21_200_000, RadioMode.Cw), Seg("15 m USB", 21_200_000, 21_450_000, RadioMode.Usb)],
-            [Call("15 m FT8", 21_074_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("15 m FT8", 21_074_000, RadioMode.Ft8, 3_600),
+                Call("15 m JS8", 21_078_000, RadioMode.Js8, 3_600),
+                Call("15 m Olivia", 21_072_500, RadioMode.Olivia, 1_500),
+                Call("15 m VarAC", 21_105_000, RadioMode.Varac, 2_500)
+            ]),
         Band("12m", "12 m", 24_890_000, 24_990_000,
             [Seg("12 m CW", 24_890_000, 24_930_000, RadioMode.Cw), Seg("12 m USB", 24_930_000, 24_990_000, RadioMode.Usb)],
-            [Call("12 m FT8", 24_915_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("12 m FT8", 24_915_000, RadioMode.Ft8, 3_600),
+                Call("12 m JS8", 24_922_000, RadioMode.Js8, 3_600),
+                Call("12 m VarAC", 24_927_000, RadioMode.Varac, 2_500)
+            ]),
         Band("10m", "10 m", 28_000_000, 29_700_000,
             [
                 Seg("10 m CW", 28_000_000, 28_300_000, RadioMode.Cw),
@@ -77,6 +109,10 @@ public static class Region2BandPlan
             ],
             [
                 Call("10 m FT8", 28_074_000, RadioMode.Ft8, 3_600),
+                Call("10 m JS8", 28_078_000, RadioMode.Js8, 3_600),
+                Call("10 m Olivia", 28_120_000, RadioMode.Olivia, 1_500),
+                Call("10 m JTTY", 28_090_000, RadioMode.Jtty, 2_500),
+                Call("10 m VarAC", 28_105_000, RadioMode.Varac, 2_500),
                 Call("10 m USB calling", 28_400_000, RadioMode.Usb, 3_000),
                 Call("10 m FM calling", 29_600_000, RadioMode.Nbfm, 7_500)
             ]),
@@ -89,6 +125,7 @@ public static class Region2BandPlan
             [
                 Call("6 m FT8", 50_313_000, RadioMode.Ft8, 3_600),
                 Call("6 m FT8", 50_323_000, RadioMode.Ft8, 3_600),
+                Call("6 m VarAC", 50_330_000, RadioMode.Varac, 2_500),
                 Call("6 m SSB calling", 50_125_000, RadioMode.Usb, 3_000),
                 Call("6 m FM calling", 52_525_000, RadioMode.Nbfm, 7_500)
             ]),
@@ -109,6 +146,7 @@ public static class Region2BandPlan
             [
                 Call("2 m FT8", 144_174_000, RadioMode.Ft8, 3_600),
                 Call("2 m SSB calling", 144_200_000, RadioMode.Usb, 3_000),
+                Call("2 m VarAC FM", 144_950_000, RadioMode.Nbfm, 7_500),
                 Call("2 m APRS packet", 144_390_000, RadioMode.Packet, 7_500),
                 Call("2 m national FM simplex calling", 146_520_000, RadioMode.Nbfm, 7_500)
             ]),
@@ -130,6 +168,7 @@ public static class Region2BandPlan
             [
                 Call("70 cm FT8", 432_174_000, RadioMode.Ft8, 3_600),
                 Call("70 cm weak-signal calling", 432_100_000, RadioMode.Usb, 3_000),
+                Call("70 cm VarAC FM", 439_600_000, RadioMode.Nbfm, 7_500),
                 Call("70 cm FM simplex calling", 446_000_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("33cm", "33 cm", 902_000_000, 928_000_000,
@@ -200,7 +239,7 @@ public static class Region2BandPlan
         return Bands.FirstOrDefault(b => b.Id.Equals(bandId.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>CB, GMRS, and NOAA weather channel lists for the Known channels panel.</summary>
+    /// <summary>CB, GMRS, NOAA weather, and published FT8 dials for the Known channels panel.</summary>
     public static IReadOnlyList<KnownChannelGroup> KnownServiceChannels()
     {
         string[] ids = ["cb", "gmrs", "noaa"];
@@ -226,7 +265,35 @@ public static class Region2BandPlan
                 groups.Add(new KnownChannelGroup(band.Id, band.Name, channels));
         }
 
+        AddDigiGroup(groups, "ft8", "FT8", RadioMode.Ft8);
+        AddDigiGroup(groups, "js8", "JS8", RadioMode.Js8);
+        AddDigiGroup(groups, "olivia", "Olivia", RadioMode.Olivia);
+        AddDigiGroup(groups, "jtty", "JTTY", RadioMode.Jtty);
+        AddDigiGroup(groups, "varac", "VarAC", RadioMode.Varac);
+
         return groups;
+    }
+
+    private static void AddDigiGroup(List<KnownChannelGroup> groups, string id, string name, RadioMode mode)
+    {
+        var channels = new List<KnownChannel>();
+        foreach (HamBand band in Bands)
+        {
+            foreach (CallingChannel channel in band.Calling)
+            {
+                if (channel.Mode != mode)
+                    continue;
+                string mhz = (channel.FrequencyHz / 1e6).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                channels.Add(new KnownChannel(
+                    channel.Name,
+                    $"{band.Name} · {mhz}",
+                    channel.FrequencyHz,
+                    CampSchedule.Canonical(mode)));
+            }
+        }
+
+        if (channels.Count > 0)
+            groups.Add(new KnownChannelGroup(id, name, channels));
     }
 
     private static string ShortChannelLabel(string bandId, string name)
@@ -250,7 +317,7 @@ public static class Region2BandPlan
             CallingChannel? calling = null;
             foreach (var channel in band.Calling)
             {
-                if (channel.Mode == RadioMode.Ft8)
+                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
                 {
                     double delta = frequencyHz - channel.FrequencyHz;
                     if (delta >= -500 && delta <= channel.ToleranceHz)
@@ -296,25 +363,66 @@ public static class Region2BandPlan
         return "Outside the region 2 amateur plan";
     }
 
-    public static bool TryFt8Dial(double frequencyHz, out double dialHz)
+    public static bool TryFt8Dial(double frequencyHz, out double dialHz) =>
+        TryDigiDial(frequencyHz, RadioMode.Ft8, out dialHz);
+
+    /// <summary>
+    /// True when the frequency sits on a published digimode dial (or in the USB tone window above FT8/JS8 dials).
+    /// </summary>
+    public static bool TryDigiDial(double frequencyHz, RadioMode mode, out double dialHz)
     {
         dialHz = 0;
+        if (mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac))
+            return false;
+
         double best = double.MaxValue;
         foreach (HamBand band in Bands)
         {
             foreach (CallingChannel channel in band.Calling)
             {
-                if (channel.Mode != RadioMode.Ft8)
+                if (channel.Mode != mode)
                     continue;
-                double delta = frequencyHz - channel.FrequencyHz;
-                if (delta < -500 || delta > channel.ToleranceHz)
-                    continue;
-                double distance = Math.Abs(delta);
+                double distance;
+                if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+                {
+                    double delta = frequencyHz - channel.FrequencyHz;
+                    if (delta < -500 || delta > channel.ToleranceHz)
+                        continue;
+                    distance = Math.Abs(delta);
+                }
+                else
+                {
+                    distance = Math.Abs(frequencyHz - channel.FrequencyHz);
+                    if (distance > channel.ToleranceHz)
+                        continue;
+                }
+
                 if (distance >= best)
                     continue;
                 best = distance;
                 dialHz = channel.FrequencyHz;
             }
+        }
+
+        return best < double.MaxValue;
+    }
+
+    /// <summary>Guess digimode from a published dial near this frequency when Auto is selected.</summary>
+    public static bool TryAnyDigiDial(double frequencyHz, out RadioMode mode, out double dialHz)
+    {
+        mode = RadioMode.Unknown;
+        dialHz = 0;
+        double best = double.MaxValue;
+        foreach (RadioMode candidate in new[] { RadioMode.Ft8, RadioMode.Js8, RadioMode.Olivia, RadioMode.Jtty, RadioMode.Varac })
+        {
+            if (!TryDigiDial(frequencyHz, candidate, out double candidateDial))
+                continue;
+            double distance = Math.Abs(frequencyHz - candidateDial);
+            if (distance >= best)
+                continue;
+            best = distance;
+            mode = candidate;
+            dialHz = candidateDial;
         }
 
         return best < double.MaxValue;

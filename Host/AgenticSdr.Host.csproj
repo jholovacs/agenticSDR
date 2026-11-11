@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <None Include="native\m17voice.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\m17voice.dll')" />
+    <None Include="native\xaramonitor.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\xaramonitor.dll')" />
   </ItemGroup>
 
 </Project>

@@ -37,6 +37,19 @@ public static class Filters
         return h;
     }
 
+    /// <summary>Bandpass via lowpass(high) − lowpass(low). Odd tap count.</summary>
+    public static float[] Bandpass(int taps, double lowHz, double highHz, double sampleRate)
+    {
+        if (lowHz >= highHz)
+            throw new ArgumentOutOfRangeException(nameof(lowHz));
+        float[] high = Lowpass(taps, highHz, sampleRate);
+        float[] low = Lowpass(taps, lowHz, sampleRate);
+        var h = new float[high.Length];
+        for (int i = 0; i < h.Length; i++)
+            h[i] = high[i] - low[i];
+        return h;
+    }
+
     public static float[] Hilbert(int taps)
     {
         if (taps % 2 == 0)

@@ -3,6 +3,7 @@ obj/
 /native/
 Host/native/libcodec2.dll
 Host/native/m17.dll
+Host/native/xaramonitor.dll
 packaging/stage/
 packaging/out/
 *.user
@@ -11,3 +12,18 @@ TestResults/
 llm.json
 schedule.json
 models/
+
+# Rust native builds
+native/xaramonitor/target/
+
+# Scratch listen captures left in the repo root while debugging
+/*.wav
+/*.mpx
+/*.iq
+/*.bin
+/ft8_*.json
+/js8_*.json
+/varac_*.json
+/wwv.json
+/fm*.json
+/capture*.iq

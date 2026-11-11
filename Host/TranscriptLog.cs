@@ -1,7 +1,7 @@
 namespace AgenticSdr.Host;
 
 /// <summary>
-/// One piece of decoded text. Kind is morse, speech, ft8, or note.
+/// One piece of decoded text. Kind is morse, speech, rds, ft8, packet, or note.
 /// Morse keeps its own color in the text pane.
 /// </summary>
 public sealed record TranscriptSpan(string Kind, string Text);

@@ -4,6 +4,7 @@ namespace AgenticSdr.Host;
 /// Settings from Host/appsettings.json under "Sdr".
 /// Sample rate, gain, and clock correction (Ppm) apply when a radio is opened.
 /// Latitude, longitude, or a Maidenhead grid let a nearby repeater name replace the band-plan label. The region selects which amateur plan is fair to mention; only region 2 is loaded.
+/// CallsignLookup asks free HamDB / HamQTH DXCC references in the background while digimodes decode.
 /// </summary>
 public sealed class SdrOptions
 {
@@ -15,4 +16,6 @@ public sealed class SdrOptions
     public double? Longitude { get; set; }
     public string? Grid { get; set; }
     public int ItuRegion { get; set; } = 2;
+    /// <summary>When true, digimode callsigns are looked up in the background and cached on disk.</summary>
+    public bool CallsignLookup { get; set; } = true;
 }

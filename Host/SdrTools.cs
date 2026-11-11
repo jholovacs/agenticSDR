@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
@@ -10,7 +11,7 @@ namespace AgenticSdr.Host;
 /// Names are snake_case because that is how the AI sees them: list_devices, set_antenna, scan_band, listen, stop.
 /// </summary>
 [McpServerToolType]
-public sealed class SdrTools(RadioSession session, CampBook camp)
+public sealed class SdrTools(RadioSession session, CampBook camp, ClipStore clips)
 {
     [McpServerTool, Description("List USB SDRs currently visible. RTL2832U dongles and LimeSDR-USB use built-in drivers. Other radios appear when SoapySDR and that radio's module are installed.")]
     public async Task<IReadOnlyList<RadioDeviceInfo>> list_devices(CancellationToken cancellationToken = default) =>
@@ -73,13 +74,66 @@ public sealed class SdrTools(RadioSession session, CampBook camp)
         CancellationToken cancellationToken = default) =>
         Guard(() => session.InspectAsync(frequencyHz, cancellationToken));
 
-    [McpServerTool, Description("Demodulate a frequency for a fixed number of seconds and return a WAV clip. The web page instead plays the same demodulator live until Stop. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or packet. CW returns Morse text. FT8 returns decoded messages. Packet returns AX.25 / APRS frames. Voice modes return a speech transcript.")]
+    [McpServerTool, Description("Demodulate a frequency for a fixed number of seconds and return a WAV clip. The web page instead plays the same demodulator live until Stop. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, dmr, or packet. CW returns Morse text. FT8/JS8/Olivia/JTTY/VarAC return decoded digimode text when present. Packet returns AX.25 / APRS frames. Voice modes return a speech transcript. Digi occupancy on a scan is not a decode — use analyze_clip when text is empty.")]
     public Task<ListenReport> listen(
         [Description("Frequency in Hz.")] double frequencyHz,
-        [Description("auto, nbfm, wbfm, am, usb, lsb, cw, ft8, dmr, or packet.")] string mode = "auto",
-        [Description("Clip length in seconds, from 1 to 20. FT8 always uses one 15-second slot.")] double seconds = 10,
+        [Description("auto, nbfm, wbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, dmr, or packet.")] string mode = "auto",
+        [Description("Clip length in seconds, from 1 to 20. FT8/JS8 use one 15-second slot (~16 s capture).")] double seconds = 10,
         CancellationToken cancellationToken = default) =>
         Guard(() => session.ListenAsync(frequencyHz, mode, seconds, cancellationToken));
+
+    [McpServerTool, Description("List recent listen clips (id, frequency, mode). Use clipId with analyze_clip after digimode text is empty.")]
+    public object list_clips(
+        [Description("How many recent clips to list, 1-12.")] int limit = 8) =>
+        clips.Recent(limit).Select(clip => new
+        {
+            clipId = clip.Id,
+            frequencyHz = clip.FrequencyHz,
+            mode = clip.Mode,
+            hasText = !string.IsNullOrWhiteSpace(clip.Morse),
+            audioUri = $"audio://clips/{clip.Id}"
+        }).ToList();
+
+    [McpServerTool, Description("Diagnose a listen WAV for digimodes (FT8/JS8/VarAC). Returns energy shape, FT8 Costas/LDPC counters, JS8 count, VarAC monitor status, a decoder self-test, and plain-language hints. Pass clipId from listen or list_clips, or omit clipId to analyze the latest clip. Does not retune the radio.")]
+    public object analyze_clip(
+        [Description("Clip id from listen / list_clips. Omit or pass latest for the most recent clip.")] string? clipId = null,
+        [Description("Optional mode hint: ft8, js8, or varac — shapes the self-test and hints.")] string? mode = null)
+    {
+        AudioClip? clip = null;
+        if (string.IsNullOrWhiteSpace(clipId) || clipId.Equals("latest", StringComparison.OrdinalIgnoreCase))
+            clip = clips.Latest();
+        else if (!clips.TryGet(clipId, out clip) || clip is null)
+            throw new McpException($"No audio clip '{clipId}'.");
+
+        if (clip is null)
+            throw new McpException("No listen clips yet. Call listen first.");
+
+        string hint = mode ?? clip.Mode;
+        DigiAnalysisReport report = DigiClipAnalyzer.AnalyzeWav(clip.Wav, hint);
+        return new
+        {
+            clipId = clip.Id,
+            frequencyHz = clip.FrequencyHz,
+            mode = clip.Mode,
+            report.SampleRate,
+            report.DurationSeconds,
+            report.Rms,
+            report.Peak,
+            report.HotBins200To3000,
+            report.DominantPeakHz,
+            report.DominantWidthHz,
+            report.ToneEntropy,
+            report.Ft8Count,
+            report.Ft8BestSync,
+            report.Ft8LdpcOk,
+            report.Js8Count,
+            report.VaracMonitorAvailable,
+            report.VaracStatus,
+            report.SelfTestOk,
+            report.Messages,
+            report.Hints
+        };
+    }
 
     [McpServerTool, Description("Cancel the scan or listen that is in progress. In camp mode this pauses the schedule until camp mode is chosen again or camp_now is called.")]
     public Task<SessionStatus> stop(CancellationToken cancellationToken = default) =>

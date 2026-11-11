@@ -26,6 +26,18 @@ public enum RadioMode
     /// <summary>FT8 digital messages in 15-second slots on known dial frequencies.</summary>
     Ft8,
 
+    /// <summary>JS8Call weak-signal keyboard messages on known dial frequencies.</summary>
+    Js8,
+
+    /// <summary>Olivia MFSK keyboard chat (default 8/500) in the HF digi window.</summary>
+    Olivia,
+
+    /// <summary>JTTY 4-tone GFSK keyboard chat from WSJT-X (receive).</summary>
+    Jtty,
+
+    /// <summary>VarAC keyboard chat over VARA HF. Decode uses an optional xara/zara monitor beside the app.</summary>
+    Varac,
+
     /// <summary>Wide FM, about 200 kHz wide. Ordinary FM broadcast from 88 to 108 MHz.</summary>
     Wbfm,
 

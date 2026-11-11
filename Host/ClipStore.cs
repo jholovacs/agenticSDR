@@ -56,4 +56,23 @@ public sealed class ClipStore
         clip = null;
         return false;
     }
+
+    /// <summary>Most recent listen clip, or null when nothing has been captured yet.</summary>
+    public AudioClip? Latest()
+    {
+        lock (_gate)
+            return _order.Last?.Value;
+    }
+
+    public IReadOnlyList<AudioClip> Recent(int max = 8)
+    {
+        lock (_gate)
+        {
+            max = Math.Clamp(max, 1, 12);
+            var list = new List<AudioClip>(Math.Min(max, _order.Count));
+            for (LinkedListNode<AudioClip>? node = _order.Last; node is not null && list.Count < max; node = node.Previous)
+                list.Add(node.Value);
+            return list;
+        }
+    }
 }

@@ -126,10 +126,26 @@ public class AgentTests
             new SdrOptions(),
             new ClipStore(),
             new RepeaterLookup(new HttpClient(), NullLogger<RepeaterLookup>.Instance),
+            new CallsignLookup(
+                new HttpClient(),
+                NullLogger<CallsignLookup>.Instance,
+                Path.Combine(Path.GetTempPath(), "agentic-sdr-calls-" + Guid.NewGuid().ToString("N") + ".json"),
+                enabled: false),
             new SpeechDecoder(Path.GetTempPath()),
             NullLogger<RadioSession>.Instance);
         var camp = new CampBook(path + ".schedule");
-        return new InstructAgent(store, session, camp, http);
+        var clips = new ClipStore();
+        return new InstructAgent(store, session, camp, clips, http);
+    }
+
+    [Fact]
+    public void Agent_tools_include_digi_clip_analysis()
+    {
+        Assert.True(AgentTools.Known("analyze_clip"));
+        Assert.True(AgentTools.Known("list_clips"));
+        string schema = AgentTools.Schema.ToJsonString();
+        Assert.Contains("analyze_clip", schema, StringComparison.Ordinal);
+        Assert.Contains("list_clips", schema, StringComparison.Ordinal);
     }
 
     private sealed class ScriptHandler : HttpMessageHandler

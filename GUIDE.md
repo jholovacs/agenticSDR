@@ -1,6 +1,6 @@
 # A beginner’s guide to this receiver
 
-This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, and speech are also written out as text.
+This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, JS8, Olivia, JTTY, VarAC (via xara/zara), and speech are also written out as text.
 
 You and an AI share one radio. The web page at http://127.0.0.1:5088, an instruct model you configure, and the tools in Cursor or Antigravity talk to the same session. Only one of them can tune or listen at a time, because a USB radio has one input.
 
@@ -14,15 +14,16 @@ If a word in the page or the code is unfamiliar, it is defined below. The same d
 4. Press **Use this antenna**. Bands the antenna can hear move to the top and are marked **best**. The closest match is selected for you.
 5. Confirm the radio hears something with a **known channel** before you learn to scan (next section).
 6. Press **Scan band**. The table fills with strong signals.
-7. Press **Listen** on a row, or type a frequency yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop** beside the playing line. The same **Stop** next to **Scan band** ends a scan. Morse text updates about once a second. FT8 still gathers one 15-second turn, then prints messages while the next turn plays.
+7. Press **Listen** on a row, or type a frequency yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop** beside the playing line. The same **Stop** next to **Scan band** ends a scan. Morse text updates about once a second. FT8 and JS8 gather one 15-second turn, then print messages while the next turn plays. Olivia and JTTY print keyboard text as enough audio accumulates.
 
 ### First listen: Known channels
 
-A new SDR often arrives with a short whip. That whip is a poor match for many amateur bands, but it can still hear strong local services. Under **Scan and listen**, open **Known channels**. You get three lists you can expand:
+A new SDR often arrives with a short whip. That whip is a poor match for many amateur bands, but it can still hear strong local services. Under **Scan and listen**, open **Known channels**. You get lists you can expand:
 
 - **NOAA weather** — seven US weather-radio channels (WX1–WX7). These are almost always on the air. Click any one. The page tunes narrow FM and plays the audio. If you hear a clear voice reading the weather, the radio, antenna, speakers, and this program are working.
 - **CB** — forty Citizens Band channels near 27 MHz. Channel **9** is the emergency channel; **19** is the highway channel. Mode is AM. You may hear truckers or nothing at all; silence on CB is normal, and is not a failure of the radio.
 - **GMRS** — twenty-two General Mobile Radio Service channels near 462 MHz. Mode is narrow FM. Walkie-talkies and neighborhood repeaters use these. Again, a quiet channel is fine.
+- **FT8 / JS8 / Olivia / JTTY / VarAC** — published digimode dials (for example **10 m · 28.074** for FT8, **20 m · 14.105** for VarAC). These are usually too weak to look like a loud peak on a scan. Click a dial to decode. FT8 and JS8 wait for the next 15-second slot. VarAC text is decoded by the bundled MIT **xaramonitor** library (from xara). A quiet dial prints nothing; that is a result, not a failure.
 
 Click a channel once. The frequency and mode fill in, and listening starts. Press **Stop** when you are done. **NOAA check** is a one-button shortcut to WX1 (162.550 MHz) if you only want that quick test.
 
@@ -40,9 +41,11 @@ One pass looks like this:
 2. **Read.** It fills a buffer with samples. On the NESDR those samples are unsigned 8-bit I/Q. Other radios, opened through SoapySDR, arrive as complex floats and are converted to the same shape.
 3. **Spectrum.** A Fourier transform shows how much energy sits at each frequency near the center. Peaks that stand well above the noise are kept.
 4. **Guess.** Bandwidth, shape, and the band plan suggest a mode: voice, Morse, broadcast FM, and so on.
-5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately. CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 is read as text at the end of each 15-second turn.
+5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately. CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 and JS8 are read as text at the end of each 15-second turn. Olivia and JTTY keyboard text is printed from rolling audio windows.
 
 A scan watches the band for at least 15 seconds. Where the band is wider than one snapshot, the radio hops, and each stop lasts at least a few seconds. A conversation is kept when the energy arrives as a burst, a pause, and another burst, or as one transmission that starts and stops. A station that stays on, such as weather radio, is kept when it stands clearly above the noise. Each mode is measured at its own width: Morse a few hundred hertz, sideband voice about 2.7 kHz, AM about 10 kHz, narrow FM about 12.5 kHz, and broadcast FM about 200 kHz. A phone segment is also watched for Morse, because a keyed signal can share that channel with voice. Hops overlap so a signal hiding in the hole at the center of one hop is visible in a neighbor.
+
+Digimodes are different. FT8 and JS8 are many quiet tones just above a published dial; Olivia and JTTY are narrower MFSK/GFSK windows; VarAC/VARA fills about 500–2300 Hz of USB above its calling dial. After the usual hop search, the scan also probes each digimode dial on that band for that pattern. When the pattern is present, the dial appears in the table labeled **(activity)** with a modest confidence (about 30–50%). That means the watering hole looks occupied — not that text will decode. Listen to attempt a decode. You can also open **Known channels** and tune a dial directly.
 
 ## The antenna, in plain language
 
@@ -68,8 +71,8 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 | The shared radio, scan, and listen | `RadioSession` |
 | Finding peaks | `PeakPicker` and `SpectrumAnalyzer` |
 | Guessing the mode | `ModeClassifier` |
-| Audio, Morse, and FT8 | `Demodulator`, `MorseDecoder`, `Ft8Decoder` |
-| The page and the AI tools | `WebApi`, `SdrTools` |
+| Audio, Morse, and digimodes | `Demodulator`, `MorseDecoder`, `Ft8Decoder`, `Js8Decoder`, `OliviaDecoder`, `JttyDecoder`, `XaraMonitor` |
+| The page and the AI tools | `WebApi`, `SdrTools` (`listen`, `list_clips`, `analyze_clip`, …) |
 
 `Radio` talks to hardware. `Dsp` is the math and does not know which dongle you own. `Host` is the page, the session, and the AI tools. `Tests` checks the math and, when the NESDR is plugged in, that the radio is not silent.
 
@@ -117,7 +120,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 **AM broadcast.** Ordinary medium-wave broadcast radio in the Americas, 530–1700 kHz. Each station is about 10 kHz wide.
 
-**FM broadcast.** Ordinary FM radio, 88–108 MHz. Each station is about 200 kHz wide, much wider than amateur FM. The mode is WBFM.
+**FM broadcast.** Ordinary FM radio, 88–108 MHz. Each station is about 200 kHz wide, much wider than amateur FM. The mode is WBFM. When a 19 kHz stereo pilot is present, audio is demodulated as stereo. RDS (station name and radio text) prints in Decoded text. Some stations also carry SCA secondary audio on 67 or 92 kHz; choose that under **Secondary channel** while listening.
 
 **Known channels.** The expandable list under **Scan and listen** with fixed CB, GMRS, and NOAA weather frequencies. Click a channel to tune and listen without scanning. The same frequencies live in `Region2BandPlan` and are served by `/api/channels`.
 
@@ -167,19 +170,29 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 ### Modes
 
-**Auto.** Measure the signal and guess. On a known FT8 dial frequency, auto selects FT8 and waits for the next 15-second slot.
+**Auto.** Measure the signal and guess. On a known digimode dial, auto selects that mode (FT8, JS8, Olivia, or JTTY) and, for FT8/JS8, waits for the next 15-second slot.
 
 **AM.** Amplitude modulation. The loudness of the voice changes the strength of the wave. Used by AM broadcast and some amateur signals. You hear it as ordinary audio.
 
 **NBFM.** Narrowband FM. The voice nudges the frequency a few kilohertz. This is the usual mode for amateur repeaters on 2 m and 70 cm, and for NOAA weather. The tuner sits 50 kHz off the station so the dongle's center spike stays outside the voice channel, and a hot gain setting is eased to 12 dB while that station is playing.
 
-**WBFM.** Wideband FM. The station swings about 75 kHz either side of its frequency, so the channel is about 200 kHz wide. This is FM broadcast. A narrow FM decoder cannot hold it. Listen with WBFM. The tuner sits 250 kHz off the station so the dongle's center spike is not on the voice, and a hot gain setting is eased to 12 dB so a strong local station does not overload the 8-bit converter. While that station is playing, the tuner filter narrows to about 900 kHz so the rest of the band is not poured into the 8-bit converter. A scan opens the filter again. The listed frequency is the loudest point in the station. The channel is reduced before the sharp filter, so the receiver keeps up with the dongle. A filter that falls behind drops samples, and each drop is a click.
+**WBFM.** Wideband FM. The station swings about 75 kHz either side of its frequency, so the channel is about 200 kHz wide. This is FM broadcast. A narrow FM decoder cannot hold it. Listen with WBFM. The tuner sits 250 kHz off the station so the dongle's center spike is not on the voice, and a hot gain setting is eased to 12 dB so a strong local station does not overload the 8-bit converter. While that station is playing, the tuner filter narrows to about 900 kHz so the rest of the band is not poured into the 8-bit converter. A scan opens the filter again. The listed frequency is the loudest point in the station. The channel is reduced before the sharp filter, so the receiver keeps up with the dongle. A filter that falls behind drops samples, and each drop is a click. The demodulator keeps the full multiplex: stereo L/R when the 19 kHz pilot locks, RDS digital text into the transcript, and optional SCA audio at 67 or 92 kHz via the Secondary channel control.
 
 **USB and LSB.** Upper sideband and lower sideband, the two halves of single-sideband voice. Amateur HF uses LSB below 10 MHz and USB above. The carrier itself is mostly missing, which is why these signals look lopsided in the spectrum.
 
 **CW.** Continuous wave, the on-off carrier used for Morse code. The program plays a tone you can hear and also tries to print the letters.
 
-**FT8.** A digital mode used on amateur bands. Stations take turns in 15-second slots that start at :00, :15, :30, and :45 of each UTC minute. A message is a short line such as a callsign and a grid. The program tunes a known dial frequency, waits for the next slot, and prints any messages it can decode. A quiet channel prints none. That is a result, not a failure.
+**FT8.** A digital mode used on amateur bands. Stations take turns in 15-second slots that start at :00, :15, :30, and :45 of each UTC minute. A message is a short line such as a callsign and a grid. The program tunes a known dial frequency, waits for the next slot, and prints any messages it can decode. A quiet channel prints none. That is a result, not a failure. Scans find FT8 by the multi-tone pattern above the dial, not by a single strong peak.
+
+Each decoded FT8 line shows strength and tone pitch beside the compact message, then a plain reading of that message. When a Maidenhead **grid** appears (such as FN42), the reading names the region it covers — for example Boston, Mexico City, or central China. When **CallsignLookup** is on (the default), callsigns are also looked up in the background through free HamDB and HamQTH DXCC tables; a name or DX country may appear beside the call once the cache has it, and decode never waits for the network. Common forms: **CQ** means “calling anyone”; a signed number like **-12** is a signal report in dB; **RR73** acknowledges and ends the contact; **73** means goodbye. DXCC entity data is provided by HamQTH.com.
+
+**JS8.** JS8Call keyboard and directed messages on dials a few kilohertz above FT8. The receiver reads Normal speed (submode A) only: the same USB tone window and 15-second turns as FT8, but JS8's own sync tones and error-correcting code. Heartbeats, CQ calls, directed commands, and Huffman free text print as words with a plain-language line below. Free text packed with JS8's large word dictionary prints common words and shows the rest as `[#number]`.
+
+**Olivia.** MFSK keyboard chat. This build listens for the common **8/500** profile (eight tones in 500 Hz) around published HF watering holes. Text is printed when the Walsh blocks look confident.
+
+**JTTY.** Keyboard-style 31.25 baud 4-tone GFSK about 127 Hz wide. The decoder locks symbol timing and prints 7-bit ASCII when the tones are clear. Weak or unsynced audio stays quiet instead of inventing letters.
+
+**VarAC.** Keyboard chat and messaging that rides on the VARA HF modem. This program tunes published VarAC USB dials (for example 14.105 MHz), looks for occupancy on scan, and decodes with the bundled MIT **xaramonitor** library (xara’s passive HF monitor, vendored under `native/xaramonitor`). Rebuild that DLL with Rust if you change it. An external `xara-monitor` binary is only a fallback. VARA is ARQ: a packet either decodes completely or not at all. Occupancy without a full packet prints a short status line, not empty silence.
 
 **DMR.** The mode choice for Digital Mobile Radio. Listening plays the digital signal as audio and, when the framing word is found, says that the words were not decoded.
 
@@ -189,4 +202,4 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 ## What this program will not do
 
-It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec. Other digital modes are left as audio. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen, for Morse, FT8, speech, and that DMR note. Speech uses a small English model downloaded once into `models/`. It writes what it thinks was said. A noisy channel will be misheard.
+It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec. It does not ship EA5HVK’s proprietary VARA binary; VarAC decode uses the MIT xara monitor built into `xaramonitor.dll`. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen, for Morse, FT8, JS8, Olivia, JTTY, VarAC, speech, and that DMR note. Speech uses a small English model downloaded once into `models/`. It writes what it thinks was said. A noisy channel will be misheard.
