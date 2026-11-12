@@ -1,5 +1,6 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Agentic SDR"
            Manufacturer="Jeremy Holovacs"
            Version="$(var.ProductVersion)"
@@ -109,26 +110,26 @@
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LlmDlg" Condition="NOT WIX_UPGRADE_DETECTED" Order="5" />
     </UI>
 
-    <!-- Deferred FileRef CAs: args only; msi flag enables setup.log and a message box on failure. -->
+    <!-- QuietExec runs the full command line from CustomActionData (FileRef ExeCommand was dropping args). -->
     <SetProperty Id="ApplyLlm"
-                 Value="--set-llm --msi --path &quot;[CommonDataFolder]llm.json&quot; --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --set-llm --msi --path &quot;[CommonDataFolder]llm.json&quot; --base &quot;[LLMBASE]&quot; --model &quot;[LLMMODEL]&quot; --key &quot;[LLMKEY]&quot;"
                  Before="ApplyLlm"
                  Sequence="execute"
                  Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT REMOVE~=&quot;ALL&quot;" />
     <CustomAction Id="ApplyLlm"
-                  FileRef="HostExe"
-                  ExeCommand="[CustomActionData]"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
     <SetProperty Id="ApplyFetch"
-                 Value="--fetch-native --msi --home &quot;[INSTALLFOLDER]&quot;"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --msi --home &quot;[INSTALLFOLDER]&quot;"
                  Before="ApplyFetch"
                  Sequence="execute"
                  Condition="NOT REMOVE~=&quot;ALL&quot;" />
     <CustomAction Id="ApplyFetch"
-                  FileRef="HostExe"
-                  ExeCommand="[CustomActionData]"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />

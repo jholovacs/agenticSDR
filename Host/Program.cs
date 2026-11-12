@@ -10,6 +10,15 @@ NativeDsp.Install();
 if (SetupCommands.TryHandle(args, out int setupCode))
     return setupCode;
 
+// MSI custom actions must never fall through into the long-running API (that hangs setup).
+if (InstallerLaunch.IsMsiexecParent())
+{
+    Console.Error.WriteLine(
+        "AgenticSdr.Host was started by Windows Installer without setup arguments. " +
+        "See %ProgramData%\\AgenticSDR\\setup.log");
+    return 1;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService(options => options.ServiceName = "AgenticSdr");
 builder.WebHost.UseUrls("http://127.0.0.1:5088");
