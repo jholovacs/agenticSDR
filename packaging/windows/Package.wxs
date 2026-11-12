@@ -154,8 +154,9 @@
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
+    <!-- Trailing \\ before the closing quote: MSI directory props end in \, and \" would escape the quote. -->
     <SetProperty Id="ApplyFetch"
-                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --msi --home &quot;[INSTALLFOLDER]&quot;"
+                 Value="&quot;[INSTALLFOLDER]AgenticSdr.Host.exe&quot; --fetch-native --msi --home &quot;[INSTALLFOLDER]\\&quot;"
                  Before="ApplyFetch"
                  Sequence="execute"
                  Condition="NOT REMOVE~=&quot;ALL&quot;" />

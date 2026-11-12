@@ -52,6 +52,18 @@ public class SetupTests
     }
 
     [Fact]
+    public void SanitizeInstallerPath_strips_escaped_quote_from_directory_home()
+    {
+        // Simulates Windows parsing of --home "C:\Program Files\AgenticSDR\"
+        string mangled = @"C:\Program Files\AgenticSDR""";
+        string cleaned = SetupCommands.SanitizeInstallerPath(mangled);
+        Assert.DoesNotContain("\"", cleaned);
+        Assert.EndsWith("AgenticSDR", cleaned.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        string native = Path.Combine(cleaned, "native");
+        Assert.DoesNotContain("\"", native);
+    }
+
+    [Fact]
     public void Msi_flag_is_accepted_alongside_set_llm()
     {
         string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-setup-" + Guid.NewGuid().ToString("N") + ".json");

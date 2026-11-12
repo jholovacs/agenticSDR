@@ -73,9 +73,15 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
+      - name: Check QuietExec quoting
+        shell: bash
+        run: python packaging/check-msi-quoting.py
       - name: Build MSI
         shell: bash
         run: bash packaging/build-msi.sh
+      - name: Smoke-install MSI
+        shell: pwsh
+        run: packaging/smoke-msi.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: windows-msi

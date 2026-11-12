@@ -105,10 +105,10 @@ public static class SetupCommands
             switch (args[i])
             {
                 case "--path":
-                    path = Value();
+                    path = SanitizeInstallerPath(Value());
                     break;
                 case "--home":
-                    home = Value();
+                    home = SanitizeInstallerPath(Value());
                     break;
                 case "--base":
                     baseUrl = Value();
@@ -125,6 +125,25 @@ public static class SetupCommands
         }
 
         return new Options(path, baseUrl, model, key, home);
+    }
+
+    /// <summary>
+    /// MSI directory properties end with '\'. Quoting them as "C:\Dir\" makes Windows treat the
+    /// closing quote as escaped, so the path can arrive with a literal '"' — fix that here.
+    /// </summary>
+    public static string SanitizeInstallerPath(string value)
+    {
+        string cleaned = value.Trim().Trim('"');
+        if (cleaned.Length == 0)
+            return cleaned;
+        try
+        {
+            return Path.GetFullPath(cleaned);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new ArgumentException($"Invalid installer path '{value}'.", ex);
+        }
     }
 
     private static async Task FetchRtlAsync(string directory, bool msi)
