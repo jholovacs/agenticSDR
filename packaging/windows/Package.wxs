@@ -16,6 +16,9 @@
     <Property Id="LLMBASE" Value="https://api.openai.com/v1" Secure="yes" />
     <Property Id="LLMMODEL" Value="gpt-4o-mini" Secure="yes" />
     <Property Id="LLMKEY" Secure="yes" />
+    <!-- Default checked: Create a desktop shortcut to http://127.0.0.1:5088 -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+    <Icon Id="AppIcon.ico" SourceFile="..\..\Host\wwwroot\favicon.ico" />
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -39,9 +42,23 @@
                   Name="Agentic SDR"
                   Description="Open the Agentic SDR page (API runs as a Windows service)"
                   Target="[WindowsFolder]explorer.exe"
-                  Arguments="http://127.0.0.1:5088" />
+                  Arguments="http://127.0.0.1:5088"
+                  Icon="AppIcon.ico" />
         <RemoveFolder Id="RemoveStartMenu" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\AgenticSDR" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="e2f7b1c4-9a56-4d8e-b3c1-8f0a2e5d7b19" Condition="INSTALLDESKTOPSHORTCUT">
+        <Shortcut Id="DesktopWebShortcut"
+                  Name="Agentic SDR"
+                  Description="Open the Agentic SDR web page"
+                  Target="[WindowsFolder]explorer.exe"
+                  Arguments="http://127.0.0.1:5088"
+                  Icon="AppIcon.ico" />
+        <RemoveFolder Id="RemoveDesktopShortcut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\AgenticSDR" Name="desktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
@@ -76,6 +93,7 @@
       <ComponentRef Id="HostService" />
       <ComponentRef Id="CommonDataDir" />
       <ComponentRef Id="StartMenu" />
+      <ComponentRef Id="DesktopShortcut" />
     </Feature>
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
@@ -97,17 +115,31 @@
           <Publish Event="NewDialog" Value="InstallDirDlg" />
         </Control>
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="NewDialog" Value="ShortcutOptionsDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+      <Dialog Id="ShortcutOptionsDlg" Width="370" Height="270" Title="Agentic SDR">
+        <Control Id="Title" Type="Text" X="20" Y="15" Width="330" Height="16" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Shortcuts" />
+        <Control Id="Description" Type="Text" X="20" Y="36" Width="330" Height="40" Transparent="yes" NoPrefix="yes" Text="The API runs as a Windows service. Shortcuts open the local web page at http://127.0.0.1:5088." />
+        <Control Id="DesktopCheck" Type="CheckBox" X="20" Y="90" Width="330" Height="17" Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1" Text="Create a desktop shortcut to the web UI" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="WelcomeDlg" Condition="WIX_UPGRADE_DETECTED" />
+          <Publish Event="NewDialog" Value="LlmDlg" Condition="NOT WIX_UPGRADE_DETECTED" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
           <Publish Event="NewDialog" Value="VerifyReadyDlg" />
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
           <Publish Event="SpawnDialog" Value="CancelDlg" />
         </Control>
       </Dialog>
-      <!-- Fresh install: directory → LLM → ready. Upgrade: keep dir + llm.json; skip to ready. -->
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="WIX_UPGRADE_DETECTED" Order="6" />
+      <!-- Fresh: directory → LLM → shortcuts → ready. Upgrade: shortcuts → ready (keeps llm.json). -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="ShortcutOptionsDlg" Condition="WIX_UPGRADE_DETECTED" Order="6" />
       <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="LlmDlg" Order="5" />
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Condition="WIX_UPGRADE_DETECTED" Order="6" />
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LlmDlg" Condition="NOT WIX_UPGRADE_DETECTED" Order="5" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ShortcutOptionsDlg" Order="6" />
     </UI>
 
     <!-- QuietExec runs the full command line from CustomActionData (FileRef ExeCommand was dropping args). -->
