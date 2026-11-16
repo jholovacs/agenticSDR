@@ -18,7 +18,7 @@ The bring-up radio is a Nooelec NESDR SMArt v5 (RTL2832U). It tunes about 100 kH
 | **AI** | On-page instruct model + MCP tools/resources at `/mcp` |
 | **Known channels** | NOAA WX, CB, GMRS, and published digimode dials without scanning |
 
-Transmit, trunking follow, and decryption are out of scope.
+Trunking follow and decryption are out of scope. Transmit is not part of this receiver. The separate Station desk is where a licensed operator authorizes outbound messages.
 
 ## Download
 
@@ -144,6 +144,10 @@ SoapySDR is the path for radios that are not RTL2832U dongles and not opened thr
 - macOS: `brew install soapysdr` and the matching module.
 
 `list_sdr_families` returns this catalog to an MCP client. A module that is installed but not named above still opens.
+
+## Station
+
+`dotnet run --project Station` serves http://127.0.0.1:5090. It is a control-operator desk for US amateur privileges (47 CFR Part 97, ITU Region 2). The operator enters a call sign and license class. That entry is an attestation, not an FCC database lookup. An agent can draft a message, or log copy it heard, through MCP at http://127.0.0.1:5090/mcp. The desk checks frequency, mode, and power against that license, and the text has to include the operator's call sign. Nothing is authorized until the operator checks the box and clicks **Transmit**. The desk does not key a radio.
 
 ## Develop and test
 

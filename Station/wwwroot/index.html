@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Station — Agentic SDR</title>
+  <link rel="stylesheet" href="/station.css?v=10">
+  <link rel="stylesheet" href="/radio-listener.css?v=2">
+</head>
+<body>
+  <header class="face">
+    <div class="brand">
+      <span class="led" id="led"></span>
+      <div>
+        <p class="eyebrow">Control operator</p>
+        <h1>Station</h1>
+        <p class="quiet">US amateur privileges. Receive uses the radio on <a href="http://127.0.0.1:5088">port 5088</a>. Transmit still needs your click.</p>
+      </div>
+    </div>
+    <div class="identity">
+      <p id="who">No operator</p>
+      <p id="status-line">Sign in with your call sign and license class.</p>
+    </div>
+  </header>
+
+  <p id="error" class="error" hidden></p>
+
+  <details class="panel fold" open data-fold="operator">
+    <summary><span class="fold-title">Operator</span></summary>
+    <div class="fold-body">
+      <p class="quiet">Entering a class attests what you hold. This desk does not look you up in the FCC database. A grid is your Maidenhead square. Look up turns that square into coordinates, or fills it from the published call sign when the box is empty. That lookup is not a license check. Transmit stays locked until you check the box and click Transmit on a message.</p>
+      <form id="operator-form" class="controls">
+        <label>Call sign
+          <input id="callsign" name="callsign" autocomplete="off" spellcheck="false" placeholder="W1AW" required>
+        </label>
+        <label>License class
+          <select id="license" name="license">
+            <option value="technician">Technician</option>
+            <option value="general">General</option>
+            <option value="extra" selected>Amateur Extra</option>
+          </select>
+        </label>
+        <label>Grid
+          <input id="grid" name="grid" autocomplete="off" spellcheck="false" placeholder="FN42" maxlength="6">
+        </label>
+        <button id="grid-lookup" type="button" class="ghost">Look up</button>
+        <button type="submit">Set control operator</button>
+        <button id="sign-out" type="button" class="ghost">Sign out</button>
+      </form>
+      <p id="grid-place" class="quiet"></p>
+      <p id="summary" class="quiet"></p>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="antenna">
+    <summary>
+      <span class="fold-title">Antenna</span>
+      <span id="antenna-summary" class="fold-aside"></span>
+    </summary>
+    <div class="fold-body">
+      <p class="quiet">A vertical antenna is a quarter-wave. A horizontal wire is a half-wave. Guess listens to the noise floor and does not transmit. If the receiver already has the radio open, the guess uses that radio.</p>
+      <form id="antenna-form" class="controls">
+        <label>Length
+          <input id="antenna-length" type="number" min="0.05" step="0.01" value="0.75">
+        </label>
+        <label>Unit
+          <select id="antenna-unit">
+            <option value="m">meters</option>
+            <option value="ft">feet</option>
+          </select>
+        </label>
+        <label>Orientation
+          <select id="antenna-orientation">
+            <option value="vertical">Vertical</option>
+            <option value="horizontal">Horizontal</option>
+          </select>
+        </label>
+        <label>Axis toward ° true
+          <input id="antenna-azimuth" type="number" min="0" max="360" value="0" disabled>
+        </label>
+        <button type="submit">Use this antenna</button>
+        <button id="antenna-guess" type="button" class="ghost">Guess from signals</button>
+      </form>
+      <p id="antenna-note" class="quiet">Set the length and orientation. Matching bands are listed under it.</p>
+      <ul id="antenna-bands" class="bands"></ul>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="receive">
+    <summary>
+      <span class="fold-title">Receive</span>
+      <span id="rx-aside" class="fold-aside"></span>
+    </summary>
+    <div class="fold-body" id="receive-panel"></div>
+  </details>
+
+  <details class="panel fold" open data-fold="check">
+    <summary><span class="fold-title">Check a frequency</span></summary>
+    <div class="fold-body">
+      <form id="check-form" class="controls">
+        <label>MHz
+          <input id="check-mhz" type="number" min="0.1" step="0.001" placeholder="14.074">
+        </label>
+        <label>Mode
+          <select id="check-mode"></select>
+        </label>
+        <label>Watts
+          <input id="check-watts" type="number" min="0.1" max="1500" step="0.1" value="5">
+        </label>
+        <button type="submit" class="ghost">Check</button>
+      </form>
+      <p id="check-result" class="quiet">USB sits above the dial and LSB sits below it. The whole signal has to fit in the segment.</p>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="draft">
+    <summary><span class="fold-title">Draft</span></summary>
+    <div class="fold-body">
+      <p class="quiet">You or an agent can write the text. Holding a draft does not transmit. After you authorize, CW and digimodes (FT8, JS8, Olivia, JTTY, Packet) can be played as local audio. The message has to include your call sign.</p>
+      <div class="presets" id="presets"></div>
+      <form id="draft-form" class="stack">
+        <div class="controls">
+          <label>MHz
+            <input id="draft-mhz" type="number" min="0.1" step="0.001" required>
+          </label>
+          <label>Mode
+            <select id="draft-mode"></select>
+          </label>
+          <label>Watts
+            <input id="draft-watts" type="number" min="0.1" max="1500" step="0.1" value="5" required>
+          </label>
+        </div>
+        <label class="grow">Message
+          <textarea id="draft-text" rows="3" maxlength="2000" required placeholder="CQ CQ DE W1AW K"></textarea>
+        </label>
+        <div class="controls">
+          <button type="submit">Hold as draft</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="repeater">
+    <summary>
+      <span class="fold-title">Repeater phone</span>
+      <span id="rep-aside" class="fold-aside"></span>
+    </summary>
+    <div class="fold-body">
+      <p class="quiet">FM phone on a repeater or simplex. Save machines you use often, then pick one. Output is the published listen frequency. Input is what you transmit, and Part 97 has to allow that frequency for your license before you can hold a draft. Encode opens the machine. Decode is optional receive squelch. Holding a draft does not transmit.</p>
+      <div class="controls" id="rep-book-bar">
+        <label class="grow">Saved
+          <select id="rep-pick">
+            <option value="">New repeater…</option>
+          </select>
+        </label>
+        <button id="rep-new" type="button" class="ghost">New</button>
+        <button id="rep-save" type="button">Save</button>
+        <button id="rep-delete" type="button" class="ghost" disabled>Delete</button>
+      </div>
+      <form id="repeater-form" class="stack">
+        <label class="grow">Label
+          <input id="rep-label" autocomplete="off" maxlength="80" placeholder="Club machine · town">
+        </label>
+        <div class="controls">
+          <label>Output MHz
+            <input id="rep-out" type="number" min="0.1" step="0.001" placeholder="146.940" required>
+          </label>
+          <label>Shift
+            <select id="rep-shift">
+              <option value="minus" selected>Minus (−)</option>
+              <option value="plus">Plus (+)</option>
+              <option value="simplex">Simplex</option>
+              <option value="split">Split</option>
+            </select>
+          </label>
+          <label>Offset kHz
+            <input id="rep-offset" type="number" min="0" step="0.001" placeholder="600">
+          </label>
+          <label>Input MHz
+            <input id="rep-in" type="number" min="0.1" step="0.001" placeholder="146.340" disabled>
+          </label>
+          <label>Watts
+            <input id="rep-watts" type="number" min="0.1" max="1500" step="0.1" value="5" required>
+          </label>
+        </div>
+        <div class="controls">
+          <label>Encode
+            <select id="rep-encode-mode">
+              <option value="none" selected>None</option>
+              <option value="ctcss">CTCSS</option>
+              <option value="dcs">DCS</option>
+            </select>
+          </label>
+          <label>Encode CTCSS Hz
+            <select id="rep-encode-ctcss" disabled></select>
+          </label>
+          <label>Encode DCS
+            <select id="rep-encode-dcs" disabled></select>
+          </label>
+          <label>Decode
+            <select id="rep-decode-mode">
+              <option value="none" selected>None</option>
+              <option value="ctcss">CTCSS</option>
+              <option value="dcs">DCS</option>
+            </select>
+          </label>
+          <label>Decode CTCSS Hz
+            <select id="rep-decode-ctcss" disabled></select>
+          </label>
+          <label>Decode DCS
+            <select id="rep-decode-dcs" disabled></select>
+          </label>
+          <label class="check">Narrow FM
+            <input id="rep-narrow" type="checkbox" checked>
+          </label>
+        </div>
+        <div class="controls">
+          <label>Repeater call
+            <input id="rep-call" autocomplete="off" spellcheck="false" placeholder="W1AW/R" maxlength="20">
+          </label>
+          <label>Name
+            <input id="rep-name" autocomplete="off" placeholder="Landmark" maxlength="80">
+          </label>
+          <label>City
+            <input id="rep-city" autocomplete="off" placeholder="City" maxlength="80">
+          </label>
+        </div>
+        <label class="grow">Notes
+          <input id="rep-notes" autocomplete="off" maxlength="400" placeholder="Optional notes">
+        </label>
+        <label class="grow">What you will say
+          <textarea id="rep-text" rows="2" maxlength="2000" required placeholder="This is W1AW monitoring"></textarea>
+        </label>
+        <p id="rep-resolved" class="quiet">Set the output and shift. Standard offsets fill in for the band.</p>
+        <p id="rep-privilege" class="quiet"></p>
+        <div class="controls">
+          <button id="rep-check" type="button" class="ghost">Check privilege</button>
+          <button id="rep-hold" type="submit" disabled>Hold repeater draft</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="waiting">
+    <summary>
+      <span class="fold-title">Waiting for you</span>
+      <span id="drafts-aside" class="fold-aside"></span>
+    </summary>
+    <div class="fold-body">
+      <div id="drafts" class="list"></div>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="heard">
+    <summary><span class="fold-title">Heard</span></summary>
+    <div class="fold-body">
+      <p class="quiet">Log copy here, or let an agent log it. This does not transmit.</p>
+      <form id="heard-form" class="stack">
+        <label class="grow">Copy
+          <textarea id="heard-text" rows="2" maxlength="2000" placeholder="What you heard"></textarea>
+        </label>
+        <div class="controls">
+          <label>MHz
+            <input id="heard-mhz" type="number" min="0.1" step="0.001">
+          </label>
+          <label>Mode
+            <select id="heard-mode"></select>
+          </label>
+          <button type="submit" class="ghost">Log copy</button>
+        </div>
+      </form>
+      <div id="heard" class="list"></div>
+    </div>
+  </details>
+
+  <details class="panel fold" open data-fold="authorized">
+    <summary><span class="fold-title">Authorized</span></summary>
+    <div class="fold-body">
+      <p class="quiet">Each line was authorized by a click. CW and digimodes can be played as local audio so you can hear (or VOX) the message. This desk still does not key a radio.</p>
+      <div id="sent" class="list"></div>
+    </div>
+  </details>
+
+  <script src="/radio-listener.js?v=2"></script>
+  <script src="/station.js?v=10"></script>
+</body>
+</html>

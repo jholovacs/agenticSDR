@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
+    <ProjectReference Include="..\Radio\AgenticSdr.Radio.csproj" />
+  </ItemGroup>
+
+  <!--
+    Host is another web app. A ProjectReference pulls its wwwroot/static assets over this desk.
+    Compile against the built Host DLL; CI and `make test` build Host first.
+  -->
+  <ItemGroup>
+    <Reference Include="AgenticSdr.Host">
+      <HintPath>..\Host\bin\$(Configuration)\net10.0\AgenticSdr.Host.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgenticSdr.Tests" />
+  </ItemGroup>
+
+  <!-- Shared radio listener UI (Host + Station). -->
+  <Target Name="CopySharedUi" BeforeTargets="Build;ResolveProjectStaticWebAssets">
+    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css"
+          DestinationFolder="wwwroot"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -32,8 +32,17 @@ public class ProcessorTests
         using var chain = new SignalChain([new MorseProcessor()]);
         Assert.True(chain.TrySubmit(SignalFrame.FromAudio(audio, 48_000)));
         await chain.WaitIdleAsync(CancellationToken.None, settleMs: 30);
-        await Task.Delay(80);
-        List<AttributedText> texts = chain.DrainTexts();
+
+        List<AttributedText> texts = [];
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            texts.AddRange(chain.DrainTexts());
+            if (texts.Any(t => t.Text.Contains("CQ", StringComparison.Ordinal) && t.SourceId == "morse"))
+                break;
+            await Task.Delay(20);
+        }
+
         Assert.Contains(texts, t => t.Text.Contains("CQ", StringComparison.Ordinal) && t.SourceId == "morse");
     }
 

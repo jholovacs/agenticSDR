@@ -52,6 +52,84 @@ public static class MorseDecoder
         return Score(direct) >= 2 ? direct : "";
     }
 
+    /// <summary>
+    /// Synthesize keyed CW tone audio for <paramref name="text"/>. Letters, digits, and common punctuation
+    /// from the decoder table are sent; spaces become word gaps. Unknown characters are skipped.
+    /// This is baseband audio only — it does not key a radio.
+    /// </summary>
+    public static float[] Modulate(string text, int sampleRate = 8_000, double toneHz = 700, double wordsPerMinute = 20, float amplitude = 0.55f)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            throw new ArgumentException("CW text is empty.", nameof(text));
+        if (sampleRate < 1_000)
+            throw new ArgumentException("Sample rate is too low for CW.", nameof(sampleRate));
+        if (!(wordsPerMinute is >= 5 and <= 60))
+            throw new ArgumentException("CW speed has to be between 5 and 60 WPM.", nameof(wordsPerMinute));
+        if (!(toneHz is >= 300 and <= 1_200))
+            throw new ArgumentException("CW tone has to be between 300 and 1200 Hz.", nameof(toneHz));
+
+        EnsureEncodeTable();
+        double ditSeconds = 1.2 / wordsPerMinute;
+        int dit = Math.Max(1, (int)Math.Round(sampleRate * ditSeconds));
+        var marks = new List<(bool On, int Dits)>();
+        bool first = true;
+        foreach (char raw in text.Trim().ToUpperInvariant())
+        {
+            if (char.IsWhiteSpace(raw))
+            {
+                marks.Add((false, 7));
+                first = true;
+                continue;
+            }
+
+            if (Encode is null || !Encode.TryGetValue(raw, out string? pattern) || string.IsNullOrEmpty(pattern))
+                continue;
+
+            if (!first)
+                marks.Add((false, 3));
+            first = false;
+            for (int i = 0; i < pattern.Length; i++)
+            {
+                if (i > 0)
+                    marks.Add((false, 1));
+                marks.Add((true, pattern[i] == '-' ? 3 : 1));
+            }
+        }
+
+        if (marks.Count == 0)
+            throw new ArgumentException("CW text has no Morse characters that can be sent.", nameof(text));
+
+        marks.Add((false, 7));
+        int totalDits = 0;
+        foreach ((bool _, int count) in marks)
+            totalDits += count;
+        var audio = new float[totalDits * dit];
+        double phase = 0;
+        double step = 2 * Math.PI * toneHz / sampleRate;
+        int cursor = 0;
+        foreach ((bool on, int count) in marks)
+        {
+            int samples = count * dit;
+            for (int i = 0; i < samples && cursor < audio.Length; i++, cursor++)
+            {
+                if (on)
+                {
+                    // Raised-cosine edges on each element so the tone is less clicky in a speaker.
+                    float edge = 1f;
+                    int fade = Math.Min(dit / 4, Math.Min(i, samples - 1 - i));
+                    if (fade < dit / 4)
+                        edge = 0.5f - 0.5f * (float)Math.Cos(Math.PI * fade / Math.Max(1, dit / 4));
+                    audio[cursor] = amplitude * edge * (float)Math.Cos(phase);
+                    phase += step;
+                    if (phase > Math.PI)
+                        phase -= 2 * Math.PI;
+                }
+            }
+        }
+
+        return audio;
+    }
+
     public static string Decode(ReadOnlySpan<float> audio, int sampleRate)
     {
         if (audio.Length < sampleRate / 20 || sampleRate < 1000)
@@ -416,5 +494,27 @@ public static class MorseDecoder
             return;
         text.Append(Letters.TryGetValue(symbol.ToString(), out char letter) ? letter : '?');
         symbol.Clear();
+    }
+
+    static readonly object EncodeGate = new();
+    static Dictionary<char, string>? Encode;
+
+    static void EnsureEncodeTable()
+    {
+        if (Encode is not null)
+            return;
+        lock (EncodeGate)
+        {
+            if (Encode is not null)
+                return;
+            var map = new Dictionary<char, string>();
+            foreach ((string pattern, char letter) in Letters)
+            {
+                // Prefer the first pattern when a character has aliases (comma).
+                if (!map.ContainsKey(letter))
+                    map[letter] = pattern;
+            }
+            Encode = map;
+        }
     }
 }

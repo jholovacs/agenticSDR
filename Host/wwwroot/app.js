@@ -1027,23 +1027,7 @@ function downloadFile(file) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-const hearModes = [
-  ["nbfm", "FMNB"],
-  ["wbfm", "FMWB"],
-  ["am", "AM"],
-  ["usb", "SSB USB"],
-  ["lsb", "SSB LSB"],
-  ["raw", "Raw"],
-  ["cw", "CW"],
-  ["ft8", "FT8"],
-  ["js8", "JS8"],
-  ["olivia", "Olivia"],
-  ["jtty", "JTTY"],
-  ["varac", "VarAC"],
-  ["dmr", "DMR"],
-  ["m17", "M17"],
-  ["packet", "Packet (AX.25)"]
-];
+const hearModes = RadioListener.HEAR_MODES;
 let suggestedMode = "nbfm";
 let listeningDmrKey = "";
 let listeningWbfmProgram = "main";
@@ -1101,7 +1085,7 @@ function formatReadout(hz, modeName) {
 }
 
 function modeLabel(value) {
-  return hearModes.find((item) => item[0] === value)?.[1] || modeToken(value);
+  return RadioListener.modeLabel(value) || modeToken(value);
 }
 
 function fillHearModes() {
@@ -1295,87 +1279,24 @@ async function listen(explicitMode) {
 }
 
 function audioChannelsFromHeaders(headers, mode, program) {
-  const raw = Number(headers.get("X-Audio-Channels"));
-  if (Number.isFinite(raw) && raw >= 1)
-    return Math.min(2, Math.max(1, Math.round(raw)));
-  // Broadcast-FM main is always interleaved stereo from the host; never treat it as mono.
-  if (String(mode || "").toLowerCase() === "wbfm" && String(program || "main").toLowerCase() === "main")
-    return 2;
-  return 1;
+  return RadioListener.channelsFromHeaders(headers, mode, program);
 }
 
 async function playPcmStream(body, context, rate, signal, channels = 1) {
-  const ch = Math.max(1, Math.min(2, Math.round(Number(channels)) || 1));
-  const sourceRate = Number(rate) || context.sampleRate || 48000;
-  const playRate = context.sampleRate || sourceRate;
-  const frameBytes = 2 * ch;
-  const reader = body.getReader();
-  let pending = new Uint8Array(0);
-  let nextTime = context.currentTime + 0.15;
-  let played = 0;
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    pending = concatBytes(pending, value);
-    const usable = pending.length - (pending.length % frameBytes);
-    if (usable < frameBytes) continue;
-    const frames = usable / frameBytes;
-    const view = new DataView(pending.buffer, pending.byteOffset, usable);
-    const source = [];
-    for (let c = 0; c < ch; c++) source[c] = new Float32Array(frames);
-    const pcm = recording ? new Int16Array(frames) : null;
-    for (let i = 0; i < frames; i++) {
-      let mix = 0;
-      for (let c = 0; c < ch; c++) {
-        const sample = view.getInt16((i * ch + c) * 2, true);
-        source[c][i] = sample / 32768;
-        mix += sample;
-      }
-      if (pcm) pcm[i] = (mix / ch) | 0;
-    }
-    if (pcm) appendRecording(pcm);
-
-    let buffer;
-    if (Math.abs(playRate - sourceRate) < 1) {
-      buffer = context.createBuffer(ch, frames, playRate);
-      for (let c = 0; c < ch; c++) buffer.copyToChannel(source[c], c);
-    } else {
-      // Resample into the AudioContext clock so pitch/speed stay correct across devices.
-      const outFrames = Math.max(1, Math.round(frames * playRate / sourceRate));
-      buffer = context.createBuffer(ch, outFrames, playRate);
-      for (let c = 0; c < ch; c++) {
-        const input = source[c];
-        const output = buffer.getChannelData(c);
-        for (let i = 0; i < outFrames; i++) {
-          const at = i * (frames - 1) / Math.max(1, outFrames - 1);
-          const i0 = Math.floor(at);
-          const i1 = Math.min(frames - 1, i0 + 1);
-          const frac = at - i0;
-          output[i] = input[i0] * (1 - frac) + input[i1] * frac;
-        }
-      }
-    }
-
-    const node = context.createBufferSource();
-    node.buffer = buffer;
-    node.connect(liveGain || context.destination);
-    const start = Math.max(nextTime, context.currentTime + 0.02);
-    node.start(start);
-    nextTime = start + buffer.duration;
-    played += buffer.duration;
-    liveState.textContent = operatingMode === "camp" && !campActivity
-      ? "Waiting for activity."
-      : `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
-    pending = pending.subarray(usable);
-  }
-}
-
-function concatBytes(left, right) {
-  if (left.length === 0) return right;
-  const merged = new Uint8Array(left.length + right.length);
-  merged.set(left, 0);
-  merged.set(right, left.length);
-  return merged;
+  await RadioListener.playPcmStream(
+    body,
+    context,
+    rate,
+    signal,
+    channels,
+    liveGain,
+    (played, ch) => {
+      liveState.textContent = operatingMode === "camp" && !campActivity
+        ? "Waiting for activity."
+        : `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
+    },
+    recording ? appendRecording : null
+  );
 }
 
 function ensureGain(context) {

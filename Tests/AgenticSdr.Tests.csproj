@@ -23,6 +23,7 @@
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
     <ProjectReference Include="..\Host\AgenticSdr.Host.csproj" />
     <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
+    <ProjectReference Include="..\Station\AgenticSdr.Station.csproj" />
   </ItemGroup>
 
 </Project>

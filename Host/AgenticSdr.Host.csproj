@@ -29,4 +29,11 @@
     <None Include="native\libxaramonitor.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libxaramonitor.dylib')" />
   </ItemGroup>
 
+  <!-- Shared radio listener UI (Host + Station). -->
+  <Target Name="CopySharedUi" BeforeTargets="Build;ResolveProjectStaticWebAssets">
+    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css"
+          DestinationFolder="wwwroot"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

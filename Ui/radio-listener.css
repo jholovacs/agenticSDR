@@ -1,0 +1,82 @@
+/* Shared radio listener — used by Host and Station. */
+.rl-pipeline-stages {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.rl-pipeline-stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, #3d3226);
+  border-radius: 8px;
+  background: #1a1511;
+  font-size: 0.9rem;
+}
+
+.rl-pipeline-stages .pipe {
+  color: var(--muted, #b5a48f);
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.rl-pipeline-stages button {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+}
+
+.rl-pipeline-edit {
+  align-items: end;
+}
+
+.rl-decoded {
+  margin: 0;
+  padding: 12px;
+  min-height: 6rem;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--line, #3d3226);
+  border-radius: 10px;
+  background: #1a1511;
+  color: var(--ink, #f4ecdf);
+  white-space: pre-wrap;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.rl-decoded .src {
+  display: block;
+  color: var(--muted, #b5a48f);
+  font-size: 0.75rem;
+  margin-top: 6px;
+}
+
+.rl-decoded .morse { color: var(--amber, #e6a04a); }
+.rl-decoded .speech { color: var(--green, #c6de7a); }
+.rl-decoded .ft8,
+.rl-decoded .js8,
+.rl-decoded .olivia,
+.rl-decoded .jtty,
+.rl-decoded .varac { color: #7dd3c0; }
+.rl-decoded .packet { color: #7eb8e8; }
+.rl-decoded .rds { color: #c4b5fd; }
+
+.rl-radio-status {
+  flex: 1;
+  min-width: 12rem;
+  align-self: center;
+  margin: 0;
+}
+
+.rl-heading {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
