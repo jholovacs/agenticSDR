@@ -100,7 +100,10 @@ public sealed class XaraMonitor : IDisposable
         using var monitor = new XaraMonitor();
         if (!monitor.Available)
             return monitor.MissingHint ?? "VarAC decode needs Host/native/xaramonitor.dll.";
-        monitor.Push(audio, sampleRate);
+        float[] wave = audio.ToArray();
+        // VARA expects the modem near 1.5 kHz; nudge mistuned dongle audio onto that center.
+        (wave, _) = DialFrequency.AlignToCenter(wave, sampleRate, 1_500, 1_150);
+        monitor.Push(wave, sampleRate);
         monitor.Finish();
         IReadOnlyList<XaraMessage> messages = monitor.Drain();
         if (messages.Count > 0)

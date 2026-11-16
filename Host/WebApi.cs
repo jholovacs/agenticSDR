@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Threading.Channels;
 using AgenticSdr.Dsp;
+using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Host;
@@ -254,11 +255,18 @@ public static class WebApi
                 report.Hints
             });
         });
-        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, string? wbfmProgram, HttpContext http, RadioSession session, CancellationToken ct) =>
+        app.MapGet("/api/processors", (RadioSession session) => session.Processors.List());
+        app.MapGet("/api/pipelines/default", (string? mode, RadioSession session) =>
+        {
+            RadioMode parsed = ModeClassifier.Parse(mode);
+            return Results.Ok(new { mode = parsed.ToString(), pipeline = ModePipelines.DefaultIds(parsed) });
+        });
+        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, string? wbfmProgram, string? pipeline, HttpContext http, RadioSession session, CancellationToken ct) =>
         {
             try
             {
-                await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct, wbfmProgram);
+                IReadOnlyList<string>? stages = ParsePipelineQuery(pipeline);
+                await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct, wbfmProgram, stages);
             }
             catch (OperationCanceledException)
             {
@@ -379,6 +387,14 @@ public static class WebApi
             return Results.BadRequest(new { error = ex.Message });
         }
     }
+
+    private static IReadOnlyList<string>? ParsePipelineQuery(string? pipeline)
+    {
+        if (string.IsNullOrWhiteSpace(pipeline))
+            return null;
+        string[] parts = pipeline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
+    }
 }
 
 /// <summary>Body of POST /api/open. Index is the position from the device list.</summary>
@@ -390,7 +406,7 @@ public sealed record ScanBody(string BandId);
 /// <summary>Body of POST /api/inspect. FrequencyHz is the frequency to measure, in hertz.</summary>
 public sealed record InspectBody(double FrequencyHz);
 /// <summary>Body of POST /api/listen. Mode is auto, nbfm, wbfm, am, usb, lsb, cw, or ft8. Seconds is capped at 20, and FT8 always uses 15.</summary>
-public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds, string? WbfmProgram = null);
+public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds, string? WbfmProgram = null, string[]? Pipeline = null);
 /// <summary>Body of POST /api/agent. Message is the question. History is earlier user and assistant sentences, not tool results.</summary>
 public sealed record AgentBody(string? Message, IReadOnlyList<AgentHistoryTurn>? History);
 /// <summary>Body of PUT /api/camp/mode. Mode is explore or camp.</summary>

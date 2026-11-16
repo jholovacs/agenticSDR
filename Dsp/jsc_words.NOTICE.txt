@@ -1,0 +1,4 @@
+JSC word list extracted from JS8Call jsc_map.cpp
+Copyright (C) 2018 Jordan Sherer <kn4crd@gmail.com>
+Licensed under the GNU General Public License v3 (or later).
+Source: https://github.com/js8call/js8call

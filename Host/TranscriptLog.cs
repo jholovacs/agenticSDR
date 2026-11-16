@@ -1,10 +1,10 @@
 namespace AgenticSdr.Host;
 
 /// <summary>
-/// One piece of decoded text. Kind is morse, speech, rds, ft8, packet, or note.
-/// Morse keeps its own color in the text pane.
+/// One piece of decoded text. Kind is morse, speech, rds, ft8, packet, or note (CSS).
+/// Source is the filter/decoder display name that produced the text.
 /// </summary>
-public sealed record TranscriptSpan(string Kind, string Text);
+public sealed record TranscriptSpan(string Kind, string Text, string? Source = null);
 
 /// <summary>
 /// Grows a Morse line as the decoder re-reads a moving window of audio.

@@ -36,6 +36,7 @@ public sealed class AgentTools(RadioSession session, CampBook camp, ClipStore cl
           {"type":"function","function":{"name":"open_device","description":"Open a device by index from list_devices. Index 0 is the first radio.","parameters":{"type":"object","properties":{"index":{"type":"integer"}}}}},
           {"type":"function","function":{"name":"close_device","description":"Close the open SDR so another program can use it.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"get_status","description":"Whether a radio is open and what it is doing right now.","parameters":{"type":"object","properties":{}}}},
+          {"type":"function","function":{"name":"get_transcript","description":"Decoded text from the current listen (Morse, digimodes, speech, RDS), with which decoder wrote each line. Call this before translating or summarizing what was heard.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"get_capabilities","description":"Tuning range, sample rate, gain, and whether HF uses direct sampling.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"list_ham_bands","description":"List amateur bands plus AM, FM, NOAA, CB, GMRS, and DMR. Recommended bands come first when an antenna is set.","parameters":{"type":"object","properties":{}}}},
           {"type":"function","function":{"name":"get_antenna","description":"The current antenna and the bands it matches.","parameters":{"type":"object","properties":{}}}},
@@ -61,7 +62,7 @@ public sealed class AgentTools(RadioSession session, CampBook camp, ClipStore cl
         """)!.AsArray();
 
     public static bool Known(string name) =>
-        name is "list_devices" or "open_device" or "close_device" or "get_status" or "get_capabilities"
+        name is "list_devices" or "open_device" or "close_device" or "get_status" or "get_transcript" or "get_capabilities"
             or "list_ham_bands" or "get_antenna" or "set_antenna" or "guess_antenna"
             or "scan_band" or "inspect_signal" or "listen" or "list_clips" or "analyze_clip" or "stop"
             or "set_operating_mode" or "get_schedule" or "add_schedule_entry" or "update_schedule_entry"
@@ -85,6 +86,23 @@ public sealed class AgentTools(RadioSession session, CampBook camp, ClipStore cl
                     return Text(Json(session.Status), session.Status.Message ?? "Radio is stopped.");
                 case "get_status":
                     return Text(Json(session.Status), session.Status.Message ?? session.Status.Phase);
+                case "get_transcript":
+                {
+                    SessionStatus status = session.Status;
+                    var lines = status.Transcript.Select(span => new
+                    {
+                        kind = span.Kind,
+                        source = span.Source,
+                        text = span.Text
+                    }).ToList();
+                    string plain = status.LiveText ?? "";
+                    string summary = lines.Count == 0
+                        ? "No decoded text yet."
+                        : lines.Count == 1
+                            ? "1 decoded line."
+                            : $"{lines.Count} decoded lines.";
+                    return Text(Json(new { text = plain, lines }), summary);
+                }
                 case "get_capabilities":
                     return Text(Json(session.Capabilities()), "Read the radio's range.");
                 case "list_ham_bands":

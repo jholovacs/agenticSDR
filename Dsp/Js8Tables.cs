@@ -1,9 +1,11 @@
 namespace AgenticSdr.Dsp;
 
 /// <summary>
-/// Fixed numbers from the JS8 (Normal / submode A) physical layer: the sync tones, the LDPC(174,87) matrices, and the
+/// Fixed numbers from the JS8 physical layer: sync tones (Costas set 1 and 2), the LDPC(174,87) matrices, and the
 /// CRC-12 settings. They are protocol constants, not settings. Values come from the public JS8 protocol description
 /// (a machine-readable table dump), not from any GPL source file.
+/// Normal uses Costas set 1 at 6.25 Hz / 1920 samples per symbol. Fast, Turbo, and Slow use Costas set 2
+/// with 10 / 20 / 3.125 Hz spacing (1200 / 600 / 3840 samples).
 /// </summary>
 internal static class Js8Tables
 {
@@ -30,8 +32,15 @@ internal static class Js8Tables
     /// <summary>The checksum is taken over the 75 payload bits plus one trailing zero bit.</summary>
     public const int CrcBits = 76;
 
-    /// <summary>Costas set 1 (Normal mode): the same seven tones at symbols 0-6, 36-42 and 72-78. Tone 7 never appears.</summary>
+    /// <summary>Costas set 1 (Normal): the same seven tones at symbols 0-6, 36-42 and 72-78. Tone 7 never appears.</summary>
     public static ReadOnlySpan<byte> Costas => [4, 2, 5, 6, 1, 3, 0];
+
+    /// <summary>Costas set 2 start block (Fast / Turbo / Slow), symbols 0-6.</summary>
+    public static ReadOnlySpan<byte> CostasSet2Start => [0, 6, 2, 3, 5, 4, 1];
+    /// <summary>Costas set 2 middle block, symbols 36-42.</summary>
+    public static ReadOnlySpan<byte> CostasSet2Mid => [1, 5, 0, 2, 3, 6, 4];
+    /// <summary>Costas set 2 end block, symbols 72-78.</summary>
+    public static ReadOnlySpan<byte> CostasSet2End => [2, 5, 0, 6, 4, 1, 3];
 
     /// <summary>Channel positions of the codeword bits. Entry i of (parity then message) lands at codeword[ColumnOrder[i]].</summary>
     public static ReadOnlySpan<byte> ColumnOrder =>

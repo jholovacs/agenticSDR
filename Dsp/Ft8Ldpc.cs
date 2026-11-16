@@ -55,10 +55,19 @@ internal static class Ft8Ldpc
         if (TryDecodeOnce(llr, plain, payload, iterations: 50))
             return true;
 
-        // Soft OSD: flip the weakest channel bits and retry BP+CRC.
-        Span<int> weak = stackalloc int[6];
+        // Soft OSD: flip weak channel bits (singles, then cumulative, then pairs) and retry BP+CRC.
+        Span<int> weak = stackalloc int[8];
         FindWeakest(llr, weak);
-        for (int n = 1; n <= weak.Length; n++)
+        for (int i = 0; i < weak.Length; i++)
+        {
+            llr.Clear();
+            logLikelihood.CopyTo(llr);
+            llr[weak[i]] = -llr[weak[i]];
+            if (TryDecodeOnce(llr, plain, payload, iterations: 40))
+                return true;
+        }
+
+        for (int n = 2; n <= Math.Min(6, weak.Length); n++)
         {
             llr.Clear();
             logLikelihood.CopyTo(llr);
@@ -66,6 +75,19 @@ internal static class Ft8Ldpc
                 llr[weak[i]] = -llr[weak[i]];
             if (TryDecodeOnce(llr, plain, payload, iterations: 40))
                 return true;
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            for (int j = i + 1; j < 4; j++)
+            {
+                llr.Clear();
+                logLikelihood.CopyTo(llr);
+                llr[weak[i]] = -llr[weak[i]];
+                llr[weak[j]] = -llr[weak[j]];
+                if (TryDecodeOnce(llr, plain, payload, iterations: 40))
+                    return true;
+            }
         }
 
         return false;

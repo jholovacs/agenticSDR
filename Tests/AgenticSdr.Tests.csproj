@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -22,6 +22,7 @@
     <ProjectReference Include="..\Radio\AgenticSdr.Radio.csproj" />
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
     <ProjectReference Include="..\Host\AgenticSdr.Host.csproj" />
+    <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
   </ItemGroup>
 
 </Project>

@@ -9,7 +9,7 @@ public class DigiModeTests
 {
     [Theory]
     [InlineData(14_078_000, RadioMode.Js8)]
-    [InlineData(14_072_300, RadioMode.Olivia)]
+    [InlineData(14_071_500, RadioMode.Olivia)]
     [InlineData(14_090_000, RadioMode.Jtty)]
     [InlineData(14_105_000, RadioMode.Varac)]
     [InlineData(28_078_000, RadioMode.Js8)]
@@ -188,12 +188,50 @@ public class DigiModeTests
     }
 
     [Fact]
-    public void Jtty_modulate_and_decode_prints_letters()
+    public void Jtty_modulate_and_decode_prints_cq()
     {
         var audio = new float[(int)(4 * JttyDecoder.SampleRate)];
-        JttyDecoder.Modulate(audio, JttyDecoder.SampleRate, "CQ DE K1ABC", 1_000, 0.55f);
+        JttyDecoder.Modulate(audio, JttyDecoder.SampleRate, "CQ K1ABC CQ", 1_500, 0.55f);
         IReadOnlyList<JttyMessage> found = JttyDecoder.Decode(audio, JttyDecoder.SampleRate);
-        Assert.Contains(found, message => message.Text.Contains("CQ DE K1ABC", StringComparison.Ordinal));
+        Assert.Contains(found, message => message.Text.Contains("CQ K1ABC CQ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Jtty_modulate_and_decode_prints_free_text()
+    {
+        var audio = new float[(int)(8 * JttyDecoder.SampleRate)];
+        JttyDecoder.Modulate(audio, JttyDecoder.SampleRate, "HELLO", 1_500, 0.55f);
+        IReadOnlyList<JttyMessage> found = JttyDecoder.Decode(audio, JttyDecoder.SampleRate);
+        Assert.Contains(found, message => message.Text.Contains("HELLO", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Jtty_official_sample_decodes_when_present()
+    {
+        string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".tmp", "jtty_sample.wav"));
+        if (!File.Exists(path))
+            return; // optional fixture from WSJT samples/JTTY
+
+        byte[] file = File.ReadAllBytes(path);
+        int rate = BitConverter.ToInt32(file, 24);
+        int bits = BitConverter.ToInt16(file, 34);
+        int channels = BitConverter.ToInt16(file, 22);
+        int dataOfs = 44;
+        int bytesPer = Math.Max(1, bits / 8 * channels);
+        int frames = (file.Length - dataOfs) / bytesPer;
+        var mono = new float[frames];
+        for (int i = 0; i < frames; i++)
+        {
+            short s = BitConverter.ToInt16(file, dataOfs + i * bytesPer);
+            mono[i] = s / 32768f;
+        }
+
+        IReadOnlyList<JttyMessage> found = JttyDecoder.Decode(mono, rate);
+        Assert.NotEmpty(found);
+        string joined = string.Join(' ', found.Select(m => m.Text));
+        Assert.True(
+            joined.Contains("RAN", StringComparison.Ordinal) || joined.Contains("DECODE", StringComparison.Ordinal),
+            $"unexpected JTTY sample text: {joined}");
     }
 
     [Fact]
@@ -217,6 +255,61 @@ public class DigiModeTests
     public void Olivia_silence_returns_nothing()
     {
         var audio = new float[OliviaDecoder.SampleRate * 2];
+        Assert.Empty(OliviaDecoder.Decode(audio, OliviaDecoder.SampleRate));
+    }
+
+    [Fact]
+    public void Olivia_round_trip_recovers_keyboard_text()
+    {
+        var profile = new OliviaProfile(8, 250, "8/250");
+        float[] wave = OliviaDecoder.Modulate("CQ DE K7ABC", profile, OliviaDecoder.SampleRate);
+        IReadOnlyList<OliviaMessage> messages = OliviaDecoder.Decode(wave, OliviaDecoder.SampleRate);
+        Assert.NotEmpty(messages);
+        Assert.Contains("CQ DE K7ABC", messages[0].Text, StringComparison.Ordinal);
+        Assert.Equal("8/250", messages[0].Profile);
+    }
+
+    [Fact]
+    public void Olivia_recovers_text_when_audio_center_is_mistuned()
+    {
+        var profile = new OliviaProfile(8, 250, "8/250");
+        // Simulate an RTL that is ~220 Hz high: stack lands below the nominal 1500 Hz center.
+        float[] wave = OliviaDecoder.Modulate(
+            "HELLO", profile, OliviaDecoder.SampleRate, centerHz: OliviaDecoder.CenterHz - 220);
+        IReadOnlyList<OliviaMessage> messages = OliviaDecoder.Decode(wave, OliviaDecoder.SampleRate);
+        Assert.NotEmpty(messages);
+        Assert.Contains("HELLO", messages[0].Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Dial_frequency_estimates_band_offset()
+    {
+        var profile = new OliviaProfile(8, 250, "8/250");
+        float[] wave = OliviaDecoder.Modulate("TEST", profile, OliviaDecoder.SampleRate, centerHz: 1_300);
+        double offset = DialFrequency.EstimateBandOffsetHz(
+            wave, OliviaDecoder.SampleRate, 1_500, OliviaDecoder.BandwidthHz * 0.5, 400);
+        Assert.InRange(offset, -250, -150);
+    }
+
+    [Fact]
+    public void Published_station_matches_known_olivia_and_noaa_dials()
+    {
+        Assert.True(Region2BandPlan.TryPublishedStation(3_581_500, RadioMode.Olivia, out double olivia, out RadioMode oliviaMode));
+        Assert.Equal(3_581_500, olivia);
+        Assert.Equal(RadioMode.Olivia, oliviaMode);
+
+        Assert.True(Region2BandPlan.TryPublishedStation(162_550_000, RadioMode.Nbfm, out double noaa, out RadioMode noaaMode));
+        Assert.Equal(162_550_000, noaa);
+        Assert.Equal(RadioMode.Nbfm, noaaMode);
+    }
+
+    [Fact]
+    public void Olivia_noise_does_not_invent_chat()
+    {
+        var rng = new Random(42);
+        var audio = new float[OliviaDecoder.SampleRate * 8];
+        for (int i = 0; i < audio.Length; i++)
+            audio[i] = (float)(rng.NextDouble() * 2 - 1) * 0.2f;
         Assert.Empty(OliviaDecoder.Decode(audio, OliviaDecoder.SampleRate));
     }
 

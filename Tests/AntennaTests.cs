@@ -151,6 +151,29 @@ public class AntennaTests
     }
 
     [Fact]
+    public void AntennaStore_round_trips_settings()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-antenna-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var store = new AntennaStore(path);
+            AntennaSpec saved = AntennaPlan.Parse(20, "ft", "horizontal", 90);
+            store.Save(saved);
+            AntennaSpec? loaded = new AntennaStore(path).Load();
+            Assert.NotNull(loaded);
+            Assert.Equal(saved.LengthMeters, loaded!.LengthMeters, 4);
+            Assert.Equal("horizontal", loaded.Orientation);
+            Assert.Equal(90, loaded.AzimuthDegrees);
+            Assert.Contains("ft", loaded.LengthText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Broadcast_fm_wider_than_voice_classifies_as_wbfm()
     {
         var peak = new SpectralPeak(98_500_000, -10, -60, 50, 160_000, 98_420_000, 98_580_000, 4, 0.05, false);

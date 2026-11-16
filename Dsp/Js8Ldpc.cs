@@ -13,24 +13,27 @@ internal static class Js8Ldpc
     /// <summary>
     /// Builds the 79 tones for one frame: Costas, 29 data tones, Costas, 29 data tones, Costas.
     /// Each data tone is three codeword bits read most-significant first, with no Gray mapping.
+    /// <paramref name="costasSet2"/> selects Fast/Turbo/Slow sync (three different Costas arrays).
     /// </summary>
-    public static void EncodeTones(ReadOnlySpan<byte> message, int i3, Span<byte> tones)
+    public static void EncodeTones(ReadOnlySpan<byte> message, int i3, Span<byte> tones, bool costasSet2 = false)
     {
         Span<byte> info = stackalloc byte[Js8Tables.LdpcKBytes];
         BuildInfo(message, i3, info);
         Span<byte> codeword = stackalloc byte[Js8Tables.LdpcN];
         Encode174(info, codeword);
 
-        ReadOnlySpan<byte> costas = Js8Tables.Costas;
+        ReadOnlySpan<byte> costasStart = costasSet2 ? Js8Tables.CostasSet2Start : Js8Tables.Costas;
+        ReadOnlySpan<byte> costasMid = costasSet2 ? Js8Tables.CostasSet2Mid : Js8Tables.Costas;
+        ReadOnlySpan<byte> costasEnd = costasSet2 ? Js8Tables.CostasSet2End : Js8Tables.Costas;
         int bit = 0;
         for (int symbol = 0; symbol < Js8Tables.Symbols; symbol++)
         {
             if (symbol < 7)
-                tones[symbol] = costas[symbol];
+                tones[symbol] = costasStart[symbol];
             else if (symbol is >= 36 and < 43)
-                tones[symbol] = costas[symbol - 36];
+                tones[symbol] = costasMid[symbol - 36];
             else if (symbol >= 72)
-                tones[symbol] = costas[symbol - 72];
+                tones[symbol] = costasEnd[symbol - 72];
             else
             {
                 tones[symbol] = (byte)((codeword[bit] << 2) | (codeword[bit + 1] << 1) | codeword[bit + 2]);
@@ -47,17 +50,18 @@ internal static class Js8Ldpc
         Span<float> llr = stackalloc float[Js8Tables.LdpcN];
         logLikelihood.CopyTo(llr);
 
-        if (TryDecodeOnce(llr, plain, message, out i3, iterations: 50))
+        if (TryDecodeOnce(llr, plain, message, out i3, iterations: 40))
             return true;
 
-        Span<int> weak = stackalloc int[6];
+        // Light OSD: flip the weakest few bits. Deeper searches burn wall time on busy false Costas hits.
+        Span<int> weak = stackalloc int[4];
         FindWeakest(llr, weak);
         for (int n = 1; n <= weak.Length; n++)
         {
             logLikelihood.CopyTo(llr);
             for (int i = 0; i < n; i++)
                 llr[weak[i]] = -llr[weak[i]];
-            if (TryDecodeOnce(llr, plain, message, out i3, iterations: 40))
+            if (TryDecodeOnce(llr, plain, message, out i3, iterations: 30))
                 return true;
         }
 

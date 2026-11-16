@@ -51,6 +51,12 @@ let liveSampleRate = 48000;
 let listenToken = 0;
 let switching = false;
 let operatingMode = "explore";
+let processorCatalog = [];
+let pipelineIds = [];
+let pipelineDirty = false;
+let statusPipeline = [];
+/** True from Listen click until live audio headers arrive (busy modal stays open). */
+let liveStarting = false;
 let campActivity = false;
 let campPlayKey = "";
 let campConnecting = false;
@@ -88,6 +94,8 @@ function setBusy(value) {
     if (button.closest("dialog")) return;
     if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop" || button.id === "camp-stop") return;
     if (button.id === "record" || button.id === "record-transcript" || button.classList.contains("row-listen")) return;
+    // Prompts stay usable while live audio plays (get_transcript, questions about what you hear).
+    if (button.id === "llm-send") return;
     if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa" || button.classList.contains("channel-tune"))) return;
     button.disabled = value;
   });
@@ -111,7 +119,12 @@ function busyBlurb(phase) {
     case "scanning":
       return "The radio is sweeping the band for strong signals. This can take a little while on a wide band.";
     case "listening":
-      return "The radio is tuned and capturing audio. Digimodes may wait for the next 15-second slot before decoding.";
+      if (liveStarting) {
+        return "Nothing is wrong — live audio starts after the radio is ready.\n"
+          + "This step can include waiting for the radio lock, classifying the signal, "
+          + "looking up a repeater name, waiting for a digimode UTC slot, or tuning.";
+      }
+      return "The radio is tuned and capturing audio. Digimodes may wait for the next slot before decoding.";
     case "inspecting":
       return "Measuring that frequency for mode, bandwidth, and strength.";
     default:
@@ -126,18 +139,18 @@ function otherDialogOpen() {
 function paintBusyModal(phase, message, progress) {
   if (!busyPanel) return;
   // Live explore/camp streaming keeps phase "listening" for the whole tune —
-  // show the modal only for finite work (scan, inspect, clip listen, digi wait).
-  const liveStream = liveAbort !== null;
-  const campWatch = operatingMode === "camp" && phase === "listening";
-  const active = !!(phase && phase !== "idle" && !liveStream && !campWatch);
+  // show the modal for finite work, and also while live audio is still starting.
+  const liveStream = liveAbort !== null && !liveStarting;
+  const campWatch = operatingMode === "camp" && phase === "listening" && !liveStarting;
+  const active = !!(liveStarting || (phase && phase !== "idle" && !liveStream && !campWatch));
   if (!active) {
     if (busyPanel.open) busyPanel.close();
     return;
   }
 
-  busyTitle.textContent = busyHeading(phase);
+  busyTitle.textContent = liveStarting ? "Starting listen" : busyHeading(phase);
   const detail = (message || "").trim();
-  const blurb = busyBlurb(phase);
+  const blurb = busyBlurb(liveStarting ? "listening" : phase);
   busyDetail.textContent = detail && detail !== phase ? `${blurb}\n\n${detail}` : blurb;
   busyDetail.style.whiteSpace = "pre-wrap";
   const pct = Math.max(0, Math.min(100, progress || 0));
@@ -147,6 +160,16 @@ function paintBusyModal(phase, message, progress) {
   if (!busyPanel.open && !otherDialogOpen()) {
     try { busyPanel.showModal(); } catch { /* Nested modal not supported. */ }
   }
+}
+
+function beginLiveStartup(message) {
+  liveStarting = true;
+  paintBusyModal("listening", message || "Opening the live stream…", 3);
+}
+
+function endLiveStartup() {
+  liveStarting = false;
+  if (busyPanel?.open) busyPanel.close();
 }
 
 function applyRadioControls() {
@@ -272,16 +295,18 @@ async function stopRadio() {
 
 let transcriptKey = "";
 
-function transcriptSource(kind) {
-  if (kind === "morse") return "Morse decoder";
-  if (kind === "ft8") return "FT8 decoder";
-  if (kind === "js8") return "JS8 decoder";
-  if (kind === "olivia") return "Olivia decoder";
-  if (kind === "jtty") return "JTTY decoder";
-  if (kind === "varac") return "VarAC / xara";
-  if (kind === "packet") return "Packet / APRS";
-  if (kind === "speech") return "speech to text";
-  if (kind === "rds") return "RDS / RBDS";
+function transcriptSource(span) {
+  if (span?.source) return span.source;
+  const kind = typeof span === "string" ? span : span?.kind;
+  if (kind === "morse") return "Morse";
+  if (kind === "ft8") return "FT8";
+  if (kind === "js8") return "JS8";
+  if (kind === "olivia") return "Olivia";
+  if (kind === "jtty") return "JTTY";
+  if (kind === "varac") return "VarAC";
+  if (kind === "packet") return "Packet";
+  if (kind === "speech") return "Speech";
+  if (kind === "rds") return "RDS";
   if (kind === "note") return "receiver note";
   return kind || "receiver";
 }
@@ -304,6 +329,7 @@ function stampTranscript(spans) {
     next.push({
       kind: span.kind,
       text: span.text,
+      source: span.source || transcriptSource(span),
       utc: match >= 0 ? transcriptSpans[match].utc : new Date().toISOString()
     });
     if (match >= 0) cursor = match + 1;
@@ -326,17 +352,121 @@ function renderTranscript(spans) {
 
   spans.forEach((span, index) => {
     if (index > 0) morse.append("\n");
-    const line = document.createElement("span");
-    line.className = span.kind === "morse" ? "morse"
+    const block = document.createElement("span");
+    block.className = span.kind === "morse" ? "morse"
       : span.kind === "packet" ? "packet"
       : span.kind === "ft8" || span.kind === "js8" || span.kind === "olivia" || span.kind === "jtty" || span.kind === "varac" ? "ft8"
       : span.kind === "rds" ? "rds"
       : span.kind === "note" ? "note"
       : "speech";
-    line.textContent = span.text;
-    morse.append(line);
+    const src = document.createElement("span");
+    src.className = "src";
+    src.textContent = transcriptSource(span);
+    block.append(src);
+    block.append(span.text);
+    morse.append(block);
   });
   if (nearBottom) morse.scrollTop = morse.scrollHeight;
+}
+
+function processorName(id) {
+  const hit = processorCatalog.find((p) => p.id === id);
+  return hit?.name || id;
+}
+
+function renderPipelineEditor() {
+  const empty = document.querySelector("#pipeline-empty");
+  const list = document.querySelector("#pipeline-stages");
+  if (!list) return;
+  list.replaceChildren();
+  const ids = pipelineIds;
+  if (empty) empty.hidden = ids.length > 0;
+  ids.forEach((id, index) => {
+    if (index > 0) {
+      const pipe = document.createElement("li");
+      pipe.className = "pipe";
+      pipe.textContent = "→";
+      list.append(pipe);
+    }
+    const item = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = processorName(id);
+    item.append(label);
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "ghost";
+    up.textContent = "↑";
+    up.disabled = index === 0;
+    up.addEventListener("click", () => movePipeline(index, -1));
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "ghost";
+    down.textContent = "↓";
+    down.disabled = index === ids.length - 1;
+    down.addEventListener("click", () => movePipeline(index, 1));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      pipelineIds = pipelineIds.filter((_, i) => i !== index);
+      pipelineDirty = true;
+      renderPipelineEditor();
+    });
+    item.append(up, down, remove);
+    list.append(item);
+  });
+}
+
+function movePipeline(index, delta) {
+  const next = index + delta;
+  if (next < 0 || next >= pipelineIds.length) return;
+  const copy = pipelineIds.slice();
+  const [item] = copy.splice(index, 1);
+  copy.splice(next, 0, item);
+  pipelineIds = copy;
+  pipelineDirty = true;
+  renderPipelineEditor();
+}
+
+async function loadProcessorCatalog() {
+  try {
+    processorCatalog = await api("/api/processors");
+    const select = document.querySelector("#pipeline-add");
+    if (select) {
+      select.replaceChildren();
+      for (const proc of processorCatalog) {
+        const option = document.createElement("option");
+        option.value = proc.id;
+        option.textContent = `${proc.name} (${proc.kind})`;
+        select.append(option);
+      }
+    }
+  } catch {
+    processorCatalog = [];
+  }
+}
+
+async function loadDefaultPipeline(modeName) {
+  if (pipelineDirty) {
+    renderPipelineEditor();
+    return;
+  }
+  try {
+    const body = await api(`/api/pipelines/default?mode=${encodeURIComponent(modeName || "auto")}`);
+    pipelineIds = Array.isArray(body.pipeline) ? body.pipeline.slice() : [];
+  } catch {
+    pipelineIds = [];
+  }
+  renderPipelineEditor();
+}
+
+function paintStatusPipeline(pipeline) {
+  statusPipeline = Array.isArray(pipeline) ? pipeline : [];
+  if (!pipelineDirty && statusPipeline.length > 0) {
+    pipelineIds = statusPipeline.map((stage) => stage.id);
+    renderPipelineEditor();
+  }
 }
 
 async function refreshStatus() {
@@ -360,6 +490,8 @@ async function refreshStatus() {
     statusLine.textContent = status.message || status.phase;
     if (Array.isArray(status.transcript))
       renderTranscript(status.transcript);
+    if (Array.isArray(status.pipeline))
+      paintStatusPipeline(status.pipeline);
     if (status.error) showError(status.error);
     if (status.campRevision !== campRevision) {
       campRevision = status.campRevision;
@@ -522,16 +654,23 @@ function paintFoldSummaries() {
     ? `${compactNumber(active.frequencyHz / 1e6, 4)} MHz, ${modeLabel(active.mode)}`
     : saved ? `${saved} saved` : "None";
 
+  paintChannelWidth();
   const raw = readout.textContent.replace(/\s+/g, " ").trim();
   let selected = "None";
   if (raw && raw !== "—") {
-    const match = raw.match(/^([0-9.]+)\s*MHz\s*(.*)$/);
-    const heard = modeLabel(listeningMode || document.querySelector("#listen-mode").value);
+    const match = raw.match(/^([0-9.]+)\s*MHz/);
+    const heard = selectedModeName();
+    const width = formatBandwidth(channelWidthHz(heard));
     selected = match
-      ? `${compactNumber(match[1], 6)} MHz${heard ? `, ${heard}` : ""}`
+      ? `${compactNumber(match[1], 6)} MHz, ${modeLabel(heard)}, ${width}`
       : raw;
     if (recording) selected += ", recording";
     else if (!liveState.hidden) selected += ", playing";
+  } else {
+    const heard = document.querySelector("#listen-mode")?.value;
+    const width = channelWidthHz(heard);
+    if (heard && heard !== "auto" && width)
+      selected = `${modeLabel(heard)}, ${formatBandwidth(width)}`;
   }
   document.querySelector("#selected-summary").textContent = selected;
 }
@@ -636,6 +775,7 @@ async function scan() {
 function stopLivePlayback() {
   liveAbort?.abort();
   liveAbort = null;
+  liveStarting = false;
   listeningHz = null;
   listeningMode = "";
   if (liveAudio) {
@@ -661,8 +801,10 @@ function updateTranscriptButton() {
   document.querySelector("#record-transcript").disabled = transcriptSpans.length === 0;
 }
 
-function utcStamp(date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+function unixBase36(date) {
+  const seconds = Math.floor(new Date(date).getTime() / 1000);
+  if (!Number.isFinite(seconds) || seconds < 0) return "0";
+  return seconds.toString(36);
 }
 
 function modeToken(value) {
@@ -686,8 +828,14 @@ function modeToken(value) {
   return names[String(value || "").toLowerCase()] || "Audio";
 }
 
+/** e.g. 146.52MHz_FMNB_lxk3a9-lxk3b2.mp3 — compact MHz, mode, unix range in base36. */
+function captureFileName(frequencyHz, heard, started, ended, ext) {
+  const mhz = compactNumber(frequencyHz / 1e6, 6) || "0";
+  return `${mhz}MHz_${modeToken(heard)}_${unixBase36(started)}-${unixBase36(ended)}.${ext}`;
+}
+
 function recordingName(frequencyHz, started, ended, heard) {
-  return `${mhzText(frequencyHz)}MHz_${modeToken(heard)}_${utcStamp(started)}-${utcStamp(ended)}.mp3`;
+  return captureFileName(frequencyHz, heard, started, ended, "mp3");
 }
 
 async function startRecording() {
@@ -845,15 +993,13 @@ function xmlEscape(text) {
 function transcriptFile() {
   const started = transcriptSpans[0].utc;
   const ended = transcriptSpans[transcriptSpans.length - 1].utc;
-  const start = utcStamp(new Date(started));
-  const end = utcStamp(new Date(ended));
   const frequencyHz = listeningHz ?? Number(mhz.value) * 1e6;
   const lines = transcriptSpans.map((span) =>
-    `  <text utc="${xmlEscape(span.utc)}" source="${xmlEscape(transcriptSource(span.kind))}">${xmlEscape(span.text)}</text>`);
+    `  <text utc="${xmlEscape(span.utc)}" source="${xmlEscape(transcriptSource(span))}">${xmlEscape(span.text)}</text>`);
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<transcript>\n${lines.join("\n")}\n</transcript>\n`;
   return {
     blob: new Blob([xml], { type: "text/xml" }),
-    name: `${mhzText(frequencyHz)}MHz_${modeToken(listeningMode)}_${start}-${end}.xml`
+    name: captureFileName(frequencyHz, listeningMode, started, ended, "xml")
   };
 }
 
@@ -901,6 +1047,58 @@ const hearModes = [
 let suggestedMode = "nbfm";
 let listeningDmrKey = "";
 let listeningWbfmProgram = "main";
+
+/** Typical occupied channel width after demod filters (matches ModeBandwidth.WidthHz). */
+function channelWidthHz(mode) {
+  switch (String(mode || "").toLowerCase()) {
+    case "cw": return 400;
+    case "usb":
+    case "lsb": return 2_700;
+    case "ft8":
+    case "js8": return 2_700;
+    case "olivia": return 250;
+    case "jtty": return 127; // occupied BW; 4×31.25 Hz tones (~94 Hz tone span)
+    case "varac": return 2_300;
+    case "am": return 10_000;
+    case "nbfm":
+    case "dmr":
+    case "m17":
+    case "packet": return 12_500;
+    case "wbfm": return 200_000;
+    case "raw": return 20_000;
+    default: return null;
+  }
+}
+
+function formatBandwidth(hz) {
+  if (!Number.isFinite(hz) || hz <= 0) return "—";
+  if (hz >= 1_000) {
+    const khz = hz / 1_000;
+    return `${compactNumber(khz, khz >= 10 ? 0 : 1)} kHz`;
+  }
+  return `${Math.round(hz)} Hz`;
+}
+
+function selectedModeName() {
+  return listeningMode || document.querySelector("#listen-mode")?.value || mode.value || "";
+}
+
+function paintChannelWidth(modeName) {
+  const el = document.querySelector("#channel-width");
+  if (!el) return null;
+  const name = modeName || selectedModeName();
+  const hz = channelWidthHz(name);
+  el.textContent = hz
+    ? `Channel width ${formatBandwidth(hz)} (${modeLabel(name)})`
+    : "Channel width — (pick a mode)";
+  return hz;
+}
+
+function formatReadout(hz, modeName) {
+  const width = channelWidthHz(modeName);
+  const widthPart = width ? ` · ${formatBandwidth(width)}` : "";
+  return `${mhzText(hz)} MHz  ${modeLabel(modeName)}${widthPart}`;
+}
 
 function modeLabel(value) {
   return hearModes.find((item) => item[0] === value)?.[1] || modeToken(value);
@@ -1019,7 +1217,7 @@ async function listen(explicitMode) {
   setBusy(true);
   const controller = new AbortController();
   liveAbort = controller;
-  if (busyPanel?.open) busyPanel.close();
+  beginLiveStartup(`Preparing ${mhzText(frequencyHz)} MHz (${modeLabel(sendMode)})…`);
   listeningHz = frequencyHz;
   listeningMode = sendMode === "auto" ? listeningMode : sendMode;
   listeningDmrKey = nextDmr;
@@ -1038,6 +1236,8 @@ async function listen(explicitMode) {
   if (sendMode === "wbfm" || document.querySelector("#listen-mode").value === "wbfm" || nextWbfm !== "main") {
     params.set("wbfmProgram", nextWbfm);
   }
+  if (pipelineDirty && pipelineIds.length > 0)
+    params.set("pipeline", pipelineIds.join(","));
   try {
     const response = await fetch(`/api/live?${params}`, { signal: controller.signal });
     if (token !== listenToken) return;
@@ -1045,6 +1245,7 @@ async function listen(explicitMode) {
       const body = await response.json().catch(() => null);
       throw new Error(body?.error || response.statusText);
     }
+    endLiveStartup();
 
     const rate = Number(response.headers.get("X-Audio-Rate")) || 48000;
     liveSampleRate = rate;
@@ -1064,7 +1265,8 @@ async function listen(explicitMode) {
     listeningWbfmProgram = program;
     if (document.querySelector("#wbfm-program")) document.querySelector("#wbfm-program").value = program;
     const channels = audioChannelsFromHeaders(response.headers, reported || sendMode, program);
-    readout.textContent = `${mhzText(listeningHz)} MHz  ${modeLabel(listeningMode)}`;
+    readout.textContent = formatReadout(listeningHz, listeningMode);
+    paintChannelWidth(listeningMode);
     source.textContent = response.headers.get("X-Source") || "";
     liveState.hidden = false;
     liveStop.hidden = operatingMode === "camp";
@@ -1082,6 +1284,7 @@ async function listen(explicitMode) {
   } catch (ex) {
     if (ex.name !== "AbortError") showError(ex.message);
   } finally {
+    endLiveStartup();
     if (token !== listenToken) return;
     const file = recording ? await endRecording() : null;
     stopLivePlayback();
@@ -1374,7 +1577,8 @@ async function playCamp(tune) {
     const rate = Number(response.headers.get("X-Audio-Rate")) || tune.sampleRate || 48000;
     const channels = audioChannelsFromHeaders(response.headers, tune.mode, "main");
     liveSampleRate = rate;
-    readout.textContent = `${mhzText(tune.frequencyHz)} MHz  ${modeLabel(tune.mode)}`;
+    readout.textContent = formatReadout(tune.frequencyHz, tune.mode);
+    paintChannelWidth(tune.mode);
     syncTuneFrequency(mhzText(tune.frequencyHz));
     if ([...document.querySelector("#listen-mode").options].some((option) => option.value === tune.mode))
       document.querySelector("#listen-mode").value = tune.mode;
@@ -1445,13 +1649,30 @@ document.querySelector("#listen-mode").addEventListener("change", () => {
   const hear = document.querySelector("#listen-mode").value;
   if ([...mode.options].some((option) => option.value === hear)) mode.value = hear;
   syncDmrFields();
+  paintChannelWidth(hear);
+  if (listeningHz != null && hear && hear !== "auto")
+    readout.textContent = formatReadout(listeningHz, hear);
   paintFoldSummaries();
+  pipelineDirty = false;
+  loadDefaultPipeline(hear).catch(() => {});
   if (operatingMode === "camp") {
     if (scheduleView?.now || scheduleView?.active)
       startCamp().catch((ex) => showError(ex.message));
     return;
   }
   if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
+});
+document.querySelector("#pipeline-add-btn")?.addEventListener("click", () => {
+  const id = document.querySelector("#pipeline-add")?.value;
+  if (!id) return;
+  pipelineIds = pipelineIds.concat(id);
+  pipelineDirty = true;
+  renderPipelineEditor();
+});
+document.querySelector("#pipeline-reset")?.addEventListener("click", () => {
+  pipelineDirty = false;
+  const hear = document.querySelector("#listen-mode")?.value || mode.value || "auto";
+  loadDefaultPipeline(hear).catch(() => {});
 });
 for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
   document.querySelector(id).addEventListener("change", () => {
@@ -1667,16 +1888,22 @@ async function askModel() {
   const box = document.querySelector("#llm-ask");
   const question = box.value.trim();
   if (!question) return;
-  if (busy) {
+  // Live listen keeps busy=true; prompts are still allowed so you can ask about the transcript.
+  if (busy && !liveAbort) {
     showError("The radio is busy. Press Stop, then send the prompt again.");
     return;
   }
+  if (agentAbort) {
+    showError("The agent is already working on a prompt.");
+    return;
+  }
+  const live = liveAbort !== null;
+  if (!live) setBusy(true);
   showError("");
   const asked = addTurn("user", "You", question);
   const pending = addTurn("agent", "Agent", "Working on it…");
   asked.scrollIntoView({ block: "nearest" });
   box.value = "";
-  setBusy(true);
   agentAbort = new AbortController();
   try {
     const reply = await api("/api/agent", {
@@ -1717,7 +1944,12 @@ async function askModel() {
     showError(reason);
   } finally {
     agentAbort = null;
-    setBusy(false);
+    // Keep busy while live audio is still playing; only clear after finite radio work.
+    if (liveAbort) setBusy(true);
+    else {
+      setBusy(false);
+      if (busyPanel?.open) busyPanel.close();
+    }
     refreshStatus();
   }
 }
@@ -1725,8 +1957,14 @@ async function askModel() {
 async function restoreAntenna() {
   const advice = await api("/api/antenna");
   if (!advice.configured) return;
-  antennaUnit.value = "m";
-  antennaLength.value = advice.lengthMeters;
+  const feet = /^\s*[\d.]+\s*ft\b/i.test(advice.summary || "");
+  if (feet) {
+    antennaUnit.value = "ft";
+    antennaLength.value = compactNumber(advice.lengthMeters / 0.3048, 2);
+  } else {
+    antennaUnit.value = "m";
+    antennaLength.value = compactNumber(advice.lengthMeters, 2);
+  }
   antennaOrientation.value = advice.orientation;
   if (advice.azimuthDegrees != null) antennaAzimuth.value = String(Math.round(advice.azimuthDegrees));
   syncAzimuth();
@@ -1794,6 +2032,7 @@ const tips = {
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
   mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, and ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}.`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
+  "channel-width": "How wide the demodulator listens for this mode after the radio samples arrive (CW narrow, broadcast FM wide).",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
   "dmr-slot": "DMR timeslot 1 or 2. Any accepts both slots.",
   "dmr-tg": "The talkgroup to write down. Leave this blank to accept every talkgroup.",
@@ -1849,38 +2088,68 @@ function placeTip(target) {
 function bindTips() {
   const tip = document.querySelector("#tip");
   if (!tip) return;
+  const hoverDelayMs = 750;
   let hideTimer = 0;
+  let showTimer = 0;
+  let pending = null;
+  const clearShow = () => {
+    clearTimeout(showTimer);
+    showTimer = 0;
+    pending = null;
+  };
   const hideSoon = () => {
+    clearShow();
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       tip.hidden = true;
     }, 160);
   };
-  const show = (target) => {
+  const showNow = (target) => {
     if (!target || !tips[target.dataset.tip]) return;
     clearTimeout(hideTimer);
+    clearShow();
     placeTip(target);
+  };
+  const showAfterHover = (target) => {
+    if (!target || !tips[target.dataset.tip]) return;
+    if (pending === target && showTimer) return;
+    clearTimeout(hideTimer);
+    clearTimeout(showTimer);
+    pending = target;
+    showTimer = setTimeout(() => {
+      showTimer = 0;
+      pending = null;
+      if (!tips[target.dataset.tip]) return;
+      placeTip(target);
+    }, hoverDelayMs);
   };
   document.addEventListener("mouseover", (event) => {
     const target = event.target.closest("[data-tip]");
-    if (target) show(target);
-    else if (event.target.closest("#tip")) clearTimeout(hideTimer);
+    if (target) showAfterHover(target);
+    else if (event.target.closest("#tip")) {
+      clearTimeout(hideTimer);
+      clearShow();
+    }
   });
   document.addEventListener("mouseout", (event) => {
     const leaving = event.target.closest("[data-tip], #tip");
     const next = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest("[data-tip], #tip") : null;
     if (leaving && leaving !== next) hideSoon();
   });
-  document.addEventListener("focusin", (event) => show(event.target.closest("[data-tip]")));
+  document.addEventListener("focusin", (event) => showNow(event.target.closest("[data-tip]")));
   document.addEventListener("focusout", (event) => {
     const next = event.relatedTarget;
     if (next && next.closest && next.closest("[data-tip], #tip")) return;
     hideSoon();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") tip.hidden = true;
+    if (event.key === "Escape") {
+      clearShow();
+      tip.hidden = true;
+    }
   });
   window.addEventListener("scroll", () => {
+    clearShow();
     tip.hidden = true;
   }, true);
 }
@@ -2122,8 +2391,13 @@ fillHearModes();
 loadVolume();
 syncCampDmr();
 paintWorkspace();
+paintChannelWidth();
+paintFoldSummaries();
 bindTips();
 rememberFolds();
+loadProcessorCatalog()
+  .then(() => loadDefaultPipeline(document.querySelector("#listen-mode")?.value || "nbfm"))
+  .catch(() => {});
 refreshStatus();
 loadRadios().catch((ex) => showError(ex.message));
 setInterval(refreshStatus, 800);

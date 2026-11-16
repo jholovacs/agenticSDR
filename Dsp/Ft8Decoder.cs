@@ -35,6 +35,8 @@ public static class Ft8Decoder
     private const int MaxCandidates = 200;
     private const float MinSyncScore = 1.6f;
     private const int DecodePasses = 2;
+    /// <summary>Run DT-pad rescue when Costas is at least this strong but LDPC still fails.</summary>
+    private const float RescueSyncScore = 2.5f;
 
     /// <summary>
     /// Formats decoded FT8 for the page. Each line shows strength, tone pitch, the message, and a plain-language reading.
@@ -169,34 +171,49 @@ public static class Ft8Decoder
         if (best.Messages.Count > 0)
             return best;
 
-        // Rescue only when Costas almost locked — full ppm/Hilbert sweeps on noise are too slow for live listen.
-        if (best.BestSyncScore >= 6f)
+        // On-air HF (esp. direct sampling) sometimes lands with inverted tone order.
+        best = Prefer(best, DecodeWave(wave, calls, mirrorTones: true));
+        if (best.Messages.Count > 0)
+            return best;
+
+        // Cheap DT pads first — on-air slots are often a fraction of a symbol early/late.
+        if (best.BestSyncScore >= RescueSyncScore)
         {
-            ReadOnlySpan<double> ppms = [-40, -20, 20, 40];
-            ReadOnlySpan<double> shifts = [-25, -12.5, 12.5, 25];
-            ReadOnlySpan<int> pads = [Hop / 2, Hop];
-            foreach (double ppm in ppms)
-            {
-                best = Prefer(best, DecodeWave(StretchPpm(wave, ppm), calls));
-                if (best.Messages.Count > 0)
-                    return best;
-            }
-
-            foreach (double df in shifts)
-            {
-                best = Prefer(best, DecodeWave(HilbertShift(wave, df), calls));
-                if (best.Messages.Count > 0)
-                    return best;
-            }
-
+            ReadOnlySpan<int> pads = [Hop / 2, Hop, Hop * 2, Hop * 3];
             foreach (int pad in pads)
             {
                 best = Prefer(best, DecodeWave(PadFront(wave, pad), calls));
                 if (best.Messages.Count > 0)
                     return best;
+                if (pad < wave.Length / 4)
+                {
+                    best = Prefer(best, DecodeWave(SkipFront(wave, pad), calls));
+                    if (best.Messages.Count > 0)
+                        return best;
+                }
             }
 
-            best = Prefer(best, DecodeWave(wave, calls, mirrorTones: true));
+            // Heavier ppm/DF/mirror only when Costas is convincingly locked.
+            if (best.BestSyncScore >= 5f)
+            {
+                ReadOnlySpan<double> ppms = [-40, -20, 20, 40];
+                ReadOnlySpan<double> shifts = [-25, -12.5, 12.5, 25];
+                foreach (double ppm in ppms)
+                {
+                    best = Prefer(best, DecodeWave(StretchPpm(wave, ppm), calls));
+                    if (best.Messages.Count > 0)
+                        return best;
+                }
+
+                foreach (double df in shifts)
+                {
+                    best = Prefer(best, DecodeWave(DialFrequency.ShiftHz(wave, SampleRate, df), calls));
+                    if (best.Messages.Count > 0)
+                        return best;
+                }
+
+                best = Prefer(best, DecodeWave(wave, calls, mirrorTones: true));
+            }
         }
 
         return best;
@@ -280,46 +297,19 @@ public static class Ft8Decoder
         return output;
     }
 
-    /// <summary>Frequency-shift real audio via a cheap analytic (Hilbert) mix so Costas bins move intact.</summary>
-    private static float[] HilbertShift(float[] wave, double shiftHz)
-    {
-        if (Math.Abs(shiftHz) < 1e-9)
-            return wave;
-
-        // FIR Hilbert (odd taps): delay real by (N-1)/2, imag is Hilbert.
-        ReadOnlySpan<float> taps = [0.0025f, 0, 0.0124f, 0, 0.0375f, 0, 0.0834f, 0, 0.186f, 0, 0.627f, 0, -0.627f, 0, -0.186f, 0, -0.0834f, 0, -0.0375f, 0, -0.0124f, 0, -0.0025f];
-        int n = taps.Length;
-        int delay = n / 2;
-        var output = new float[wave.Length];
-        double step = 2 * Math.PI * shiftHz / SampleRate;
-        double phase = 0;
-        for (int i = 0; i < wave.Length; i++)
-        {
-            double imag = 0;
-            for (int t = 0; t < n; t++)
-            {
-                int at = i - t;
-                if ((uint)at < (uint)wave.Length)
-                    imag += wave[at] * taps[t];
-            }
-
-            int reAt = i - delay;
-            double real = (uint)reAt < (uint)wave.Length ? wave[reAt] : 0;
-            output[i] = (float)(real * Math.Cos(phase) - imag * Math.Sin(phase));
-            phase += step;
-            if (phase > Math.PI)
-                phase -= 2 * Math.PI;
-            else if (phase < -Math.PI)
-                phase += 2 * Math.PI;
-        }
-
-        return output;
-    }
-
     private static float[] PadFront(float[] wave, int pad)
     {
         var output = new float[wave.Length + pad];
         Array.Copy(wave, 0, output, pad, wave.Length);
+        return output;
+    }
+
+    private static float[] SkipFront(float[] wave, int skip)
+    {
+        if (skip <= 0 || skip >= wave.Length)
+            return wave;
+        var output = new float[wave.Length - skip];
+        Array.Copy(wave, skip, output, 0, output.Length);
         return output;
     }
 
@@ -353,12 +343,21 @@ public static class Ft8Decoder
         {
             int symbol = k + (k < 29 ? 7 : 14);
             int step = candidate.Time + symbol * TimeOsr;
+            if ((uint)step >= (uint)waterfall.Steps)
+            {
+                llr[3 * k] = 0;
+                llr[3 * k + 1] = 0;
+                llr[3 * k + 2] = 0;
+                continue;
+            }
+
             for (int j = 0; j < 8; j++)
             {
                 int tone = mirrorTones ? 7 - gray[j] : gray[j];
                 powers[j] = waterfall.At(step, candidate.FreqSub, candidate.Bin + tone);
             }
 
+            // Max-log MAP on dB magnitudes (same soft metric as ft8_lib / WSJT-X).
             llr[3 * k] = Max4(powers[4], powers[5], powers[6], powers[7]) - Max4(powers[0], powers[1], powers[2], powers[3]);
             llr[3 * k + 1] = Max4(powers[2], powers[3], powers[6], powers[7]) - Max4(powers[0], powers[1], powers[4], powers[5]);
             llr[3 * k + 2] = Max4(powers[1], powers[3], powers[5], powers[7]) - Max4(powers[0], powers[2], powers[4], powers[6]);
@@ -389,8 +388,10 @@ public static class Ft8Decoder
 
     private static List<Candidate> FindCandidates(Waterfall waterfall, bool mirrorTones = false)
     {
-        int last = waterfall.Steps - 79 * TimeOsr;
-        if (last < 0)
+        // Allow about ±2 s of DT (clock skew / early capture pad) while keeping the hop grid.
+        int minTime = -12 * TimeOsr;
+        int maxTime = waterfall.Steps - 72 * TimeOsr;
+        if (maxTime < minTime)
             return [];
 
         var ranked = new List<Candidate>();
@@ -398,7 +399,7 @@ public static class Ft8Decoder
         {
             for (int bin = MinBin; bin <= MaxBin - 8; bin++)
             {
-                for (int time = 0; time <= last; time++)
+                for (int time = minTime; time <= maxTime; time++)
                 {
                     float score = SyncScore(waterfall, time, freqSub, bin, mirrorTones);
                     if (score < MinSyncScore)
@@ -432,12 +433,13 @@ public static class Ft8Decoder
     /// </summary>
     private static Candidate RefineCandidate(Waterfall waterfall, Candidate rough, bool mirrorTones = false)
     {
-        int last = waterfall.Steps - 79 * TimeOsr;
+        int minTime = -12 * TimeOsr;
+        int maxTime = waterfall.Steps - 72 * TimeOsr;
         Candidate best = rough;
         for (int dt = -TimeOsr; dt <= TimeOsr; dt++)
         {
             int time = rough.Time + dt;
-            if (time < 0 || time > last)
+            if (time < minTime || time > maxTime)
                 continue;
             for (int db = -1; db <= 1; db++)
             {
@@ -466,12 +468,16 @@ public static class Ft8Decoder
         ReadOnlySpan<byte> costas = Ft8Tables.Costas;
         float total = 0;
         float bestGroup = float.NegativeInfinity;
+        int groups = 0;
         for (int group = 0; group < 3; group++)
         {
             float groupSum = 0;
+            int tones = 0;
             for (int k = 0; k < 7; k++)
             {
                 int step = time + (group * 36 + k) * TimeOsr;
+                if ((uint)step >= (uint)waterfall.Steps)
+                    continue;
                 int tone = mirrorTones ? 7 - costas[k] : costas[k];
                 float peak = waterfall.At(step, freqSub, bin + tone);
                 float others = 0;
@@ -483,15 +489,21 @@ public static class Ft8Decoder
                 }
 
                 groupSum += peak - others / 7f;
+                tones++;
             }
 
-            groupSum /= 7f;
+            if (tones == 0)
+                continue;
+            groupSum /= tones;
             total += groupSum;
+            groups++;
             if (groupSum > bestGroup)
                 bestGroup = groupSum;
         }
 
-        float average = total / 3f;
+        if (groups == 0)
+            return 0;
+        float average = total / groups;
         // Prefer a strong single Costas array when the slot was clipped, but keep the full average
         // as the usual score so random noise groups do not dominate.
         return Math.Max(average, 0.85f * bestGroup + 0.15f * average);

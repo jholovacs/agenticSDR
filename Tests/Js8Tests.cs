@@ -59,9 +59,9 @@ public class Js8Tests
     }
 
     [Fact]
-    public void Jsc_frames_show_common_words_and_mark_the_rest()
+    public void Jsc_frames_expand_dictionary_words()
     {
-        // Compressed data frame: 1, H=1, then BEACON (dictionary 82), a space flag, a made-up word, padding.
+        // Compressed data frame: 1, H=1, then BEACON (dictionary 82), a space flag, then index 7*9+7+0 = 70 (JS8).
         string bits = "11" + "01111000" + "0101" + "1" + "0111" + "1111" + "0000" + "0" + "0";
         bits = bits.PadRight(72, '1');
         Assert.Equal(72, bits.Length);
@@ -74,7 +74,10 @@ public class Js8Tests
 
         string text = Js8Text.Render(message, 3);
         Assert.StartsWith("BEACON ", text, StringComparison.Ordinal);
-        Assert.Contains("[#", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("[#", text, StringComparison.Ordinal);
+        Assert.Equal("BEACON", Js8JscDictionary.Word(82));
+        Assert.Equal("HOLIDAY", Js8JscDictionary.Word(500));
+        Assert.Equal("VIRGIN", Js8JscDictionary.Word(5000));
     }
 
     [Theory]
@@ -115,5 +118,28 @@ public class Js8Tests
         Assert.Empty(Js8Decoder.Decode(new float[15 * Js8Decoder.SampleRate], Js8Decoder.SampleRate));
         Assert.Empty(Js8Decoder.Decode(new float[5 * Js8Decoder.SampleRate], Js8Decoder.SampleRate));
         Assert.Equal("", Js8Decoder.Format([]));
+    }
+
+    [Theory]
+    [InlineData("Fast", 10, 1_200.0)]
+    [InlineData("Turbo", 6, 1_500.0)]
+    public void Js8_fast_and_turbo_round_trip(string speed, int slotSeconds, double hz)
+    {
+        var audio = new float[slotSeconds * Js8Decoder.SampleRate];
+        Js8Decoder.Modulate(audio, Js8Decoder.SampleRate, "KN4CRD: @ALLCALL CQ CQ CQ EM73", hz, 0.5, speed: speed);
+        IReadOnlyList<Js8Message> found = Js8Decoder.Decode(audio, Js8Decoder.SampleRate);
+        Assert.Contains(found, message =>
+            message.Text == "KN4CRD: @ALLCALL CQ CQ CQ EM73"
+            && message.Speed == speed
+            && Math.Abs(message.AudioHz - hz) < 15);
+    }
+
+    [Fact]
+    public void Js8_slow_round_trip()
+    {
+        var audio = new float[30 * Js8Decoder.SampleRate];
+        Js8Decoder.Modulate(audio, Js8Decoder.SampleRate, "HELLO WORLD", 900, 0.5, speed: "Slow");
+        IReadOnlyList<Js8Message> found = Js8Decoder.Decode(audio, Js8Decoder.SampleRate);
+        Assert.Contains(found, message => message.Text == "HELLO WORLD" && message.Speed == "Slow");
     }
 }

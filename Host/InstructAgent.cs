@@ -11,7 +11,8 @@ namespace AgenticSdr.Host;
 /// </summary>
 public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook camp, ClipStore clips, HttpClient http)
 {
-    private const int MaxRounds = 6;
+    private const int MaxRounds = 12;
+    private const int MaxActions = 10;
     private readonly AgentTools _tools = new(session, camp, clips);
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
@@ -87,11 +88,10 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
             cancellationToken.ThrowIfCancellationRequested();
             ChatReply reply = await CompleteAsync(settings, messages, allowTools, cancellationToken);
             allowTools = reply.ToolsAccepted;
-            if (reply.Calls.Count == 0 || actions.Count >= 8)
+            if (reply.Calls.Count == 0)
             {
-                string answer = string.IsNullOrWhiteSpace(reply.Content)
-                    ? "The model returned no words."
-                    : reply.Content.Trim();
+                string answer = await ResolveAnswerAsync(
+                    settings, messages, reply.Content, actions, listenText, scan, cancellationToken);
                 return new AgentReply(answer, actions, scan, antenna, listenText);
             }
 
@@ -102,7 +102,7 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
 
             foreach (ToolCall call in reply.Calls)
             {
-                if (actions.Count >= 8)
+                if (actions.Count >= MaxActions)
                     break;
                 cancellationToken.ThrowIfCancellationRequested();
                 ToolOutcome outcome = await _tools.RunAsync(call.Name, call.Arguments, cancellationToken);
@@ -129,9 +129,83 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
                     });
                 }
             }
+
+            if (actions.Count >= MaxActions)
+                break;
         }
 
-        return new AgentReply("The model was still asking for tools, so this turn stopped.", actions, scan, antenna, listenText);
+        string stopped = await ResolveAnswerAsync(
+            settings,
+            messages,
+            "The model was still asking for tools, so this turn stopped.",
+            actions,
+            listenText,
+            scan,
+            cancellationToken,
+            forceSummary: true);
+        return new AgentReply(stopped, actions, scan, antenna, listenText);
+    }
+
+    /// <summary>
+    /// Models often finish a tool round with empty content. Ask once more for words, then fall back to tool notes.
+    /// </summary>
+    private async Task<string> ResolveAnswerAsync(
+        LlmSettings settings,
+        JsonArray messages,
+        string? content,
+        IReadOnlyList<AgentAction> actions,
+        string? listenText,
+        ScanReport? scan,
+        CancellationToken cancellationToken,
+        bool forceSummary = false)
+    {
+        if (!forceSummary && !string.IsNullOrWhiteSpace(content))
+            return content.Trim();
+
+        if (actions.Count > 0)
+        {
+            messages.Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] =
+                    "Write a short plain-language answer for the operator from the tool results above. " +
+                    "Do not call tools. If nothing coherent stood out, say that and name what you tried."
+            });
+            try
+            {
+                ChatReply summary = await CompleteAsync(settings, messages, includeTools: false, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(summary.Content))
+                    return summary.Content.Trim();
+            }
+            catch (InvalidOperationException)
+            {
+                // Fall through to a local summary when the endpoint will not answer again.
+            }
+        }
+
+        string? fromTools = SummarizeActions(actions, listenText, scan);
+        if (!string.IsNullOrWhiteSpace(fromTools))
+            return fromTools;
+        if (!string.IsNullOrWhiteSpace(content))
+            return content.Trim();
+        return "The model returned no words.";
+    }
+
+    private static string? SummarizeActions(
+        IReadOnlyList<AgentAction> actions,
+        string? listenText,
+        ScanReport? scan)
+    {
+        if (actions.Count == 0)
+            return null;
+        var lines = new List<string>();
+        foreach (AgentAction action in actions.TakeLast(6))
+            lines.Add($"{action.Tool}: {action.Result}");
+        if (!string.IsNullOrWhiteSpace(listenText))
+            lines.Add("Heard: " + listenText.Trim());
+        if (scan is not null)
+            lines.Add($"Last scan reported {scan.Hits.Count} hit(s).");
+        return string.Join("\n", lines);
     }
 
     private async Task<ChatReply> CompleteAsync(LlmSettings settings, JsonArray messages, bool includeTools, CancellationToken cancellationToken)
@@ -198,7 +272,7 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
         JsonObject? message = root["choices"]?[0]?["message"] as JsonObject;
         if (message is null)
             throw new InvalidOperationException("The model returned no answer.");
-        string? content = ReadString(message["content"]);
+        string? content = ReadContent(message["content"]);
         var calls = new List<ToolCall>();
         bool native = false;
         if (message["tool_calls"] is JsonArray toolCalls)
@@ -221,6 +295,39 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
         if (!native && TryTextTool(content, out ToolCall textCall))
             calls.Add(textCall);
         return new ChatReply(content, calls, message, native, toolsAccepted);
+    }
+
+    /// <summary>OpenAI-style string content, or an array of text parts some servers return.</summary>
+    private static string? ReadContent(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+        if (node is JsonValue value)
+        {
+            if (value.GetValueKind() == JsonValueKind.Null)
+                return null;
+            return value.TryGetValue(out string? text) ? text : null;
+        }
+
+        if (node is not JsonArray parts)
+            return null;
+        var pieces = new List<string>();
+        foreach (JsonNode? part in parts)
+        {
+            if (part is JsonValue scalar && scalar.TryGetValue(out string? piece) && !string.IsNullOrEmpty(piece))
+            {
+                pieces.Add(piece);
+                continue;
+            }
+
+            if (part is not JsonObject obj)
+                continue;
+            string? bit = ReadString(obj["text"]) ?? ReadString(obj["content"]);
+            if (!string.IsNullOrEmpty(bit))
+                pieces.Add(bit);
+        }
+
+        return pieces.Count == 0 ? null : string.Concat(pieces);
     }
 
     private static bool TryTextTool(string? content, out ToolCall call)
@@ -348,7 +455,7 @@ public sealed class InstructAgent(LlmStore store, RadioSession session, CampBook
 
     private const string SystemPrompt =
         """
-        You operate a receive-only software-defined radio for a beginner. Use the tools to look at the radio. Do not invent frequencies, callsigns, or signals. Frequencies for listen and inspect are in hertz. Band ids include 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, and dmr. Prefer a band the antenna recommends. DMR voice uses a proprietary codec and is not decoded. Digimode scan hits (FT8, JS8, Olivia, JTTY, VarAC) mean channel occupancy only — not that text decoded. When listen returns empty digi text, call analyze_clip with that clipId (or omit clipId for the latest clip) and explain the hints. list_clips lists recent captures. Explore mode scans and listens with the audio on. Camp mode tunes a frequency and keeps the speaker quiet until that channel is active. camp_now camps right away; a schedule is optional. Times are local HH:mm. Leave start and end empty for a watch that runs only when nothing else is scheduled, and allow only one of those. New entries that overlap are rejected. set_schedule_policy, follow_schedule, and ignore_schedule choose whether a timed entry may take the radio from an explicit camp. Explain the result in plain language. If you cannot call tools directly, reply with only a JSON object of the form {"tool":"scan_band","arguments":{"bandId":"2m"}} and nothing else.
+        You operate a receive-only software-defined radio for a beginner. Use the tools to look at the radio. Do not invent frequencies, callsigns, or signals. Frequencies for listen and inspect are in hertz. Band ids include 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, and dmr. Prefer a band the antenna recommends. DMR voice uses a proprietary codec and is not decoded. Digimode scan hits (FT8, JS8, Olivia, JTTY, VarAC) mean channel occupancy only — not that text decoded. When listen returns empty digi text, call analyze_clip with that clipId (or omit clipId for the latest clip) and explain the hints. list_clips lists recent captures. Decoded Morse, digimode, speech, and RDS text from the current listen is available through get_transcript (each line names its decoder). When the user asks you to translate, summarize, explain, or paraphrase what was heard, call get_transcript first and work only from that text — do not invent copy. Explore mode scans and listens with the audio on. Camp mode tunes a frequency and keeps the speaker quiet until that channel is active. camp_now camps right away; a schedule is optional. Times are local HH:mm. Leave start and end empty for a watch that runs only when nothing else is scheduled, and allow only one of those. New entries that overlap are rejected. set_schedule_policy, follow_schedule, and ignore_schedule choose whether a timed entry may take the radio from an explicit camp. One user message is one turn with a limited number of tool calls — scan and listen a few times, then stop and report the most coherent or noteworthy finding; do not try to scan forever in one turn. Always finish with a short plain-language answer after tools (never an empty message). If you cannot call tools directly, reply with only a JSON object of the form {"tool":"scan_band","arguments":{"bandId":"2m"}} and nothing else.
         """;
 
     private sealed record ToolCall(string Id, string Name, string Arguments);

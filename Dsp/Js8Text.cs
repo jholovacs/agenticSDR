@@ -4,8 +4,8 @@ namespace AgenticSdr.Dsp;
 
 /// <summary>
 /// JS8 message layer: what the 72 payload bits of one frame mean. A frame is one of heartbeat/CQ, compound-callsign,
-/// directed (from, to, command), or free text squeezed with a Huffman code. Free text built from the big JSC word list
-/// shows its common words and marks the rest as dictionary numbers, because that 262 144-word list is not bundled.
+/// directed (from, to, command), or free text squeezed with a Huffman code. Free text built from the JSC word list
+/// is expanded with <see cref="Js8JscDictionary"/>.
 /// </summary>
 public static class Js8Text
 {
@@ -63,15 +63,6 @@ public static class Js8Text
 
     private static readonly Dictionary<string, char> HuffmanDecode = Huffman.ToDictionary(item => item.Code, item => item.Letter);
     private static readonly Dictionary<char, string> HuffmanEncode = Huffman.ToDictionary(item => item.Letter, item => item.Code);
-
-    /// <summary>The first few JSC words (most common). Anything else is shown as a dictionary number.</summary>
-    private static readonly Dictionary<int, string> JscKnown = new()
-    {
-        [0] = "E", [1] = "T", [2] = "A", [3] = "O", [4] = "I", [5] = "N", [6] = "S", [7] = "H", [8] = "R", [9] = "D",
-        [10] = "L", [11] = "C", [12] = "U", [13] = "M", [14] = "W", [15] = "F", [16] = "G", [17] = "Y", [18] = "P",
-        [19] = "B", [20] = ",", [21] = ".", [81] = "@ALLCALL", [82] = "BEACON", [99] = "BCNU", [100] = "BD",
-        [101] = "BK", [102] = "BN", [103] = "BEAM", [500] = "HOLIDAY", [5000] = "VIRGIN"
-    };
 
     private static readonly int[] JscBase = [0, 7, 70, 637, 5740, 51667, 465010, 4185097];
 
@@ -211,7 +202,7 @@ public static class Js8Text
         return builder.ToString();
     }
 
-    /// <summary>Reads JSC codewords. Known common words print as text. Unknown dictionary entries print as [#index].</summary>
+    /// <summary>Reads JSC codewords and expands them with the JS8Call dictionary.</summary>
     private static string RenderJsc(List<byte> bits)
     {
         var builder = new StringBuilder();
@@ -243,7 +234,8 @@ public static class Js8Text
                 break;
 
             bool space = bits[position++] != 0;
-            builder.Append(JscKnown.TryGetValue((int)value, out string? word) ? word : $"[#{value}]");
+            int index = (int)value;
+            builder.Append(Js8JscDictionary.Word(index) ?? $"[#{index}]");
             if (space)
                 builder.Append(' ');
         }

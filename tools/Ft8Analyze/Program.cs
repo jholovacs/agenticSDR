@@ -206,6 +206,11 @@ for (int sec = 0; sec < secs; sec++)
     Console.WriteLine($"  t={sec,2}s hot={hotCount,3} noise={snNoise,6:F1}");
 }
 
+var js8 = Js8Decoder.Decode(mono, rate);
+Console.WriteLine($"js8_decode_lines={js8.Count}");
+foreach (Js8Message m in js8)
+    Console.WriteLine($"  js8 {m.SnrDb,5:F0} dB {m.AudioHz,6:F0} Hz {m.Speed} t={m.TimeSeconds:F2}  {m.Text}");
+
 Ft8DecodeStats stats = Ft8Decoder.DecodeDetailed(mono, rate);
 Console.WriteLine($"ft8_decode_count={stats.Messages.Count} candidates={stats.CandidatesTried} ldpc_ok={stats.LdpcAccepted} best_sync={stats.BestSyncScore:F2} audio_s={stats.AudioSeconds:F2}");
 foreach (Ft8Message m in stats.Messages)
@@ -233,8 +238,6 @@ foreach (double shiftSec in new[] { 0.0, 0.32, 0.64, 1.0, 1.5 })
     if (interesting || Math.Abs(shiftSec) < 0.01)
         Console.WriteLine($"dt={shiftSec:0.00}s decode={alt.Messages.Count} ldpc_ok={alt.LdpcAccepted} best_sync={alt.BestSyncScore:F2}");
 }
-
-Console.WriteLine($"js8_decode_lines={Js8Decoder.Decode(mono, rate).Count}");
 
 // Sanity: our own FT8 under this clip's noise floor should still decode.
 {

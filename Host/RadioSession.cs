@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
 using AgenticSdr.Dsp;
+using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Host;
@@ -12,6 +13,7 @@ namespace AgenticSdr.Host;
 /// Progress runs from 0 to 1. Message is the sentence under the radio name. Error is set when the last operation failed.
 /// DeviceIndex is the list position of the radio that is started, and null when the radio is stopped.
 /// LiveText is the plain transcript. Transcript is the same text in pieces, so Morse can be colored apart from speech.
+/// Pipeline is the ordered filters/decoders for the current listen.
 /// </summary>
 public sealed record SessionStatus(
     bool DeviceOpen,
@@ -25,6 +27,7 @@ public sealed record SessionStatus(
     int? DeviceIndex,
     string? LiveText,
     IReadOnlyList<TranscriptSpan> Transcript,
+    IReadOnlyList<PipelineStageInfo> Pipeline,
     string OperatingMode,
     bool CampActivity,
     double? CampSnrDb,
@@ -104,6 +107,8 @@ public sealed class RadioSession(
     RepeaterLookup repeaters,
     CallsignLookup callsigns,
     SpeechDecoder speech,
+    ProcessorCatalog processors,
+    AntennaStore antennas,
     ILogger<RadioSession> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -119,10 +124,11 @@ public sealed class RadioSession(
     private int? _deviceIndex;
     private string? _liveText;
     private readonly List<TranscriptSpan> _transcript = [];
+    private PipelineStageInfo[] _pipeline = [];
     private string _morseWindow = "";
     private double? _transcriptHz;
     private bool _directSampling;
-    private AntennaSpec? _antenna;
+    private AntennaSpec? _antenna = antennas.Load();
     private Complex[] _liveIq = [];
     private readonly object _campGate = new();
     private CampFanout? _fanout;
@@ -161,6 +167,7 @@ public sealed class RadioSession(
                     _deviceIndex,
                     _liveText,
                     _transcript.ToArray(),
+                    _pipeline,
                     _operatingMode,
                     _campActivity,
                     _campSnrDb,
@@ -169,6 +176,8 @@ public sealed class RadioSession(
             }
         }
     }
+
+    public ProcessorCatalog Processors => processors;
 
     public void Note(string message)
     {
@@ -435,6 +444,7 @@ public sealed class RadioSession(
     public AntennaAdvice SetAntenna(double length, string? unit, string? orientation, double? azimuthDegrees)
     {
         _antenna = AntennaPlan.Parse(length, unit, orientation, azimuthDegrees);
+        antennas.Save(_antenna);
         return AntennaPlan.Advise(_antenna);
     }
 
@@ -481,6 +491,7 @@ public sealed class RadioSession(
                     throw new InvalidOperationException(note);
 
                 _antenna = spec;
+                antennas.Save(spec);
                 AntennaAdvice advice = AntennaPlan.Advise(spec);
                 SetStatus("idle", 1, "Antenna guessed from signal strength.");
                 return advice with { Summary = note + " " + advice.Summary };
@@ -823,35 +834,10 @@ public sealed class RadioSession(
             double confidence = 1;
             double tuneHz = frequencyHz;
             string? source = null;
-            if (requested == RadioMode.Unknown && Region2BandPlan.TryAnyDigiDial(frequencyHz, out RadioMode digiMode, out double digiDial))
-            {
-                mode = digiMode;
-                tuneHz = digiDial;
-                // Dial match only — decode success is reported after the listen finishes.
-                confidence = 0.45;
-            }
-            else if (requested == RadioMode.Unknown)
+            if (requested == RadioMode.Unknown)
             {
                 SetStatus("listening", 0.1, "Classifying the signal.");
-                Measurement? measured = await MeasureAsync(device, frequencyHz, ct);
-                if (measured is null)
-                {
-                    mode = RadioMode.Nbfm;
-                    confidence = 0.2;
-                }
-                else
-                {
-                    BandHint hint = Region2BandPlan.HintAt(measured.Peak.FrequencyHz);
-                    Classification classification = ModeClassifier.Classify(measured.Peak, hint);
-                    mode = classification.Mode == RadioMode.Unknown ? RadioMode.Nbfm : classification.Mode;
-                    confidence = classification.Confidence;
-                    tuneHz = ModeClassifier.CarrierFrequency(measured.Peak, mode);
-                    if (HearsDmr(measured))
-                    {
-                        mode = RadioMode.Dmr;
-                        confidence = 0.9;
-                    }
-                }
+                (mode, tuneHz, confidence, _) = await ResolveAutoModeAsync(device, frequencyHz, ct);
             }
 
             if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac)
@@ -860,9 +846,15 @@ public sealed class RadioSession(
                     tuneHz = dial;
                 seconds = DigiListenSeconds(mode);
                 // Leave ~1.2 s to tune and flush junk so capture can start on the UTC boundary.
-                if (mode is RadioMode.Ft8 or RadioMode.Js8)
-                    await WaitForFt8Slot(ct, earlySeconds: 1.2);
+                // JS8 uses a 30 s boundary (LCM of Normal/Fast/Turbo/Slow slots).
+                if (mode is RadioMode.Ft8)
+                    await WaitForDigiSlot(ct, periodSeconds: 15, earlySeconds: 2.0);
+                else if (mode is RadioMode.Js8)
+                    await WaitForDigiSlot(ct, periodSeconds: 30, earlySeconds: 2.0);
             }
+
+            SetStatus("listening", 0.25, "Checking published-channel frequency…");
+            tuneHz = await RefinePublishedTuneAsync(device, tuneHz, mode, ct);
 
             source = Region2BandPlan.SourceLabel(tuneHz);
             if (TryLocation(out double latitude, out double longitude) && mode == RadioMode.Nbfm)
@@ -874,12 +866,18 @@ public sealed class RadioSession(
 
             SetStatus("listening", 0.35, $"Listening {seconds:0.#} s at {tuneHz / 1e6:0.000000} MHz ({mode}).");
             RadioMode demodMode = mode;
+            using SignalChain? clipChain = OpenPipeline(mode, null);
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
             DemodResult result;
             try
             {
-                var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz, demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main);
+                var demod = new Demodulator(
+                    demodMode,
+                    shiftHz,
+                    device.SampleRateHz,
+                    demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main,
+                    allowUsbSidebandFlip: device.DirectSampling);
                 await CaptureDemodAsync(device, loHz, seconds, demod, demodMode, ct);
                 result = demod.Finish(normalize: true);
             }
@@ -888,6 +886,7 @@ public sealed class RadioSession(
                 if (EasedGain(demodMode))
                     RestoreGain(device);
                 ReleaseTuner(device);
+                ClearPipeline();
             }
             string? decoded = mode == RadioMode.Dmr
                 ? DmrSync.VoiceNote
@@ -967,11 +966,18 @@ public sealed class RadioSession(
     /// Tune, demodulate, and write 16-bit audio as it is produced. The response stays open until Stop or the browser disconnects.
     /// Morse and FT8 text are updated on the status the page already polls.
     /// </summary>
-    public Task WriteLiveAsync(double frequencyHz, string? modeName, DmrFilter dmr, HttpResponse response, CancellationToken cancellationToken, string? wbfmProgram = null) =>
-        PlayLiveAsync(frequencyHz, modeName, dmr, response, null, false, WbfmPrograms.Parse(wbfmProgram), cancellationToken);
+    public Task WriteLiveAsync(
+        double frequencyHz,
+        string? modeName,
+        DmrFilter dmr,
+        HttpResponse response,
+        CancellationToken cancellationToken,
+        string? wbfmProgram = null,
+        IReadOnlyList<string>? pipeline = null) =>
+        PlayLiveAsync(frequencyHz, modeName, dmr, response, null, false, WbfmPrograms.Parse(wbfmProgram), pipeline, cancellationToken);
 
     private Task HoldCampAsync(CampRequest request, CampFanout fanout, CancellationToken cancellationToken) =>
-        PlayLiveAsync(request.FrequencyHz, request.Mode, request.Filter, null, fanout, true, WbfmProgram.Main, cancellationToken);
+        PlayLiveAsync(request.FrequencyHz, request.Mode, request.Filter, null, fanout, true, WbfmProgram.Main, null, cancellationToken);
 
     private async Task PlayLiveAsync(
         double frequencyHz,
@@ -981,9 +987,11 @@ public sealed class RadioSession(
         CampFanout? fanout,
         bool squelch,
         WbfmProgram wbfmProgram,
+        IReadOnlyList<string>? pipeline,
         CancellationToken cancellationToken)
     {
         RadioMode requested = ModeClassifier.Parse(modeName);
+        SetStatus("listening", 0.02, "Waiting for the radio…");
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -994,29 +1002,11 @@ public sealed class RadioSession(
             RadioMode mode = requested;
             double tuneHz = frequencyHz;
             bool dmrFramed = false;
-            if (requested == RadioMode.Unknown && Region2BandPlan.TryAnyDigiDial(frequencyHz, out RadioMode digiMode, out double digiDialHz))
+            SetStatus("listening", 0.05, $"Preparing to listen at {frequencyHz / 1e6:0.000000} MHz…");
+            if (requested == RadioMode.Unknown)
             {
-                mode = digiMode;
-                tuneHz = digiDialHz;
-            }
-            else if (requested == RadioMode.Unknown)
-            {
-                SetStatus("listening", 0.1, "Classifying the signal.");
-                Measurement? measured = await MeasureAsync(device, frequencyHz, ct);
-                if (measured is null)
-                    mode = RadioMode.Nbfm;
-                else
-                {
-                    BandHint hint = Region2BandPlan.HintAt(measured.Peak.FrequencyHz);
-                    Classification classification = ModeClassifier.Classify(measured.Peak, hint);
-                    mode = classification.Mode == RadioMode.Unknown ? RadioMode.Nbfm : classification.Mode;
-                    tuneHz = ModeClassifier.CarrierFrequency(measured.Peak, mode);
-                    if (HearsDmr(measured))
-                    {
-                        mode = RadioMode.Dmr;
-                        dmrFramed = true;
-                    }
-                }
+                SetStatus("listening", 0.1, "Classifying the signal (this takes a moment)…");
+                (mode, tuneHz, _, dmrFramed) = await ResolveAutoModeAsync(device, frequencyHz, ct);
             }
 
             if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac)
@@ -1024,13 +1014,19 @@ public sealed class RadioSession(
                 if (Region2BandPlan.TryDigiDial(tuneHz, mode, out double dial) || Region2BandPlan.TryDigiDial(frequencyHz, mode, out dial))
                     tuneHz = dial;
                 // Leave time to open the stream so live digi audio starts on the UTC boundary.
-                if (mode is RadioMode.Ft8 or RadioMode.Js8)
-                    await WaitForFt8Slot(ct, earlySeconds: 1.2);
+                if (mode is RadioMode.Ft8)
+                    await WaitForDigiSlot(ct, periodSeconds: 15, earlySeconds: 2.0);
+                else if (mode is RadioMode.Js8)
+                    await WaitForDigiSlot(ct, periodSeconds: 30, earlySeconds: 2.0);
             }
+
+            SetStatus("listening", 0.45, "Checking published-channel frequency…");
+            tuneHz = await RefinePublishedTuneAsync(device, tuneHz, mode, ct);
 
             string? source = Region2BandPlan.SourceLabel(tuneHz);
             if (TryLocation(out double latitude, out double longitude) && mode == RadioMode.Nbfm)
             {
+                SetStatus("listening", 0.55, "Looking up the repeater name (audio starts after this)…");
                 string? call = await repeaters.TryFindAsync(tuneHz, latitude, longitude, ct);
                 if (!string.IsNullOrWhiteSpace(call))
                     source = $"{call} ({source})";
@@ -1039,11 +1035,18 @@ public sealed class RadioSession(
             if (mode == RadioMode.Dmr)
                 source = "DMR";
             RadioMode demodMode = mode;
+            SetStatus("listening", 0.75, $"Tuning {tuneHz / 1e6:0.000000} MHz ({mode})…");
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
             EaseWideFmGain(device, demodMode);
-            var demod = new Demodulator(demodMode, shiftHz, device.SampleRateHz, demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main);
+            var demod = new Demodulator(
+                demodMode,
+                shiftHz,
+                device.SampleRateHz,
+                demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main,
+                allowUsbSidebandFlip: device.DirectSampling);
             if (response is not null)
             {
+                SetStatus("listening", 0.9, "Starting live audio…");
                 response.Headers["X-Audio-Rate"] = demod.PlaybackRate.ToString(CultureInfo.InvariantCulture);
                 response.Headers["X-Audio-Channels"] = demod.Channels.ToString(CultureInfo.InvariantCulture);
                 response.Headers["X-Tune-Hz"] = tuneHz.ToString(CultureInfo.InvariantCulture);
@@ -1076,12 +1079,16 @@ public sealed class RadioSession(
             if (dmrFramed)
                 AppendNote("DMR framing found.");
 
+            SignalChain? chain = null;
             try
             {
-                await PumpLiveAsync(device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch, mode == RadioMode.Dmr && !dmrFramed, dmr, ct);
+                chain = OpenPipeline(mode, pipeline);
+                await PumpLiveAsync(device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch, mode == RadioMode.Dmr && !dmrFramed, dmr, chain, ct);
             }
             finally
             {
+                chain?.Dispose();
+                ClearPipeline();
                 if (EasedGain(demodMode))
                     RestoreGain(device);
                 ReleaseTuner(device);
@@ -1112,6 +1119,57 @@ public sealed class RadioSession(
         }
     }
 
+    private SignalChain? OpenPipeline(RadioMode mode, IReadOnlyList<string>? overrideIds)
+    {
+        try
+        {
+            SignalChain? chain = overrideIds is { Count: > 0 }
+                ? processors.CreateChain(overrideIds, mode)
+                : processors.TryCreateDefault(mode);
+            lock (_statusGate)
+                _pipeline = chain?.Stages.ToArray() ?? [];
+            return chain;
+        }
+        catch (Exception ex)
+        {
+            AppendNote("Pipeline was not started. " + ex.Message);
+            lock (_statusGate)
+                _pipeline = [];
+            return null;
+        }
+    }
+
+    private void ClearPipeline()
+    {
+        lock (_statusGate)
+            _pipeline = [];
+    }
+
+    private void PublishPipelineTexts(SignalChain chain, RadioMode mode, ref bool digiHeader)
+    {
+        foreach (AttributedText text in chain.DrainTexts())
+            ApplyAttributed(text, mode, ref digiHeader);
+    }
+
+    private void ApplyAttributed(AttributedText text, RadioMode mode, ref bool digiHeader)
+    {
+        if (string.IsNullOrWhiteSpace(text.Text))
+            return;
+        if (text.Kind == "morse")
+        {
+            AppendMorse(text.Text);
+            return;
+        }
+
+        if (text.Kind is "ft8" or "js8" or "olivia" or "jtty" or "varac")
+        {
+            AppendDigiLines(mode, text.Text, ref digiHeader);
+            return;
+        }
+
+        AppendSpan(text.Kind, text.Text, text.SourceName);
+    }
+
     private async Task PumpLiveAsync(
         IRadioDevice device,
         double frequencyHz,
@@ -1124,6 +1182,7 @@ public sealed class RadioSession(
         bool squelch,
         bool recheckDmr,
         DmrFilter dmr,
+        SignalChain? chain,
         CancellationToken cancellationToken)
     {
         int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
@@ -1139,13 +1198,9 @@ public sealed class RadioSession(
         bool dmrChecked = !recheckDmr;
         int dmrNeed = (int)(device.SampleRateHz * 0.12);
         var digiPeriod = new List<float>();
-        string digiLog = "";
-        Task<string>? speechTask = null;
-        Task<(RadioMode Mode, string Text)>? digiDecode = null;
         bool voice = SpeechDecoder.IsVoice(mode);
-        bool digi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+        bool digi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty;
         bool sideband = mode is RadioMode.Usb or RadioMode.Lsb;
-        bool hearingMorse = false;
         bool digiHeader = false;
         int rate = demod.PlaybackRate;
         var packetReader = mode == RadioMode.Packet ? new PacketReader(rate) : null;
@@ -1154,7 +1209,7 @@ public sealed class RadioSession(
             AppendNote(xara.MissingHint ?? "VarAC decode needs xara-monitor or zara-monitor beside the app.");
         int remember = voice ? 6 * rate : 8 * rate;
         var nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
-        // Live FT8/JS8 chops on the 15 s protocol period even when a clip listen runs a bit longer.
+        // Live FT8 chops on 15 s; JS8 on 30 s (covers Normal/Fast/Turbo/Slow) even when the clip pads longer.
         int digiSlot = DigiPeriodSeconds(mode) * rate;
         var nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         float level = 0.05f;
@@ -1173,8 +1228,10 @@ public sealed class RadioSession(
             var junk = new byte[Aligned(device, 32 * 1024)];
             device.Read(junk);
             // Align after junk so the first Costas symbols are not clipped by tuner settle.
-            if (mode is RadioMode.Ft8 or RadioMode.Js8)
-                AlignFt8Slot(cancellationToken);
+            if (mode is RadioMode.Ft8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 15);
+            else if (mode is RadioMode.Js8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 30);
         }, cancellationToken);
 
         // Read the next block while this one is turned into audio. Samples that arrive
@@ -1316,8 +1373,13 @@ public sealed class RadioSession(
 
             if (mode == RadioMode.Wbfm)
             {
-                foreach (string line in demod.TakeRds())
-                    AppendRds(line);
+                string[] rdsLines = demod.TakeRds().ToArray();
+                if (rdsLines.Length > 0 && chain is null)
+                {
+                    foreach (string line in rdsLines)
+                        AppendRds(line);
+                }
+
                 if (!stereoNoted && demod.WbfmStereo)
                 {
                     stereoNoted = true;
@@ -1337,66 +1399,42 @@ public sealed class RadioSession(
                     if (sca92Noted)
                         AppendNote("SCA 92 kHz present — choose it under Secondary channel.");
                 }
+
+                if (chain is not null && (rdsLines.Length > 0 || DateTime.UtcNow >= nextText))
+                {
+                    float[] mono = demod.Channels > 1 ? DownmixAudio(fresh, demod.Channels) : fresh;
+                    AppendLimited(recent, mono, remember);
+                    if (recent.Count >= rate && DateTime.UtcNow >= nextText)
+                    {
+                        var frame = SignalFrame.FromAudio(recent.ToArray(), rate, 1);
+                        if (rdsLines.Length > 0)
+                            frame.Meta["rdsLines"] = rdsLines;
+                        chain.TrySubmit(frame);
+                        nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+                    }
+                }
             }
 
-            if (mode == RadioMode.Cw)
+            if (chain is not null)
+                PublishPipelineTexts(chain, mode, ref digiHeader);
+
+            if (mode == RadioMode.Cw && chain is not null)
             {
                 AppendLimited(recent, fresh, remember);
                 if (DateTime.UtcNow >= nextText)
                 {
-                    string text = MorseDecoder.Decode(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(recent), rate);
-                    AppendMorse(text);
+                    chain.TrySubmit(SignalFrame.FromAudio(recent.ToArray(), rate));
                     nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 }
             }
-            else if (voice)
+            else if (voice && mode != RadioMode.Wbfm && chain is not null)
             {
                 float[] mono = demod.Channels > 1 ? DownmixAudio(fresh, demod.Channels) : fresh;
                 AppendLimited(recent, mono, sideband ? 8 * rate : remember);
-                if (sideband && DateTime.UtcNow >= nextMorse)
+                if (recent.Count >= rate && DateTime.UtcNow >= nextMorse)
                 {
-                    string morse = MorseDecoder.DecodeAudible(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(recent), rate);
-                    if (MorseDecoder.IsCopy(morse))
-                    {
-                        hearingMorse = true;
-                        speechTask = null;
-                        AppendMorse(morse);
-                    }
-                    else if (hearingMorse)
-                    {
-                        hearingMorse = false;
-                    }
-
+                    chain.TrySubmit(SignalFrame.FromAudio(recent.ToArray(), rate));
                     nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
-                }
-
-                if (hearingMorse)
-                    continue;
-
-                if (speechTask is { IsCompleted: true })
-                {
-                    try
-                    {
-                        string said = await speechTask;
-                        AppendSpeech(said);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        AppendNote("Speech was not read. " + ex.Message);
-                    }
-
-                    speechTask = null;
-                }
-
-                if (speechTask is null && recent.Count >= remember && DateTime.UtcNow >= nextText)
-                {
-                    float[] clip = recent.ToArray();
-                    speechTask = speech.TranscribeAsync(clip, rate, cancellationToken);
-                    nextText = DateTime.UtcNow + TimeSpan.FromSeconds(6);
                 }
             }
             else if (mode == RadioMode.Varac && xara is not null)
@@ -1414,45 +1452,19 @@ public sealed class RadioSession(
                     xara.Push(fresh, rate);
                     IReadOnlyList<XaraMessage> heard = xara.Drain();
                     if (heard.Count > 0)
-                    {
-                        string messages = XaraMonitor.Format(heard);
-                        digiLog = string.IsNullOrEmpty(digiLog) ? messages : digiLog + "\n" + messages;
-                        AppendDigiLines(mode, messages, ref digiHeader);
-                    }
+                        AppendDigiLines(mode, XaraMonitor.Format(heard), ref digiHeader);
                 }
             }
-            else if (digi)
+            else if (digi && chain is not null)
             {
                 digiPeriod.AddRange(fresh);
-                // Decode off the audio loop so a slow FT8 search does not stall the next 15 s of samples.
-                if (digiDecode is { IsCompleted: true })
+                if (digiPeriod.Count >= digiSlot)
                 {
-                    try
-                    {
-                        (RadioMode decodedMode, string messages) = await digiDecode;
-                        if (!string.IsNullOrWhiteSpace(messages))
-                        {
-                            digiLog = string.IsNullOrEmpty(digiLog) ? messages : digiLog + "\n" + messages;
-                            AppendDigiLines(decodedMode, messages, ref digiHeader);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        AppendNote($"Digimode decode failed: {ex.Message}");
-                    }
-
-                    digiDecode = null;
-                }
-
-                if (digiDecode is null && digiPeriod.Count >= digiSlot)
-                {
+                    while (digiPeriod.Count >= 2 * digiSlot)
+                        digiPeriod.RemoveRange(0, digiSlot);
                     float[] block = digiPeriod.GetRange(0, digiSlot).ToArray();
                     digiPeriod.RemoveRange(0, digiSlot);
-                    RadioMode decodeMode = mode;
-                    int decodeRate = rate;
-                    digiDecode = Task.Run(
-                        () => (decodeMode, FormatDigi(decodeMode, block, decodeRate)),
-                        cancellationToken);
+                    chain.TrySubmit(SignalFrame.FromAudio(block, rate));
                 }
             }
             else if (mode == RadioMode.Packet && packetReader is not null)
@@ -1467,19 +1479,8 @@ public sealed class RadioSession(
         }
         finally
         {
-            if (digiDecode is { IsCompleted: true })
-            {
-                try
-                {
-                    (RadioMode decodedMode, string messages) = digiDecode.GetAwaiter().GetResult();
-                    if (!string.IsNullOrWhiteSpace(messages))
-                        AppendDigiLines(decodedMode, messages, ref digiHeader);
-                }
-                catch
-                {
-                    // Listen is ending; ignore a late decode failure.
-                }
-            }
+            if (chain is not null)
+                PublishPipelineTexts(chain, mode, ref digiHeader);
 
             if (pending is { IsCompleted: false })
             {
@@ -1671,16 +1672,16 @@ public sealed class RadioSession(
             if (grown.Length == 0)
                 return;
             if (_transcript.Count > 0 && _transcript[^1].Kind == "morse")
-                _transcript[^1] = new TranscriptSpan("morse", grown);
+                _transcript[^1] = new TranscriptSpan("morse", grown, "Morse");
             else
-                _transcript.Add(new TranscriptSpan("morse", grown));
+                _transcript.Add(new TranscriptSpan("morse", grown, "Morse"));
             PublishTranscript();
         }
     }
 
-    private void AppendSpeech(string text) => AppendSpan("speech", text);
+    private void AppendSpeech(string text) => AppendSpan("speech", text, "Speech");
 
-    private void AppendRds(string text) => AppendSpan("rds", text);
+    private void AppendRds(string text) => AppendSpan("rds", text, "RDS");
 
     /// <summary>Split a WBFM clip's combined text into RDS lines vs speech.</summary>
     private void AppendWbfmDecoded(string decoded)
@@ -1801,12 +1802,13 @@ public sealed class RadioSession(
         _ => ""
     };
 
-    /// <summary>Clip length. FT8/JS8 runs a little past 15 s so a late start still covers one full message.</summary>
+    /// <summary>Clip length. FT8 pads past 15 s; JS8 uses ~32 s so Slow and stacked Fast/Turbo slots fit.</summary>
     private static int DigiListenSeconds(RadioMode mode) => mode switch
     {
-        RadioMode.Ft8 or RadioMode.Js8 => 16,
-        RadioMode.Olivia => 20,
-        RadioMode.Jtty => 10,
+        RadioMode.Ft8 => 18,
+        RadioMode.Js8 => 32,
+        RadioMode.Olivia => 10,
+        RadioMode.Jtty => 16,
         RadioMode.Varac => 20,
         _ => 15
     };
@@ -1814,15 +1816,17 @@ public sealed class RadioSession(
     /// <summary>Live digi chop length — the protocol period, not the clip pad.</summary>
     private static int DigiPeriodSeconds(RadioMode mode) => mode switch
     {
-        RadioMode.Ft8 or RadioMode.Js8 => 15,
+        RadioMode.Ft8 => 15,
+        // 30 s is the LCM of Normal (15), Fast (10), Turbo (6), and Slow (30).
+        RadioMode.Js8 => 30,
         _ => DigiListenSeconds(mode)
     };
 
-    private void AppendPacket(string text) => AppendSpan("packet", text);
+    private void AppendPacket(string text) => AppendSpan("packet", text, "Packet");
 
-    private void AppendNote(string text) => AppendSpan("note", text);
+    private void AppendNote(string text) => AppendSpan("note", text, "receiver note");
 
-    private void AppendSpan(string kind, string text)
+    private void AppendSpan(string kind, string text, string? source = null)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
@@ -1831,10 +1835,25 @@ public sealed class RadioSession(
         {
             if (_transcript.Count > 0 && _transcript[^1].Kind == kind && _transcript[^1].Text == text)
                 return;
-            _transcript.Add(new TranscriptSpan(kind, text));
+            _transcript.Add(new TranscriptSpan(kind, text, source ?? KindSource(kind)));
             PublishTranscript();
         }
     }
+
+    private static string KindSource(string kind) => kind switch
+    {
+        "morse" => "Morse",
+        "speech" => "Speech",
+        "ft8" => "FT8",
+        "js8" => "JS8",
+        "olivia" => "Olivia",
+        "jtty" => "JTTY",
+        "varac" => "VarAC",
+        "packet" => "Packet",
+        "rds" => "RDS",
+        "note" => "receiver note",
+        _ => kind
+    };
 
     private void PublishTranscript()
     {
@@ -1847,6 +1866,42 @@ public sealed class RadioSession(
         }
 
         _liveText = _transcript.Count == 0 ? null : string.Join('\n', _transcript.Select(span => span.Text));
+    }
+
+    /// <summary>
+    /// When the tune is a known channel or calling dial, briefly measure the spectrum and nudge the
+    /// LO so a mistuned dongle still lands on the carrier / digi tone stack.
+    /// </summary>
+    private async Task<double> RefinePublishedTuneAsync(
+        IRadioDevice device,
+        double tuneHz,
+        RadioMode mode,
+        CancellationToken cancellationToken)
+    {
+        if (!Region2BandPlan.TryPublishedStation(tuneHz, mode, out double publishedHz, out RadioMode publishedMode))
+            return tuneHz;
+
+        RadioMode useMode = mode == RadioMode.Unknown ? publishedMode : mode;
+        double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
+        double expectedRf = DialFrequency.ExpectedRfHz(publishedHz, useMode);
+        double captureHz = Math.Clamp(
+            expectedRf + offset,
+            device.Capabilities.MinFrequencyHz,
+            device.Capabilities.MaxFrequencyHz);
+        Capture capture = await CaptureAsync(device, captureHz, 120, cancellationToken);
+        int fft = capture.Samples.Length >= 65_536 ? 16_384 : 8_192;
+        double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, fft);
+        double snapped = DialFrequency.SnapPublishedTuneHz(
+            db, capture.CenterHz, capture.SampleRate, publishedHz, useMode);
+        if (Math.Abs(snapped - publishedHz) >= 1)
+        {
+            SetStatus(
+                "listening",
+                0.5,
+                $"Published channel offset {snapped - publishedHz:+0;-0} Hz — retuning.");
+        }
+
+        return snapped;
     }
 
     /// <summary>
@@ -1922,6 +1977,44 @@ public sealed class RadioSession(
         if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
             return frequencyHz >= dialHz - 500 && frequencyHz <= dialHz + toleranceHz;
         return Math.Abs(frequencyHz - dialHz) <= toleranceHz;
+    }
+
+    /// <summary>
+    /// Auto mode: measure the spectrum first. A published digi dial (e.g. 7.090 JTTY) is only used when
+    /// the peak still looks digi — AM/LSB voice on the same kHz must not snap to JTTY.
+    /// </summary>
+    private async Task<(RadioMode Mode, double TuneHz, double Confidence, bool DmrFramed)> ResolveAutoModeAsync(
+        IRadioDevice device,
+        double frequencyHz,
+        CancellationToken cancellationToken)
+    {
+        bool nearDigi = Region2BandPlan.TryAnyDigiDial(frequencyHz, out RadioMode digiMode, out double digiDial);
+        Measurement? measured = await MeasureAsync(device, frequencyHz, cancellationToken);
+        if (measured is null)
+        {
+            if (nearDigi)
+                return (digiMode, digiDial, 0.35, false);
+            return (RadioMode.Nbfm, frequencyHz, 0.2, false);
+        }
+
+        BandHint hint = Region2BandPlan.HintAt(measured.Peak.FrequencyHz);
+        Classification classification = ModeClassifier.Classify(measured.Peak, hint);
+        RadioMode mode = classification.Mode == RadioMode.Unknown ? RadioMode.Nbfm : classification.Mode;
+        double confidence = classification.Confidence;
+        double tuneHz = ModeClassifier.CarrierFrequency(measured.Peak, mode);
+        bool dmrFramed = HearsDmr(measured);
+        if (dmrFramed)
+            return (RadioMode.Dmr, tuneHz, 0.9, true);
+
+        bool digiLike = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+        bool voiceLike = mode is RadioMode.Am or RadioMode.Nbfm or RadioMode.Usb or RadioMode.Lsb or RadioMode.Wbfm;
+        if (nearDigi && !voiceLike && (digiLike || mode == RadioMode.Cw && measured.Peak.BandwidthHz < 800))
+        {
+            // Narrow energy on a digi watering hole — use the published dial/mode.
+            return (digiMode, digiDial, Math.Max(confidence, 0.42), false);
+        }
+
+        return (mode, tuneHz, confidence, false);
     }
 
     private async Task<Measurement?> MeasureAsync(IRadioDevice device, double frequencyHz, CancellationToken cancellationToken, double thresholdDb = 8)
@@ -2070,8 +2163,10 @@ public sealed class RadioSession(
             var junk = new byte[Aligned(device, 32 * 1024)];
             device.Read(junk);
             // Align after junk so the first Costas symbols are not clipped by tuner settle.
-            if (mode is RadioMode.Ft8 or RadioMode.Js8)
-                AlignFt8Slot(cancellationToken);
+            if (mode is RadioMode.Ft8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 15);
+            else if (mode is RadioMode.Js8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 30);
             // One Hilbert stream for the whole listen — per-chunk FIR resets destroy FT8 Costas.
             Iq.DirectSamplingState? ds = device.DirectSampling ? new Iq.DirectSamplingState() : null;
             long got = 0;
@@ -2119,13 +2214,13 @@ public sealed class RadioSession(
     }
 
     /// <summary>
-    /// Wait until just before the next 15 s UTC digimode boundary.
+    /// Wait until just before the next UTC digimode boundary of <paramref name="periodSeconds"/>.
     /// <paramref name="earlySeconds"/> leaves room for tuner setup before the exact align.
     /// </summary>
-    private async Task WaitForFt8Slot(CancellationToken cancellationToken, double earlySeconds = 0)
+    private async Task WaitForDigiSlot(CancellationToken cancellationToken, double periodSeconds, double earlySeconds = 0)
     {
-        double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % 15.0;
-        double untilBoundary = into < 0.15 ? 0 : 15.0 - into;
+        double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % periodSeconds;
+        double untilBoundary = into < 0.15 ? 0 : periodSeconds - into;
         double wait = Math.Max(0, untilBoundary - Math.Max(0, earlySeconds));
         if (wait <= 0.05)
             return;
@@ -2137,21 +2232,27 @@ public sealed class RadioSession(
             double left = wait - (DateTime.UtcNow - started).TotalSeconds;
             if (left <= 0.05)
                 break;
-            SetStatus("listening", 0.05 + 0.25 * (1 - Math.Clamp(left / wait, 0, 1)), $"Waiting {Math.Ceiling(left):0} s for the next 15 s digimode slot.");
+            SetStatus("listening", 0.05 + 0.25 * (1 - Math.Clamp(left / wait, 0, 1)), $"Waiting {Math.Ceiling(left):0} s for the next {periodSeconds:0} s digimode slot.");
             await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(250, Math.Max(20, left * 1000))), cancellationToken);
         }
     }
 
-    /// <summary>Block until the UTC 15 s boundary so FT8 audio starts with the Costas sync.</summary>
-    private static void AlignFt8Slot(CancellationToken cancellationToken)
+    /// <summary>
+    /// Block until about 0.45 s before the UTC digimode boundary so capture starts slightly early.
+    /// Starting after the boundary (old behavior) plus USB/tune latency often clipped the first Costas
+    /// array and left Costas sync hits that never CRC — the 28.074 / 14.074 “no translate” failure mode.
+    /// </summary>
+    private static void AlignDigiSlot(CancellationToken cancellationToken, double periodSeconds)
     {
+        double earlyAt = periodSeconds - 0.45;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % 15.0;
-            if (into < 0.12 || into > 14.95)
+            double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % periodSeconds;
+            // Early pad before the boundary, or a few hundred ms after it (do not wait a whole slot).
+            if (into >= earlyAt || into < 0.20)
                 return;
-            int sleepMs = (int)Math.Clamp((15.0 - into) * 1000.0, 5, 40);
+            int sleepMs = (int)Math.Clamp((earlyAt - into) * 1000.0, 5, 40);
             Thread.Sleep(sleepMs);
         }
     }

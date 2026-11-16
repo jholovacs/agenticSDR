@@ -74,6 +74,22 @@ public sealed class SdrTools(RadioSession session, CampBook camp, ClipStore clip
         CancellationToken cancellationToken = default) =>
         Guard(() => session.InspectAsync(frequencyHz, cancellationToken));
 
+    [McpServerTool, Description("Decoded text from the current listen (Morse, digimodes, speech, RDS), with which decoder wrote each line. Call this before translating or summarizing what was heard.")]
+    public object get_transcript()
+    {
+        SessionStatus status = session.Status;
+        return new
+        {
+            text = status.LiveText ?? "",
+            lines = status.Transcript.Select(span => new
+            {
+                kind = span.Kind,
+                source = span.Source,
+                text = span.Text
+            }).ToList()
+        };
+    }
+
     [McpServerTool, Description("Demodulate a frequency for a fixed number of seconds and return a WAV clip. The web page instead plays the same demodulator live until Stop. mode is auto, nbfm, wbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, dmr, or packet. CW returns Morse text. FT8/JS8/Olivia/JTTY/VarAC return decoded digimode text when present. Packet returns AX.25 / APRS frames. Voice modes return a speech transcript. Digi occupancy on a scan is not a decode — use analyze_clip when text is empty.")]
     public Task<ListenReport> listen(
         [Description("Frequency in Hz.")] double frequencyHz,

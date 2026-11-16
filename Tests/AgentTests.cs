@@ -116,6 +116,21 @@ public class AgentTests
         Assert.DoesNotContain("\"tools\"", script.Bodies[1]);
     }
 
+    [Fact]
+    public async Task Empty_final_content_after_tools_gets_a_summary_pass()
+    {
+        var script = new ScriptHandler(
+            """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"list_ham_bands","arguments":"{}"}}]}}]}""",
+            """{"choices":[{"message":{"role":"assistant","content":null}}]}""",
+            """{"choices":[{"message":{"role":"assistant","content":"Two meters looks quiet right now."}}]}""");
+        InstructAgent agent = Agent(script, "");
+        AgentReply reply = await agent.AskAsync("Keep scanning until something stands out.", null, CancellationToken.None);
+
+        Assert.Equal("Two meters looks quiet right now.", reply.Answer);
+        Assert.Equal("list_ham_bands", reply.Actions[0].Tool);
+        Assert.Contains("plain-language answer", script.Bodies[2], StringComparison.OrdinalIgnoreCase);
+    }
+
     private static InstructAgent Agent(HttpMessageHandler script, string apiKey)
     {
         string path = Path.Combine(Path.GetTempPath(), "agentic-sdr-llm-" + Guid.NewGuid().ToString("N") + ".json");
@@ -132,6 +147,8 @@ public class AgentTests
                 Path.Combine(Path.GetTempPath(), "agentic-sdr-calls-" + Guid.NewGuid().ToString("N") + ".json"),
                 enabled: false),
             new SpeechDecoder(Path.GetTempPath()),
+            new AgenticSdr.Processors.ProcessorCatalog(),
+            new AntennaStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-antenna-" + Guid.NewGuid().ToString("N") + ".json")),
             NullLogger<RadioSession>.Instance);
         var camp = new CampBook(path + ".schedule");
         var clips = new ClipStore();
@@ -143,9 +160,11 @@ public class AgentTests
     {
         Assert.True(AgentTools.Known("analyze_clip"));
         Assert.True(AgentTools.Known("list_clips"));
+        Assert.True(AgentTools.Known("get_transcript"));
         string schema = AgentTools.Schema.ToJsonString();
         Assert.Contains("analyze_clip", schema, StringComparison.Ordinal);
         Assert.Contains("list_clips", schema, StringComparison.Ordinal);
+        Assert.Contains("get_transcript", schema, StringComparison.Ordinal);
     }
 
     private sealed class ScriptHandler : HttpMessageHandler

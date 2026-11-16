@@ -38,13 +38,11 @@ Local builds default to version `0.1.0` unless you set `VERSION`. Packaging scri
 
 ## Run
 
-On Windows from source, double-click **start** in the project folder to launch the host and open the page. Or:
-
 ```bash
-dotnet run --project Host
+make run
 ```
 
-Open http://127.0.0.1:5088. After **Start radio**, a short smoke test is **Scan and listen** → **Known channels** → **NOAA weather** (or **NOAA check**). If you hear weather radio, the SDR path is working. The same panel lists CB, GMRS, and digimode dials.
+That starts the host on Windows, Linux, and macOS (needs the .NET 10 LTS SDK and Make). Then open http://127.0.0.1:5088. On Windows from source you can also double-click **start** to launch the host and open the page, or run `dotnet run --project Host` directly. After **Start radio**, a short smoke test is **Scan and listen** → **Known channels** → **NOAA weather** (or **NOAA check**). If you hear weather radio, the SDR path is working. The same panel lists CB, GMRS, and digimode dials.
 
 Enter the antenna length and whether it is vertical or horizontal, or let the page **Guess from signals**. Matching bands move to the top. Pick **Explore** to scan and listen, or **Camp** to watch a schedule quietly. Audio plays live in Explore (and in Camp when squelch opens). CW shows Morse; FT8/JS8 wait for the next 15-second slot; broadcast FM uses wideband demodulation with stereo/RDS when present.
 

@@ -149,11 +149,11 @@ public static class DigiClipAnalyzer
         string mode = (modeHint ?? "").Trim().ToLowerInvariant();
 
         if (duration < 10)
-            hints.Add("Clip is shorter than about 10 s; a full FT8/JS8 frame needs ~12.6 s.");
+            hints.Add("Clip is shorter than about 10 s; a full FT8/JS8 Normal frame needs ~12.6 s.");
         if (rms < 0.002)
             hints.Add("Audio level is very low.");
         if (spectrum.WidthHz is double width && width > 200)
-            hints.Add($"Dominant energy is ~{width:0} Hz wide; a single FT8/JS8 tone stack is about 44 Hz.");
+            hints.Add($"Dominant energy is ~{width:0} Hz wide; a single JS8 Normal stack is about 50 Hz (Fast ~70 Hz).");
         if (spectrum.WidthHz is double narrow && narrow < 15 && spectrum.PeakHz is not null)
             hints.Add("Dominant energy looks like a narrow carrier/spur, not an 8-FSK digimode stack.");
         if (ft8.Messages.Count == 0 && js8Count == 0)
@@ -165,7 +165,7 @@ public static class DigiClipAnalyzer
         }
 
         if ((mode is "js8" or "js8call") && js8Count == 0)
-            hints.Add("JS8 decoder found no Normal-speed frames in this clip.");
+            hints.Add("JS8 decoder found no Normal/Fast/Turbo/Slow frames in this clip.");
         if (mode is "varac" or "vara" or "xara" or "zara")
         {
             if (!varacAvailable)

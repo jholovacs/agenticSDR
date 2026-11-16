@@ -29,10 +29,10 @@ public enum RadioMode
     /// <summary>JS8Call weak-signal keyboard messages on known dial frequencies.</summary>
     Js8,
 
-    /// <summary>Olivia MFSK keyboard chat (default 8/500) in the HF digi window.</summary>
+    /// <summary>Olivia MFSK keyboard chat (calling default 8/250) in the HF digi window.</summary>
     Olivia,
 
-    /// <summary>JTTY 4-tone GFSK keyboard chat from WSJT-X (receive).</summary>
+    /// <summary>JTTY (WSJT-X 3.2) 4-tone GFSK keyboard/contest mode (receive).</summary>
     Jtty,
 
     /// <summary>VarAC keyboard chat over VARA HF. Decode uses an optional xara/zara monitor beside the app.</summary>

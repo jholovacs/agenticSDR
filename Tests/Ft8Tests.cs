@@ -74,6 +74,43 @@ public class Ft8Tests
     }
 
     [Fact]
+    public void Weak_snr_still_decodes_most_trials()
+    {
+        // ~-18 dB in 2500 Hz: SNR = 10*log10(0.5 / (sigma^2 * 2500 / 6000))
+        // sigma ≈ 5.5 → about -18 dB. On-air FT8 often sits here; missing these looks like "1 of 5".
+        const float sigma = 5.5f;
+        int hits = 0;
+        const int trials = 8;
+        for (int t = 0; t < trials; t++)
+        {
+            var audio = new float[15 * Ft8Decoder.SampleRate];
+            Ft8Decoder.Modulate(audio, Ft8Decoder.SampleRate, "CQ K1ABC FN42", 1_400 + t * 37, 0.45);
+            var random = new Random(90 + t * 11);
+            for (int i = 0; i < audio.Length; i++)
+            {
+                double u1 = 1 - random.NextDouble();
+                double u2 = 1 - random.NextDouble();
+                audio[i] += sigma * (float)(Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2));
+            }
+
+            if (Ft8Decoder.Decode(audio, Ft8Decoder.SampleRate, new Ft8Callsigns())
+                .Any(message => message.Text == "CQ K1ABC FN42"))
+                hits++;
+        }
+
+        Assert.True(hits >= 5, $"expected at least 5/8 weak-SNR decodes, got {hits}");
+    }
+
+    [Fact]
+    public void Late_dt_still_decodes()
+    {
+        var audio = new float[15 * Ft8Decoder.SampleRate];
+        Ft8Decoder.Modulate(audio, Ft8Decoder.SampleRate, "CQ K1ABC FN42", 1_500, 1.8);
+        IReadOnlyList<Ft8Message> found = Ft8Decoder.Decode(audio, Ft8Decoder.SampleRate, new Ft8Callsigns());
+        Assert.Contains(found, message => message.Text == "CQ K1ABC FN42");
+    }
+
+    [Fact]
     public void Ft8_demod_keeps_the_upper_sideband_tone()
     {
         int count = (int)(0.25 * Demodulator.InputRate);

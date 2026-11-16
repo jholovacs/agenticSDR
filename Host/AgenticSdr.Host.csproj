@@ -3,10 +3,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Radio\AgenticSdr.Radio.csproj" />
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
+    <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.15" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
     <PackageReference Include="ModelContextProtocol.Extensions.Tasks" Version="2.3.0" />
     <PackageReference Include="Whisper.net" Version="1.7.4" />
@@ -14,7 +15,7 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

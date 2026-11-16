@@ -5,6 +5,7 @@ namespace AgenticSdr.Dsp;
 /// <summary>
 /// Reads Morse timing from audio. It follows the loudness, estimates the dit length from the marks it heard,
 /// and prints letters and digits. A clip with no Morse returns an empty string.
+/// Quiet CW is amplified before keying is measured so a weak HF carrier still copies.
 /// </summary>
 public static class MorseDecoder
 {
@@ -17,84 +18,64 @@ public static class MorseDecoder
         ["..-"] = 'U', ["...-"] = 'V', [".--"] = 'W', ["-..-"] = 'X', ["-.--"] = 'Y',
         ["--.."] = 'Z',
         ["-----"] = '0', [".----"] = '1', ["..---"] = '2', ["...--"] = '3', ["....-"] = '4',
-        ["....."] = '5', ["-...."] = '6', ["--..."] = '7', ["---.."] = '8', ["----."] = '9'
+        ["....."] = '5', ["-...."] = '6', ["--..."] = '7', ["---.."] = '8', ["----."] = '9',
+        [".-.-."] = '+', // AR
+        ["-...-"] = '=', // BT
+        ["...-.-"] = '*', // SK (rendered *)
+        [".-.-"] = ',', // rarely used
+        ["--..--"] = ',',
+        ["..--.."] = '?',
+        ["-....-"] = '-',
+        [".-..-."] = '"',
+        ["-.-.--"] = '!',
+        [".----."] = '\'',
+        ["-..-."] = '/',
     };
+
+    /// <summary>
+    /// Best-effort CW decode for demodulated Morse audio (BFO tone or raw keying).
+    /// Tries a direct envelope read, then a tone-isolated path for quiet signals.
+    /// </summary>
+    public static string DecodeCw(ReadOnlySpan<float> audio, int sampleRate)
+    {
+        string direct = Decode(audio, sampleRate);
+        if (IsCopy(direct))
+            return direct;
+
+        string audible = DecodeAudible(audio, sampleRate);
+        if (IsCopy(audible))
+            return audible;
+
+        // Prefer the longer almost-copy when neither quite passes IsCopy.
+        if (Score(audible) > Score(direct) && Score(audible) >= 2)
+            return audible;
+        return Score(direct) >= 2 ? direct : "";
+    }
 
     public static string Decode(ReadOnlySpan<float> audio, int sampleRate)
     {
         if (audio.Length < sampleRate / 20 || sampleRate < 1000)
             return "";
 
-        var env = new float[audio.Length];
-        float smooth = 0;
-        float alpha = 1f - (float)Math.Exp(-1.0 / (sampleRate * 0.008));
-        for (int i = 0; i < audio.Length; i++)
+        var env = Envelope(audio, sampleRate);
+        Agc(env);
+
+        string best = "";
+        int bestScore = -1;
+        // Several thresholds: HF CW keying depth varies with QSB and AGC.
+        ReadOnlySpan<float> fracs = [0.30f, 0.40f, 0.50f, 0.60f];
+        foreach (float frac in fracs)
         {
-            smooth += alpha * (Math.Abs(audio[i]) - smooth);
-            env[i] = smooth;
-        }
-
-        var sorted = (float[])env.Clone();
-        Array.Sort(sorted);
-        float low = sorted[(int)(sorted.Length * 0.2)];
-        float high = sorted[(int)(sorted.Length * 0.9)];
-        if (high < 0.02f || high < low * 1.8f)
-            return "";
-
-        float threshold = low + 0.45f * (high - low);
-        var runs = new List<(bool Mark, int Samples)>();
-        bool mark = env[0] >= threshold;
-        int length = 1;
-        for (int i = 1; i < env.Length; i++)
-        {
-            bool next = env[i] >= threshold;
-            if (next == mark)
+            string text = DecodeEnvelope(env, sampleRate, frac);
+            int score = Score(text);
+            if (score > bestScore)
             {
-                length++;
-                continue;
-            }
-
-            runs.Add((mark, length));
-            mark = next;
-            length = 1;
-        }
-
-        runs.Add((mark, length));
-        runs = Clean(runs, (int)(sampleRate * 0.015));
-
-        var marks = runs.Where(r => r.Mark).Select(r => r.Samples).ToList();
-        if (marks.Count == 0)
-            return "";
-
-        int dit = EstimateDit(marks);
-        if (dit <= 0)
-            return "";
-
-        var text = new StringBuilder();
-        var symbol = new StringBuilder();
-        foreach (var run in runs)
-        {
-            double units = (double)run.Samples / dit;
-            if (run.Mark)
-            {
-                symbol.Append(units > 1.8 ? '-' : '.');
-                continue;
-            }
-
-            if (units >= 5)
-            {
-                Flush(text, symbol);
-                if (text.Length > 0 && text[^1] != ' ')
-                    text.Append(' ');
-            }
-            else if (units >= 2)
-            {
-                Flush(text, symbol);
+                bestScore = score;
+                best = text;
             }
         }
 
-        Flush(text, symbol);
-        return text.ToString().Trim();
+        return best;
     }
 
     /// <summary>
@@ -115,14 +96,108 @@ public static class MorseDecoder
         float peak = 0;
         foreach (float sample in narrow)
             peak = Math.Max(peak, Math.Abs(sample));
-        if (peak < 1e-5f || peak >= 0.05f)
+        if (peak < 1e-6f)
             return "";
 
         float gain = 0.5f / peak;
         for (int i = 0; i < narrow.Length; i++)
             narrow[i] *= gain;
         string boosted = Decode(narrow, sampleRate);
-        return IsCopy(boosted) ? boosted : "";
+        return IsCopy(boosted) ? boosted : (Score(boosted) > Score(direct) ? boosted : direct);
+    }
+
+    private static float[] Envelope(ReadOnlySpan<float> audio, int sampleRate)
+    {
+        var env = new float[audio.Length];
+        float smooth = 0;
+        float alpha = 1f - (float)Math.Exp(-1.0 / (sampleRate * 0.005));
+        for (int i = 0; i < audio.Length; i++)
+        {
+            smooth += alpha * (Math.Abs(audio[i]) - smooth);
+            env[i] = smooth;
+        }
+
+        return env;
+    }
+
+    /// <summary>Stretch the envelope so quiet CW still crosses a stable threshold.</summary>
+    private static void Agc(Span<float> env)
+    {
+        var sorted = env.ToArray();
+        Array.Sort(sorted);
+        float high = sorted[(int)(sorted.Length * 0.95)];
+        if (high < 1e-8f)
+            return;
+        float gain = 0.5f / high;
+        for (int i = 0; i < env.Length; i++)
+            env[i] *= gain;
+    }
+
+    private static string DecodeEnvelope(float[] env, int sampleRate, float thresholdFrac)
+    {
+        var sorted = (float[])env.Clone();
+        Array.Sort(sorted);
+        float low = sorted[(int)(sorted.Length * 0.15)];
+        float high = sorted[(int)(sorted.Length * 0.90)];
+        if (high < 0.01f || high < low * 1.35f)
+            return "";
+
+        float threshold = low + thresholdFrac * (high - low);
+        var runs = new List<(bool Mark, int Samples)>();
+        bool mark = env[0] >= threshold;
+        int length = 1;
+        for (int i = 1; i < env.Length; i++)
+        {
+            bool next = env[i] >= threshold;
+            if (next == mark)
+            {
+                length++;
+                continue;
+            }
+
+            runs.Add((mark, length));
+            mark = next;
+            length = 1;
+        }
+
+        runs.Add((mark, length));
+        // Ignore clicks shorter than ~8 ms; keep true dits (≈50–80 ms at 15–25 WPM).
+        runs = Clean(runs, (int)(sampleRate * 0.008));
+
+        var marks = runs.Where(r => r.Mark).Select(r => r.Samples).ToList();
+        if (marks.Count < 3)
+            return "";
+
+        int dit = EstimateDit(marks, sampleRate);
+        if (dit <= 0)
+            return "";
+
+        var text = new StringBuilder();
+        var symbol = new StringBuilder();
+        foreach (var run in runs)
+        {
+            double units = (double)run.Samples / dit;
+            if (run.Mark)
+            {
+                // Dah ≈ 3 dits; allow 2.0–2.2 for slightly short dahs on HF.
+                symbol.Append(units >= 2.0 ? '-' : '.');
+                continue;
+            }
+
+            if (units >= 5.5)
+            {
+                Flush(text, symbol);
+                if (text.Length > 0 && text[^1] != ' ')
+                    text.Append(' ');
+            }
+            else if (units >= 2.2)
+            {
+                Flush(text, symbol);
+            }
+        }
+
+        Flush(text, symbol);
+        return text.ToString().Trim();
     }
 
     private static bool TryTone(ReadOnlySpan<float> audio, int sampleRate, out double hz)
@@ -132,10 +207,14 @@ public static class MorseDecoder
         if (n < sampleRate / 5 || sampleRate < 1000)
             return false;
 
-        int start = audio.Length - n;
+        int start = Math.Max(0, audio.Length - n);
+        // Prefer mid-clip if the start is tuner settle / AGC.
+        if (audio.Length > sampleRate * 2)
+            start = audio.Length / 2 - n / 2;
+
         const double lowHz = 200;
-        const double highHz = 1_500;
-        const double stepHz = 20;
+        const double highHz = 1_800;
+        const double stepHz = 10;
         int bins = (int)((highHz - lowHz) / stepHz) + 1;
         var power = new double[bins];
         for (int bin = 0; bin < bins; bin++)
@@ -151,13 +230,13 @@ public static class MorseDecoder
         var sorted = (double[])power.Clone();
         Array.Sort(sorted);
         double median = sorted[bins / 2];
-        int away = Math.Max(1, (int)Math.Round(100 / stepHz));
+        int away = Math.Max(1, (int)Math.Round(80 / stepHz));
         double shoulder = 0;
         if (peak - away >= 0)
             shoulder = power[peak - away];
         if (peak + away < bins)
             shoulder = Math.Max(shoulder, power[peak + away]);
-        if (median <= 0 || power[peak] < median * 8 || power[peak] < shoulder * 4)
+        if (median <= 0 || power[peak] < median * 5 || power[peak] < shoulder * 2.5)
             return false;
 
         hz = lowHz + peak * stepHz;
@@ -183,7 +262,7 @@ public static class MorseDecoder
 
     private static float[] Bandpass(ReadOnlySpan<float> audio, int sampleRate, double hz)
     {
-        double bandwidth = Math.Clamp(hz / 4, 80, 180);
+        double bandwidth = Math.Clamp(hz / 5, 60, 150);
         double q = hz / bandwidth;
         double w0 = 2 * Math.PI * hz / sampleRate;
         double alpha = Math.Sin(w0) / (2 * q);
@@ -216,6 +295,30 @@ public static class MorseDecoder
     {
         if (string.IsNullOrWhiteSpace(text))
             return false;
+        return Score(text) >= 4 && UnknownRatio(text) <= 0.35;
+    }
+
+    private static int Score(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+        int letters = 0;
+        int unknown = 0;
+        foreach (char ch in text)
+        {
+            if (ch == ' ')
+                continue;
+            if (char.IsLetterOrDigit(ch))
+                letters++;
+            else
+                unknown++;
+        }
+
+        return letters - unknown * 2;
+    }
+
+    private static double UnknownRatio(string text)
+    {
         int letters = 0;
         int unknown = 0;
         foreach (char ch in text)
@@ -229,22 +332,30 @@ public static class MorseDecoder
         }
 
         int symbols = letters + unknown;
-        return letters >= 2 && unknown * 4 <= symbols;
+        return symbols == 0 ? 1 : unknown / (double)symbols;
     }
 
-    private static int EstimateDit(List<int> marks)
+    private static int EstimateDit(List<int> marks, int sampleRate)
     {
-        var sorted = marks.OrderBy(v => v).ToList();
-        if (sorted.Count == 1)
-            return sorted[0];
-        if (sorted[^1] <= sorted[0] * 2)
-            return sorted[sorted.Count / 2];
+        // Typical HF CW: about 12–40 WPM → dit ≈ 30–100 ms.
+        int minDit = (int)(sampleRate * 0.025);
+        int maxDit = (int)(sampleRate * 0.120);
+        var candidates = marks.Where(v => v >= minDit && v <= maxDit * 1.4).OrderBy(v => v).ToList();
+        if (candidates.Count == 0)
+            candidates = marks.OrderBy(v => v).ToList();
+
+        if (candidates.Count == 1)
+            return Math.Clamp(candidates[0], minDit, maxDit);
+
+        // Cluster short marks (dits). Dahs are ~3×; find the largest gap in the lower half.
+        if (candidates[^1] <= candidates[0] * 2.2)
+            return Math.Clamp(candidates[candidates.Count / 2], minDit, maxDit);
 
         int split = 1;
         double bestRatio = 1;
-        for (int i = 1; i < sorted.Count; i++)
+        for (int i = 1; i < candidates.Count; i++)
         {
-            double ratio = (double)sorted[i] / sorted[i - 1];
+            double ratio = (double)candidates[i] / candidates[i - 1];
             if (ratio > bestRatio)
             {
                 bestRatio = ratio;
@@ -252,7 +363,12 @@ public static class MorseDecoder
             }
         }
 
-        return sorted[split / 2];
+        int dit = candidates[Math.Max(0, split / 2)];
+        // If the "dit" cluster looks like dahs, divide by 3.
+        double medianAll = marks.OrderBy(v => v).ElementAt(marks.Count / 2);
+        if (dit > maxDit && medianAll / 3 >= minDit && medianAll / 3 <= maxDit)
+            dit = (int)Math.Round(medianAll / 3.0);
+        return Math.Clamp(dit, minDit, maxDit);
     }
 
     private static List<(bool Mark, int Samples)> Clean(List<(bool Mark, int Samples)> runs, int minSamples)

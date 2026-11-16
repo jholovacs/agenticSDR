@@ -33,6 +33,13 @@ public static class AppPaths
         return Path.Combine(directory ?? "", "schedule.json");
     }
 
+    public static string UserAntenna()
+    {
+        string llm = UserLlm();
+        string? directory = Path.GetDirectoryName(llm);
+        return Path.Combine(directory ?? "", "antenna.json");
+    }
+
     public static string UserCallsignCache()
     {
         string llm = UserLlm();
@@ -68,6 +75,21 @@ public static class AppPaths
         }
 
         return UserSchedule();
+    }
+
+    public static string SelectAntenna(string contentRoot)
+    {
+        string content = Path.Combine(contentRoot, "antenna.json");
+        if (File.Exists(content))
+            return content;
+        if (OperatingSystem.IsWindows())
+        {
+            string system = Path.Combine(WindowsSystemDirectory(), "antenna.json");
+            if (File.Exists(system))
+                return system;
+        }
+
+        return UserAntenna();
     }
 
     public static string UserLlm()

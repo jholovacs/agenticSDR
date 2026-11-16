@@ -21,7 +21,7 @@ public class MorseTests
         float[] audio = Key("CQ", wpm: 20, jitter: 0, seed: 1);
         for (int i = 0; i < audio.Length; i++)
             audio[i] *= 0.001f;
-        Assert.Equal("", MorseDecoder.Decode(audio, 48_000));
+        Assert.Equal("CQ", MorseDecoder.DecodeCw(audio, 48_000));
         Assert.Equal("CQ", MorseDecoder.DecodeAudible(audio, 48_000));
     }
 

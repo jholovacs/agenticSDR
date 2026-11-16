@@ -87,6 +87,31 @@ public class ClassifierTests
         Assert.Equal(RadioMode.Usb, ModeClassifier.SideFromFrequency(14_200_000));
     }
 
+    [Fact]
+    public void Am_like_peak_on_jtty_dial_is_not_labeled_jtty()
+    {
+        double[] db = Floor();
+        int carrier = Bin(40_000);
+        db[carrier] = -30;
+        for (int i = 1; i <= 8; i++)
+        {
+            db[carrier - i] = -44;
+            db[carrier + i] = -44;
+        }
+
+        SpectralPeak peak = Strongest(db) with { FrequencyHz = 7_090_000 };
+        var hint = new BandHint(RadioMode.Jtty, "40 m JTTY", "40 m JTTY");
+        Assert.Equal(RadioMode.Am, ModeClassifier.Classify(peak, hint).Mode);
+    }
+
+    [Fact]
+    public void Narrow_peak_on_jtty_dial_can_be_jtty()
+    {
+        SpectralPeak peak = Strongest(Tone(10_000, -40)) with { FrequencyHz = 7_090_000, BandwidthHz = 250 };
+        var hint = new BandHint(RadioMode.Jtty, "40 m JTTY", "40 m JTTY");
+        Assert.Equal(RadioMode.Jtty, ModeClassifier.Classify(peak, hint).Mode);
+    }
+
     private static SpectralPeak Strongest(double[] db)
     {
         var peaks = PeakPicker.Find(db, centerHz: 144_000_000, SampleRate, thresholdDb: 8);

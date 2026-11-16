@@ -262,6 +262,7 @@
       <div class="fold-body">
       <p class="readout" id="readout">—</p>
       <p id="source" class="source"></p>
+      <p id="channel-width" class="source" data-tip="channel-width">Channel width —</p>
       <div class="controls selected-tune">
         <label class="freq camp-only" data-tip="freq">Frequency MHz
           <input id="camp-freq" inputmode="decimal" value="146.520000">
@@ -333,6 +334,18 @@
         <span data-tip="record"><button id="record" type="button" disabled>Record</button></span>
         <span data-tip="transcript"><button id="record-transcript" type="button" class="ghost" disabled>Download Transcript</button></span>
       </div>
+      <h3 data-tip="pipeline">Signal pipeline</h3>
+      <div id="pipeline-strip" class="pipeline-strip" aria-live="polite">
+        <p id="pipeline-empty" class="source">Mode picks the default filters and decoders. Edit before you listen.</p>
+        <ol id="pipeline-stages" class="pipeline-stages"></ol>
+        <div class="pipeline-edit signal-actions">
+          <label data-tip="pipeline-add">Add
+            <select id="pipeline-add"></select>
+          </label>
+          <button id="pipeline-add-btn" type="button" class="ghost">Add</button>
+          <button id="pipeline-reset" type="button" class="ghost">Reset to mode default</button>
+        </div>
+      </div>
       <h3 data-tip="decoded">Decoded text</h3>
       <pre id="morse">Morse, FT8, and speech appear here.</pre>
       </div>
@@ -369,6 +382,6 @@
   </dialog>
 
   <script src="/lame.min.js?v=5"></script>
-  <script src="/app.js?v=37"></script>
+  <script src="/app.js?v=47"></script>
 </body>
 </html>

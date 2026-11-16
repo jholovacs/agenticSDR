@@ -78,6 +78,11 @@ public sealed class Demodulator
     private double _ft8Phase;
     private bool _ft8Conjugate;
     private bool _ft8OrientationLocked;
+    /// <summary>
+    /// When true, digi USB may conjugate I/Q if the lower sideband is stronger (HF direct sampling).
+    /// Quadrature VHF/UHF/10 m must stay false — a wrong lock dumps FT8 outside the USB window.
+    /// </summary>
+    private readonly bool _allowUsbSidebandFlip;
     private readonly double _inputRate;
     private readonly int _audioRate;
     private readonly int _decim1;
@@ -90,11 +95,17 @@ public sealed class Demodulator
     private readonly List<float> _mpxScratch = [];
     private readonly List<float> _mpxDecimated = [];
 
-    public Demodulator(RadioMode mode, double offsetHz = 0, double inputRate = InputRate, WbfmProgram wbfmProgram = WbfmProgram.Main)
+    public Demodulator(
+        RadioMode mode,
+        double offsetHz = 0,
+        double inputRate = InputRate,
+        WbfmProgram wbfmProgram = WbfmProgram.Main,
+        bool allowUsbSidebandFlip = false)
     {
         _mode = mode == RadioMode.Unknown ? RadioMode.Nbfm : mode;
         _inputRate = inputRate;
         _wbfmProgram = wbfmProgram;
+        _allowUsbSidebandFlip = allowUsbSidebandFlip;
         _shift = offsetHz != 0;
         double dphi = -2 * Math.PI * offsetHz / _inputRate;
         _shiftStep = new Complex(Math.Cos(dphi), Math.Sin(dphi));
@@ -166,9 +177,16 @@ public sealed class Demodulator
     private static bool IsUsbDigi(RadioMode mode) =>
         mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty;
 
-    public static DemodResult Demodulate(ReadOnlySpan<Complex> iq, RadioMode mode, double offsetHz = 0, bool normalize = true, double inputRate = InputRate, WbfmProgram wbfmProgram = WbfmProgram.Main)
+    public static DemodResult Demodulate(
+        ReadOnlySpan<Complex> iq,
+        RadioMode mode,
+        double offsetHz = 0,
+        bool normalize = true,
+        double inputRate = InputRate,
+        WbfmProgram wbfmProgram = WbfmProgram.Main,
+        bool allowUsbSidebandFlip = false)
     {
-        var demod = new Demodulator(mode, offsetHz, inputRate, wbfmProgram);
+        var demod = new Demodulator(mode, offsetHz, inputRate, wbfmProgram, allowUsbSidebandFlip);
         const int chunk = 240_000;
         for (int offset = 0; offset < iq.Length; offset += chunk)
         {
@@ -285,7 +303,8 @@ public sealed class Demodulator
         int channels = Channels;
         string? text = _mode switch
         {
-            RadioMode.Cw => MorseDecoder.Decode(audio, rate),
+            // Decode before normalize would miss quiet HF CW; DecodeCw AGCs and tone-isolates.
+            RadioMode.Cw => CwText(audio, rate),
             RadioMode.Ft8 => Ft8Decoder.Format(Ft8Decoder.Decode(audio, rate)),
             RadioMode.Js8 => Js8Decoder.Format(Js8Decoder.Decode(audio, rate)),
             RadioMode.Olivia => OliviaDecoder.Format(OliviaDecoder.Decode(audio, rate)),
@@ -298,6 +317,12 @@ public sealed class Demodulator
         if (normalize)
             Normalize(audio);
         return new DemodResult(audio, rate, text, channels);
+    }
+
+    private static string? CwText(float[] audio, int rate)
+    {
+        string text = MorseDecoder.DecodeCw(audio, rate);
+        return MorseDecoder.IsCopy(text) ? text : null;
     }
 
     private static string? FinishRds(WbfmMux? mux)
@@ -594,24 +619,28 @@ public sealed class Demodulator
     /// </summary>
     private List<Complex> ChooseUsbOrientation(List<Complex> baseband)
     {
-        if (baseband.Count < 64)
+        if (!_allowUsbSidebandFlip || baseband.Count < 64)
             return baseband;
 
         if (!_ft8OrientationLocked)
         {
-            double plain = UsbOverLsb(baseband, conjugate: false);
-            double flipped = UsbOverLsb(baseband, conjugate: true);
-            if (flipped > plain * 1.35)
+            // Wait for ~0.25 s of baseband so the first noisy tuner block cannot lock the wrong sideband.
+            if (baseband.Count >= Math.Max(64, _audioRate / 4))
             {
-                _ft8Conjugate = true;
-                _ft8OrientationLocked = true;
+                double plain = UsbOverLsb(baseband, conjugate: false);
+                double flipped = UsbOverLsb(baseband, conjugate: true);
+                if (flipped > plain * 1.5)
+                {
+                    _ft8Conjugate = true;
+                    _ft8OrientationLocked = true;
+                }
+                else if (plain > flipped * 1.5)
+                {
+                    _ft8Conjugate = false;
+                    _ft8OrientationLocked = true;
+                }
+                // else keep default (no conjugate) until a later block is decisive
             }
-            else if (plain > flipped * 1.35)
-            {
-                _ft8Conjugate = false;
-                _ft8OrientationLocked = true;
-            }
-            // else keep default (no conjugate) until a later block is decisive
         }
 
         if (!_ft8Conjugate)

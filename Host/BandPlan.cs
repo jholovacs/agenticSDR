@@ -47,7 +47,8 @@ public static class Region2BandPlan
             [
                 Call("80 m FT8", 3_573_000, RadioMode.Ft8, 3_600),
                 Call("80 m JS8", 3_578_000, RadioMode.Js8, 3_600),
-                Call("80 m Olivia", 3_583_000, RadioMode.Olivia, 1_500),
+                // Olivia lists publish RF center; USB dial is 1.5 kHz below (same convention as fldigi).
+                Call("80 m Olivia", 3_581_500, RadioMode.Olivia, 1_500),
                 Call("80 m VarAC", 3_595_000, RadioMode.Varac, 2_500)
             ]),
         Band("60m", "60 m", 5_330_500, 5_406_500,
@@ -58,7 +59,7 @@ public static class Region2BandPlan
             [
                 Call("40 m FT8", 7_074_000, RadioMode.Ft8, 3_600),
                 Call("40 m JS8", 7_078_000, RadioMode.Js8, 3_600),
-                Call("40 m Olivia", 7_073_000, RadioMode.Olivia, 1_500),
+                Call("40 m Olivia", 7_071_500, RadioMode.Olivia, 1_500),
                 Call("40 m JTTY", 7_090_000, RadioMode.Jtty, 2_500),
                 Call("40 m VarAC", 7_105_000, RadioMode.Varac, 2_500)
             ]),
@@ -74,7 +75,7 @@ public static class Region2BandPlan
             [
                 Call("20 m FT8", 14_074_000, RadioMode.Ft8, 3_600),
                 Call("20 m JS8", 14_078_000, RadioMode.Js8, 3_600),
-                Call("20 m Olivia", 14_072_300, RadioMode.Olivia, 1_500),
+                Call("20 m Olivia", 14_071_500, RadioMode.Olivia, 1_500),
                 Call("20 m JTTY", 14_090_000, RadioMode.Jtty, 2_500),
                 Call("20 m VarAC", 14_105_000, RadioMode.Varac, 2_500),
                 Call("20 m USB net", 14_300_000, RadioMode.Usb, 5_000)
@@ -91,7 +92,7 @@ public static class Region2BandPlan
             [
                 Call("15 m FT8", 21_074_000, RadioMode.Ft8, 3_600),
                 Call("15 m JS8", 21_078_000, RadioMode.Js8, 3_600),
-                Call("15 m Olivia", 21_072_500, RadioMode.Olivia, 1_500),
+                Call("15 m Olivia", 21_071_000, RadioMode.Olivia, 1_500),
                 Call("15 m VarAC", 21_105_000, RadioMode.Varac, 2_500)
             ]),
         Band("12m", "12 m", 24_890_000, 24_990_000,
@@ -110,7 +111,7 @@ public static class Region2BandPlan
             [
                 Call("10 m FT8", 28_074_000, RadioMode.Ft8, 3_600),
                 Call("10 m JS8", 28_078_000, RadioMode.Js8, 3_600),
-                Call("10 m Olivia", 28_120_000, RadioMode.Olivia, 1_500),
+                Call("10 m Olivia", 28_121_500, RadioMode.Olivia, 1_500),
                 Call("10 m JTTY", 28_090_000, RadioMode.Jtty, 2_500),
                 Call("10 m VarAC", 28_105_000, RadioMode.Varac, 2_500),
                 Call("10 m USB calling", 28_400_000, RadioMode.Usb, 3_000),
@@ -365,6 +366,54 @@ public static class Region2BandPlan
 
     public static bool TryFt8Dial(double frequencyHz, out double dialHz) =>
         TryDigiDial(frequencyHz, RadioMode.Ft8, out dialHz);
+
+    /// <summary>
+    /// True when the tune sits on a published known channel or calling dial (NOAA, CB, GMRS, FT8, Olivia, …).
+    /// <paramref name="publishedHz"/> is the listed frequency (USB dial for digimodes).
+    /// </summary>
+    public static bool TryPublishedStation(double frequencyHz, RadioMode mode, out double publishedHz, out RadioMode publishedMode)
+    {
+        publishedHz = 0;
+        publishedMode = RadioMode.Unknown;
+        double best = double.MaxValue;
+        double foundHz = 0;
+        RadioMode foundMode = RadioMode.Unknown;
+
+        foreach (HamBand band in Bands)
+        {
+            foreach (CallingChannel channel in band.Calling)
+            {
+                if (mode != RadioMode.Unknown && channel.Mode != mode)
+                    continue;
+                double distance;
+                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+                {
+                    double delta = frequencyHz - channel.FrequencyHz;
+                    if (delta < -500 || delta > channel.ToleranceHz)
+                        continue;
+                    distance = Math.Abs(delta);
+                }
+                else
+                {
+                    distance = Math.Abs(frequencyHz - channel.FrequencyHz);
+                    if (distance > channel.ToleranceHz)
+                        continue;
+                }
+
+                if (distance >= best)
+                    continue;
+                best = distance;
+                foundHz = channel.FrequencyHz;
+                foundMode = channel.Mode;
+            }
+        }
+
+        if (best >= double.MaxValue)
+            return false;
+        publishedHz = foundHz;
+        publishedMode = foundMode;
+        return true;
+    }
 
     /// <summary>
     /// True when the frequency sits on a published digimode dial (or in the USB tone window above FT8/JS8 dials).

@@ -13,22 +13,25 @@ public static class ModeClassifier
         double confidence = 0.3;
 
         // Digi dial hints mean “this looks like the published watering hole,” not decode certainty.
-        if ((hint?.PreferredMode is RadioMode.Ft8 or RadioMode.Js8) && bw < 3_600 && peak.SnrDb >= 0)
+        // Keep bandwidth gates tight so AM/LSB voice on the same kHz is not labeled as digi.
+        bool amLike = peak.CarrierProminenceDb > 10 && Math.Abs(peak.Asymmetry) < 0.35 && bw > 1_500;
+        if (!amLike && (hint?.PreferredMode is RadioMode.Ft8 or RadioMode.Js8) && bw < 3_600 && peak.SnrDb >= 0)
         {
             mode = hint.PreferredMode;
             confidence = peak.SnrDb >= 6 ? 0.48 : 0.40;
         }
-        else if (hint?.PreferredMode == RadioMode.Olivia && bw < 2_500 && peak.SnrDb >= 0)
+        else if (!amLike && hint?.PreferredMode == RadioMode.Olivia && bw < 1_500 && peak.SnrDb >= 0)
         {
             mode = RadioMode.Olivia;
             confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
         }
-        else if (hint?.PreferredMode == RadioMode.Jtty && bw < 3_000 && peak.SnrDb >= 0)
+        // JTTY occupies ~127 Hz; a multi-kHz AM/LSB footprint must not inherit the 7.090 dial label.
+        else if (!amLike && hint?.PreferredMode == RadioMode.Jtty && bw < 800 && peak.SnrDb >= 0)
         {
             mode = RadioMode.Jtty;
             confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
         }
-        else if (hint?.PreferredMode == RadioMode.Varac && bw < 3_200 && peak.SnrDb >= 0)
+        else if (!amLike && hint?.PreferredMode == RadioMode.Varac && bw < 3_200 && peak.SnrDb >= 0)
         {
             mode = RadioMode.Varac;
             confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;

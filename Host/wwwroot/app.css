@@ -453,6 +453,53 @@ pre .rds { color: #c4b5fd; }
 pre .speech { color: var(--green); }
 pre .note { color: #86efac; }
 
+.pipeline-strip { margin: 8px 0 16px; }
+.pipeline-stages {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.pipeline-stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #1a1612;
+  font-size: 0.9rem;
+}
+.pipeline-stages .pipe {
+  color: var(--muted);
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.pipeline-stages button {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+}
+.pipeline-edit {
+  align-items: end;
+  gap: 8px;
+}
+.pipeline-edit label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+pre .src {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
 .empty { margin-top: 12px; }
 
 #tip {
