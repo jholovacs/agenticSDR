@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AgenticSdr.Jtty</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Privilege\AgenticSdr.Privilege.csproj" />
+    <ProjectReference Include="..\..\Dsp\AgenticSdr.Dsp.csproj" />
+    <ProjectReference Include="..\..\Radio\AgenticSdr.Radio.csproj" />
+  </ItemGroup>
+
+</Project>

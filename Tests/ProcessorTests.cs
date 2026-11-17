@@ -12,6 +12,8 @@ public class ProcessorTests
         Assert.Equal(["morse", "speech"], ModePipelines.DefaultIds(RadioMode.Usb));
         Assert.Equal(["morse"], ModePipelines.DefaultIds(RadioMode.Cw));
         Assert.Equal(["ft8"], ModePipelines.DefaultIds(RadioMode.Ft8));
+        Assert.Equal(["packet"], ModePipelines.DefaultIds(RadioMode.Packet));
+        Assert.Equal(["ribbit"], ModePipelines.DefaultIds(RadioMode.Ribbit));
     }
 
     [Fact]
@@ -32,8 +34,17 @@ public class ProcessorTests
         using var chain = new SignalChain([new MorseProcessor()]);
         Assert.True(chain.TrySubmit(SignalFrame.FromAudio(audio, 48_000)));
         await chain.WaitIdleAsync(CancellationToken.None, settleMs: 30);
-        await Task.Delay(80);
-        List<AttributedText> texts = chain.DrainTexts();
+
+        List<AttributedText> texts = [];
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            texts.AddRange(chain.DrainTexts());
+            if (texts.Any(t => t.Text.Contains("CQ", StringComparison.Ordinal) && t.SourceId == "morse"))
+                break;
+            await Task.Delay(20);
+        }
+
         Assert.Contains(texts, t => t.Text.Contains("CQ", StringComparison.Ordinal) && t.SourceId == "morse");
     }
 

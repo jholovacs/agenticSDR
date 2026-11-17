@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using AgenticSdr.Host;
+using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AgenticSdr.Tests;
@@ -149,6 +151,7 @@ public class AgentTests
             new SpeechDecoder(Path.GetTempPath()),
             new AgenticSdr.Processors.ProcessorCatalog(),
             new AntennaStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-antenna-" + Guid.NewGuid().ToString("N") + ".json")),
+            new RadioPreferenceStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-radio-" + Guid.NewGuid().ToString("N") + ".json")),
             NullLogger<RadioSession>.Instance);
         var camp = new CampBook(path + ".schedule");
         var clips = new ClipStore();

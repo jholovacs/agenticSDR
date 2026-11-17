@@ -72,3 +72,7 @@ public sealed class VaracProcessor() : DigiProcessorBase(
 public sealed class PacketProcessor() : DigiProcessorBase(
     "packet", "Packet", "packet",
     PacketDecoder.Decode);
+
+public sealed class RibbitProcessor() : DigiProcessorBase(
+    "ribbit", "Ribbit", "ribbit",
+    RibbitDecoder.Decode);

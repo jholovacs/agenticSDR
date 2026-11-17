@@ -3,6 +3,8 @@ name: Packages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -35,13 +37,14 @@ jobs:
       - name: Build MIT native libraries
         run: bash tools/build-native.sh
       - name: Run unit tests
-        # Live RTL test runs but skips only when no USB dongle is present.
+        # Live RTL skips only when no USB dongle is present.
         run: dotnet test Tests/AgenticSdr.Tests.csproj -c Release --nologo
       - name: Show version for this build
         run: echo "VERSION=$VERSION"
 
   debian:
     name: Debian .deb
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -66,6 +69,7 @@ jobs:
 
   windows:
     name: Windows MSI
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: windows-latest
     steps:
@@ -92,6 +96,7 @@ jobs:
 
   macos:
     name: macOS zips
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: macos-latest
     steps:
@@ -114,6 +119,7 @@ jobs:
 
   release:
     name: Publish versioned release
+    if: github.event_name != 'pull_request'
     needs: [debian, windows, macos]
     runs-on: ubuntu-latest
     steps:

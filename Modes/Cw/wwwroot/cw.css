@@ -1,0 +1,164 @@
+:root {
+  --bg: #12151a;
+  --panel: #1a1f27;
+  --ink: #e8eef6;
+  --muted: #9aa7b8;
+  --accent: #6db3ff;
+  --danger: #ff7b7b;
+  --line: #2a3340;
+  --ok: #6dffa3;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1e3a5f 0%, transparent 55%),
+    radial-gradient(900px 500px at 110% 10%, #243028 0%, transparent 50%),
+    var(--bg);
+  min-height: 100vh;
+  padding: 1.25rem clamp(1rem, 3vw, 2rem) 3rem;
+}
+
+.face {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+#app-nav.sp-app-nav {
+  margin: 0 0 1rem;
+}
+.brand { display: flex; gap: 0.9rem; align-items: flex-start; }
+.led {
+  width: 0.7rem; height: 0.7rem; border-radius: 50%;
+  margin-top: 0.55rem; background: #555;
+  box-shadow: 0 0 0 3px #222;
+}
+.led.on { background: var(--ok); box-shadow: 0 0 10px #6dffa366; }
+.eyebrow { margin: 0; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; }
+h1 { margin: 0.15rem 0; font-size: clamp(1.8rem, 4vw, 2.4rem); font-weight: 650; }
+.quiet { color: var(--muted); margin: 0.35rem 0 0; }
+.identity { text-align: right; }
+.identity p { margin: 0.2rem 0; }
+
+.panel.fold {
+  background: color-mix(in srgb, var(--panel) 92%, black);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0;
+  margin: 0.9rem 0;
+}
+.panel.fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0.9rem 1.1rem;
+}
+.panel.fold > summary::-webkit-details-marker { display: none; }
+.panel.fold > summary::marker { content: ""; }
+.panel.fold > summary::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.panel.fold[open] > summary::before { transform: translateY(0.08rem) rotate(45deg); }
+.panel.fold:not([open]) > :not(summary) { display: none; }
+.panel.fold[open] > summary .fold-aside { display: none; }
+.fold-title { font-weight: 600; flex: 1; }
+.fold-aside { color: var(--muted); font-size: 0.85rem; }
+.fold-body { padding: 0 1.1rem 1.15rem; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+.stack { display: grid; gap: 0.75rem; }
+label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.85rem; }
+label.grow { display: grid; }
+label.check {
+  display: flex; align-items: center; gap: 0.55rem;
+  color: var(--ink); font-size: 0.92rem;
+}
+input, textarea, button, select {
+  font: inherit; color: var(--ink);
+  background: #0f1318; border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+}
+button {
+  background: var(--accent); color: #071018; border: none;
+  font-weight: 600; cursor: pointer; padding: 0.55rem 1rem;
+}
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.error {
+  background: #3a1818; color: var(--danger);
+  border: 1px solid #5a2a2a; padding: 0.7rem 0.9rem; border-radius: 8px;
+}
+audio { width: min(100%, 28rem); margin-top: 0.75rem; }
+
+.chat-panel { display: grid; gap: 0.85rem; }
+.chat-tune { align-items: end; }
+.chat-log {
+  min-height: 16rem;
+  max-height: min(50vh, 28rem);
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0c1016;
+  display: grid;
+  gap: 0.65rem;
+}
+.chat-row { display: grid; gap: 0.2rem; }
+.chat-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+.chat-row.tx .chat-text { color: var(--accent); }
+.chat-row.rx .chat-text { color: var(--ok); }
+.chat-row.note .chat-text { color: var(--muted); font-family: inherit; }
+.compose textarea {
+  text-transform: uppercase;
+  font-family: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+.signoff-dialog {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 1rem 1.2rem;
+  max-width: min(28rem, 92vw);
+}
+.signoff-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.signoff-dialog h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.signoff-text {
+  margin: 0.75rem 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: 8px;
+  background: #0c1016;
+  border: 1px solid var(--line);
+}
+.signoff-text code {
+  font-family: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  font-size: 1rem;
+}

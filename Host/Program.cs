@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using AgenticSdr.Dsp;
 using AgenticSdr.Host;
+using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 using ModelContextProtocol.AspNetCore;
@@ -49,21 +51,15 @@ builder.Services.AddSingleton(sp =>
         AppPaths.SelectCallsignCache(env.ContentRootPath),
         options.CallsignLookup);
 });
-builder.Services.AddSingleton(sp =>
-{
-    var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
-    return new LlmStore(AppPaths.SelectLlm(env.ContentRootPath));
-});
+builder.Services.AddSingleton(_ => new LlmStore(SharedPaths.LlmJson(), SharedPaths.LlmJson()));
 builder.Services.AddSingleton(sp =>
 {
     var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
     return new CampBook(AppPaths.SelectSchedule(env.ContentRootPath));
 });
-builder.Services.AddSingleton(sp =>
-{
-    var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
-    return new AntennaStore(AppPaths.SelectAntenna(env.ContentRootPath));
-});
+builder.Services.AddSingleton(_ => new AntennaStore(SharedPaths.AntennaJson()));
+builder.Services.AddSingleton(new RadioPreferenceStore(SharedPaths.RadioJson()));
+builder.Services.AddSingleton(new UiPrefsStore(SharedPaths.UiPrefsJson()));
 builder.Services.AddSingleton(sp =>
 {
     var http = new HttpClient { Timeout = TimeSpan.FromMinutes(4) };

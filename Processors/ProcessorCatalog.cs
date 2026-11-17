@@ -17,6 +17,7 @@ public sealed class ProcessorCatalog(ISpeechTranscriber? speech = null)
         new("jtty", "JTTY", "decoder"),
         new("varac", "VarAC", "decoder"),
         new("packet", "Packet", "decoder"),
+        new("ribbit", "Ribbit", "decoder"),
         new(RdsProcessor.ProcessorId, "RDS", "decoder")
     ];
 
@@ -36,6 +37,7 @@ public sealed class ProcessorCatalog(ISpeechTranscriber? speech = null)
             "jtty" => new JttyProcessor(),
             "varac" => new VaracProcessor(),
             "packet" => new PacketProcessor(),
+            "ribbit" => new RibbitProcessor(),
             RdsProcessor.ProcessorId => new RdsProcessor(),
             _ => throw new ArgumentException($"Unknown processor '{id}'.")
         };

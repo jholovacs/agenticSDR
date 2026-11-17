@@ -1,3 +1,59 @@
+DeskPanels.mountAppNav(document.getElementById("app-nav"), { current: "receiver" });
+
+DeskPanels.mountRadio(document.getElementById("radio-host"), {
+  apiBase: "",
+  ownEvents: false,
+  open: true
+});
+
+const promptPanel = AgentPanels.mountPrompt(document.getElementById("prompt-host"), {
+  apiBase: "",
+  onError: (message) => showError(message),
+  foldNote: "Tell the agent what to do with the radio.",
+  placeholder: "Scan 2 m and tell me what you hear.",
+  emptyText: "Nothing asked yet. Try “Scan 2 m and tell me what you hear.”",
+  canAsk: () => {
+    if (busy && !liveAbort) {
+      showError("The radio is busy. Press Stop, then send the prompt again.");
+      return false;
+    }
+    return true;
+  },
+  beforeAsk: () => {
+    if (!liveAbort) setBusy(true);
+    showError("");
+    return true;
+  },
+  onReply: async (reply) => {
+    if (reply.antenna) {
+      antennaUnit.value = "m";
+      antennaLength.value = reply.antenna.lengthMeters;
+      antennaOrientation.value = reply.antenna.orientation;
+      if (reply.antenna.azimuthDegrees != null)
+        antennaAzimuth.value = String(Math.round(reply.antenna.azimuthDegrees));
+      syncAzimuth();
+      antennaNote.textContent = reply.antenna.summary;
+      await loadBands();
+      paintFoldSummaries();
+    }
+    if (reply.scan) renderHits(reply.scan);
+  },
+  onSettled: () => {
+    if (liveAbort) setBusy(true);
+    else {
+      setBusy(false);
+      if (busyPanel?.open) busyPanel.close();
+    }
+    refreshStatus();
+  }
+});
+
+AgentPanels.mountModel(document.getElementById("model-host"), {
+  apiBase: "",
+  onError: (message) => showError(message),
+  onChange: () => paintFoldSummaries()
+});
+
 const band = document.querySelector("#band");
 const hits = document.querySelector("#hits");
 const empty = document.querySelector("#empty");
@@ -38,8 +94,6 @@ const radioSelect = document.querySelector("#radio");
 
 let busy = false;
 let liveAbort = null;
-let agentAbort = null;
-const agentHistory = [];
 let liveAudio = null;
 let recording = null;
 let recordingFileId = null;
@@ -208,9 +262,14 @@ async function loadRadios() {
         option.textContent = device.serial ? `${device.name} · ${device.serial}` : device.name;
         radioSelect.append(option);
       }
+      let preferred = "";
+      try {
+        const saved = await api("/api/radio/preference");
+        if (saved && saved.index != null) preferred = String(saved.index);
+      } catch { /* Keep the previous selection when preference is unavailable. */ }
       const keep = openIndex !== null && devices.some((device) => device.index === openIndex)
         ? String(openIndex)
-        : previous;
+        : (preferred || previous);
       if ([...radioSelect.options].some((option) => option.value === keep))
         radioSelect.value = keep;
     }
@@ -305,6 +364,7 @@ function transcriptSource(span) {
   if (kind === "jtty") return "JTTY";
   if (kind === "varac") return "VarAC";
   if (kind === "packet") return "Packet";
+  if (kind === "ribbit") return "Ribbit";
   if (kind === "speech") return "Speech";
   if (kind === "rds") return "RDS";
   if (kind === "note") return "receiver note";
@@ -346,7 +406,7 @@ function renderTranscript(spans) {
   updateTranscriptButton();
   morse.replaceChildren();
   if (spans.length === 0) {
-    morse.textContent = "Morse, FT8, JS8, Olivia, JTTY, VarAC, packet, RDS, and speech appear here.";
+    morse.textContent = "Morse, FT8, JS8, Olivia, JTTY, VarAC, packet, Ribbit, RDS, and speech appear here.";
     return;
   }
 
@@ -355,6 +415,7 @@ function renderTranscript(spans) {
     const block = document.createElement("span");
     block.className = span.kind === "morse" ? "morse"
       : span.kind === "packet" ? "packet"
+      : span.kind === "ribbit" ? "ribbit"
       : span.kind === "ft8" || span.kind === "js8" || span.kind === "olivia" || span.kind === "jtty" || span.kind === "varac" ? "ft8"
       : span.kind === "rds" ? "rds"
       : span.kind === "note" ? "note"
@@ -623,24 +684,6 @@ function paintFoldSummaries() {
     antennaSummary.textContent = `${length}${unit}, vertical`;
   }
 
-  const modelName = document.querySelector("#llm-model").value.trim();
-  const base = document.querySelector("#llm-base").value.trim();
-  let modelText = "Not set";
-  if (modelName) modelText = modelName;
-  else if (base) {
-    try { modelText = new URL(base).host; }
-    catch { modelText = base; }
-  }
-  document.querySelector("#model-summary").textContent = modelText;
-
-  const turns = document.querySelectorAll("#prompt-log .turn");
-  let promptText = "Nothing asked yet";
-  if (turns.length) {
-    const body = turns[turns.length - 1].querySelector("p:last-child")?.textContent.replace(/\s+/g, " ").trim() || "";
-    promptText = body.length > 48 ? `${body.slice(0, 47)}…` : body;
-  }
-  document.querySelector("#prompt-summary").textContent = promptText;
-
   const bandName = band.selectedOptions[0]?.textContent.split(" · ")[0] || "";
   const freq = compactNumber(mhz.value, 6);
   const modeName = mode.selectedOptions[0]?.textContent || "";
@@ -823,7 +866,8 @@ function modeToken(value) {
     varac: "VarAC",
     dmr: "DMR",
     m17: "M17",
-    packet: "PKT"
+    packet: "PKT",
+    ribbit: "Ribbit"
   };
   return names[String(value || "").toLowerCase()] || "Audio";
 }
@@ -1027,23 +1071,7 @@ function downloadFile(file) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-const hearModes = [
-  ["nbfm", "FMNB"],
-  ["wbfm", "FMWB"],
-  ["am", "AM"],
-  ["usb", "SSB USB"],
-  ["lsb", "SSB LSB"],
-  ["raw", "Raw"],
-  ["cw", "CW"],
-  ["ft8", "FT8"],
-  ["js8", "JS8"],
-  ["olivia", "Olivia"],
-  ["jtty", "JTTY"],
-  ["varac", "VarAC"],
-  ["dmr", "DMR"],
-  ["m17", "M17"],
-  ["packet", "Packet (AX.25)"]
-];
+const hearModes = RadioListener.HEAR_MODES;
 let suggestedMode = "nbfm";
 let listeningDmrKey = "";
 let listeningWbfmProgram = "main";
@@ -1063,7 +1091,8 @@ function channelWidthHz(mode) {
     case "nbfm":
     case "dmr":
     case "m17":
-    case "packet": return 12_500;
+    case "packet":
+    case "ribbit": return 12_500;
     case "wbfm": return 200_000;
     case "raw": return 20_000;
     default: return null;
@@ -1101,7 +1130,7 @@ function formatReadout(hz, modeName) {
 }
 
 function modeLabel(value) {
-  return hearModes.find((item) => item[0] === value)?.[1] || modeToken(value);
+  return RadioListener.modeLabel(value) || modeToken(value);
 }
 
 function fillHearModes() {
@@ -1295,87 +1324,24 @@ async function listen(explicitMode) {
 }
 
 function audioChannelsFromHeaders(headers, mode, program) {
-  const raw = Number(headers.get("X-Audio-Channels"));
-  if (Number.isFinite(raw) && raw >= 1)
-    return Math.min(2, Math.max(1, Math.round(raw)));
-  // Broadcast-FM main is always interleaved stereo from the host; never treat it as mono.
-  if (String(mode || "").toLowerCase() === "wbfm" && String(program || "main").toLowerCase() === "main")
-    return 2;
-  return 1;
+  return RadioListener.channelsFromHeaders(headers, mode, program);
 }
 
 async function playPcmStream(body, context, rate, signal, channels = 1) {
-  const ch = Math.max(1, Math.min(2, Math.round(Number(channels)) || 1));
-  const sourceRate = Number(rate) || context.sampleRate || 48000;
-  const playRate = context.sampleRate || sourceRate;
-  const frameBytes = 2 * ch;
-  const reader = body.getReader();
-  let pending = new Uint8Array(0);
-  let nextTime = context.currentTime + 0.15;
-  let played = 0;
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    pending = concatBytes(pending, value);
-    const usable = pending.length - (pending.length % frameBytes);
-    if (usable < frameBytes) continue;
-    const frames = usable / frameBytes;
-    const view = new DataView(pending.buffer, pending.byteOffset, usable);
-    const source = [];
-    for (let c = 0; c < ch; c++) source[c] = new Float32Array(frames);
-    const pcm = recording ? new Int16Array(frames) : null;
-    for (let i = 0; i < frames; i++) {
-      let mix = 0;
-      for (let c = 0; c < ch; c++) {
-        const sample = view.getInt16((i * ch + c) * 2, true);
-        source[c][i] = sample / 32768;
-        mix += sample;
-      }
-      if (pcm) pcm[i] = (mix / ch) | 0;
-    }
-    if (pcm) appendRecording(pcm);
-
-    let buffer;
-    if (Math.abs(playRate - sourceRate) < 1) {
-      buffer = context.createBuffer(ch, frames, playRate);
-      for (let c = 0; c < ch; c++) buffer.copyToChannel(source[c], c);
-    } else {
-      // Resample into the AudioContext clock so pitch/speed stay correct across devices.
-      const outFrames = Math.max(1, Math.round(frames * playRate / sourceRate));
-      buffer = context.createBuffer(ch, outFrames, playRate);
-      for (let c = 0; c < ch; c++) {
-        const input = source[c];
-        const output = buffer.getChannelData(c);
-        for (let i = 0; i < outFrames; i++) {
-          const at = i * (frames - 1) / Math.max(1, outFrames - 1);
-          const i0 = Math.floor(at);
-          const i1 = Math.min(frames - 1, i0 + 1);
-          const frac = at - i0;
-          output[i] = input[i0] * (1 - frac) + input[i1] * frac;
-        }
-      }
-    }
-
-    const node = context.createBufferSource();
-    node.buffer = buffer;
-    node.connect(liveGain || context.destination);
-    const start = Math.max(nextTime, context.currentTime + 0.02);
-    node.start(start);
-    nextTime = start + buffer.duration;
-    played += buffer.duration;
-    liveState.textContent = operatingMode === "camp" && !campActivity
-      ? "Waiting for activity."
-      : `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
-    pending = pending.subarray(usable);
-  }
-}
-
-function concatBytes(left, right) {
-  if (left.length === 0) return right;
-  const merged = new Uint8Array(left.length + right.length);
-  merged.set(left, 0);
-  merged.set(right, left.length);
-  return merged;
+  await RadioListener.playPcmStream(
+    body,
+    context,
+    rate,
+    signal,
+    channels,
+    liveGain,
+    (played, ch) => {
+      liveState.textContent = operatingMode === "camp" && !campActivity
+        ? "Waiting for activity."
+        : `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
+    },
+    recording ? appendRecording : null
+  );
 }
 
 function ensureGain(context) {
@@ -1397,6 +1363,14 @@ function loadVolume() {
   const slider = document.querySelector("#volume");
   if (Number.isFinite(saved) && saved >= 0 && saved <= 100) slider.value = String(saved);
   applyVolume();
+  if (window.DeskPanels?.loadUiPrefs) {
+    DeskPanels.loadUiPrefs().then((prefs) => {
+      if (prefs.volume == null || !Number.isFinite(Number(prefs.volume))) return;
+      slider.value = String(Math.max(0, Math.min(100, Number(prefs.volume))));
+      try { localStorage.setItem("agentic-sdr-volume", slider.value); } catch { /* ignore */ }
+      applyVolume();
+    }).catch(() => {});
+  }
 }
 
 function paintModeSwitch() {
@@ -1612,7 +1586,7 @@ async function playCamp(tune) {
 }
 
 antennaOrientation.addEventListener("change", syncAzimuth);
-for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#camp-freq", "#mode", "#llm-model", "#llm-base"]) {
+for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#camp-freq", "#mode"]) {
   document.querySelector(id).addEventListener("input", paintFoldSummaries);
   document.querySelector(id).addEventListener("change", paintFoldSummaries);
 }
@@ -1739,7 +1713,7 @@ async function stopWork() {
   if (busyPanel?.open) busyPanel.close();
   closePrompt();
   stopLivePlayback();
-  agentAbort?.abort();
+  promptPanel.abort();
   setBusy(false);
   if (operatingMode === "camp") {
     try { await api("/api/camp/pause", { method: "POST" }); } catch { /* The watch also stops when the page disconnects. */ }
@@ -1754,25 +1728,6 @@ window.addEventListener("pagehide", () => {
 });
 document.querySelector("#stop").addEventListener("click", stopWork);
 liveStop.addEventListener("click", stopWork);
-document.querySelector("#llm-save").addEventListener("click", () => {
-  saveModel(false).catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-forget").addEventListener("click", () => {
-  saveModel(true).catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-models-btn").addEventListener("click", () => {
-  listModels().catch((ex) => showError(ex.message));
-});
-document.querySelector("#prompt-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  askModel().catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-ask").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    askModel().catch((ex) => showError(ex.message));
-  }
-});
 document.querySelector("#noaa").addEventListener("click", () => {
   syncTuneFrequency("162.550000");
   mode.value = "nbfm";
@@ -1783,176 +1738,7 @@ restoreAntenna()
   .then(loadBands)
   .then(loadKnownChannels)
   .then(loadRadios)
-  .then(loadModel)
   .catch((ex) => showError(ex.message));
-
-async function loadModel() {
-  const view = await api("/api/llm");
-  document.querySelector("#llm-base").value = view.baseUrl || "";
-  document.querySelector("#llm-model").value = view.model || "";
-  document.querySelector("#llm-key").value = "";
-  document.querySelector("#llm-key").placeholder = view.hasKey
-    ? `Saved (ends ${view.keyHint}). Leave blank to keep it.`
-    : "Optional for a local server";
-  document.querySelector("#llm-note").textContent = view.baseUrl
-    ? `Using ${view.model || "a model"} at ${view.baseUrl}.`
-    : "An instruct model that speaks the OpenAI chat protocol can run the same actions as these buttons. Ask it in the prompt below.";
-  paintFoldSummaries();
-}
-
-async function saveModel(clearKey) {
-  showError("");
-  const view = await api("/api/llm", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      baseUrl: document.querySelector("#llm-base").value,
-      model: document.querySelector("#llm-model").value,
-      apiKey: clearKey ? "" : document.querySelector("#llm-key").value,
-      clearKey
-    })
-  });
-  document.querySelector("#llm-key").value = "";
-  document.querySelector("#llm-key").placeholder = view.hasKey
-    ? `Saved (ends ${view.keyHint}). Leave blank to keep it.`
-    : "Optional for a local server";
-  document.querySelector("#llm-note").textContent = view.baseUrl
-    ? `Saved ${view.model || "the model"} at ${view.baseUrl}.`
-    : "The endpoint was cleared.";
-  paintFoldSummaries();
-}
-
-async function listModels() {
-  showError("");
-  await saveModel(false);
-  const listed = await api("/api/llm/models");
-  const names = listed || [];
-  const datalist = document.querySelector("#llm-models");
-  const picks = document.querySelector("#llm-model-picks");
-  const modelInput = document.querySelector("#llm-model");
-  datalist.innerHTML = "";
-  picks.innerHTML = "";
-  picks.hidden = names.length === 0;
-  for (const name of names) {
-    const option = document.createElement("option");
-    option.value = name;
-    datalist.append(option);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = name;
-    button.classList.toggle("active", modelInput.value === name);
-    button.addEventListener("click", () => {
-      modelInput.value = name;
-      for (const peer of picks.querySelectorAll("button"))
-        peer.classList.toggle("active", peer === button);
-      saveModel(false).catch((ex) => showError(ex.message));
-    });
-    picks.append(button);
-  }
-  if (names.length && !modelInput.value.trim()) {
-    modelInput.value = names[0];
-    picks.querySelector("button")?.classList.add("active");
-    await saveModel(false);
-  }
-  document.querySelector("#llm-note").textContent = names.length
-    ? `Found ${names.length} model${names.length === 1 ? "" : "s"}. Click one to use it.`
-    : "The endpoint listed no models.";
-  paintFoldSummaries();
-}
-
-function addTurn(kind, who, text, steps) {
-  document.querySelector("#prompt-empty").hidden = true;
-  const turn = document.createElement("article");
-  turn.className = `turn ${kind}`;
-  const label = document.createElement("p");
-  label.className = "who";
-  label.textContent = who;
-  turn.append(label);
-  if (steps) {
-    const detail = document.createElement("p");
-    detail.className = "steps";
-    detail.textContent = steps;
-    turn.append(detail);
-  }
-  const body = document.createElement("p");
-  body.textContent = text;
-  turn.append(body);
-  const log = document.querySelector("#prompt-log");
-  log.append(turn);
-  log.scrollTop = log.scrollHeight;
-  paintFoldSummaries();
-  return turn;
-}
-
-async function askModel() {
-  const box = document.querySelector("#llm-ask");
-  const question = box.value.trim();
-  if (!question) return;
-  // Live listen keeps busy=true; prompts are still allowed so you can ask about the transcript.
-  if (busy && !liveAbort) {
-    showError("The radio is busy. Press Stop, then send the prompt again.");
-    return;
-  }
-  if (agentAbort) {
-    showError("The agent is already working on a prompt.");
-    return;
-  }
-  const live = liveAbort !== null;
-  if (!live) setBusy(true);
-  showError("");
-  const asked = addTurn("user", "You", question);
-  const pending = addTurn("agent", "Agent", "Working on it…");
-  asked.scrollIntoView({ block: "nearest" });
-  box.value = "";
-  agentAbort = new AbortController();
-  try {
-    const reply = await api("/api/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: question, history: agentHistory }),
-      signal: agentAbort.signal
-    });
-    agentHistory.push({ role: "user", content: question });
-    agentHistory.push({ role: "assistant", content: reply.answer });
-    while (agentHistory.length > 8) agentHistory.shift();
-    const steps = (reply.actions || []).map((action) => `${action.tool}: ${action.result}`).join("\n");
-    pending.querySelector("p:last-child").textContent = reply.answer;
-    paintFoldSummaries();
-    if (steps) {
-      const detail = document.createElement("p");
-      detail.className = "steps";
-      detail.textContent = steps;
-      pending.querySelector(".who").after(detail);
-    }
-    if (reply.antenna) {
-      antennaUnit.value = "m";
-      antennaLength.value = reply.antenna.lengthMeters;
-      antennaOrientation.value = reply.antenna.orientation;
-      if (reply.antenna.azimuthDegrees != null)
-        antennaAzimuth.value = String(Math.round(reply.antenna.azimuthDegrees));
-      syncAzimuth();
-      antennaNote.textContent = reply.antenna.summary;
-      await loadBands();
-      paintFoldSummaries();
-    }
-    if (reply.scan) renderHits(reply.scan);
-  } catch (ex) {
-    const reason = ex.name === "AbortError" ? "Stopped." : ex.message;
-    pending.querySelector("p:last-child").textContent = reason;
-    paintFoldSummaries();
-    box.value = question;
-    showError(reason);
-  } finally {
-    agentAbort = null;
-    // Keep busy while live audio is still playing; only clear after finite radio work.
-    if (liveAbort) setBusy(true);
-    else {
-      setBusy(false);
-      if (busyPanel?.open) busyPanel.close();
-    }
-    refreshStatus();
-  }
-}
 
 async function restoreAntenna() {
   const advice = await api("/api/antenna");
@@ -1972,6 +1758,10 @@ async function restoreAntenna() {
   paintFoldSummaries();
 }
 function rememberFolds() {
+  if (window.DeskPanels?.rememberFolds) {
+    DeskPanels.rememberFolds(document);
+    return;
+  }
   const folds = document.querySelectorAll("details.fold");
   let saved = {};
   try {
@@ -2030,7 +1820,7 @@ const tips = {
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, and ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}.`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "channel-width": "How wide the demodulator listens for this mode after the radio samples arrive (CW narrow, broadcast FM wide).",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
@@ -2315,8 +2105,11 @@ document.querySelector("#camp-stop").addEventListener("click", () => {
   stopCamping().catch((ex) => showError(ex.message));
 });
 document.querySelector("#volume").addEventListener("input", () => {
-  try { localStorage.setItem("agentic-sdr-volume", document.querySelector("#volume").value); } catch { /* The slider still changes the level for this visit. */ }
+  const value = document.querySelector("#volume").value;
+  try { localStorage.setItem("agentic-sdr-volume", value); } catch { /* The slider still changes the level for this visit. */ }
   applyVolume();
+  if (window.DeskPanels?.saveUiPrefs)
+    DeskPanels.saveUiPrefs({ volume: Number(value) }).catch(() => {});
 });
 document.querySelector("#camp-squelch").addEventListener("input", () => {
   const value = Number(document.querySelector("#camp-squelch").value);

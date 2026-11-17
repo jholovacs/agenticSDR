@@ -1,0 +1,183 @@
+/**
+ * Shared Operator / Antenna / Repeater phone panels.
+ * Relies on page tokens (--ink, --muted, --line, --amber, --green, --danger) when present.
+ */
+
+.sp-panel.fold {
+  /* --desk-gutter: Host sets 20px so these line up with native .fold panels. */
+  margin: 0.9rem var(--desk-gutter, 0px);
+  padding: 0;
+  border: 1px solid var(--line, #3d3226);
+  border-radius: var(--desk-radius, 10px);
+  background: var(--panel, #221c16);
+}
+
+.sp-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  color: var(--ink, #f4ecdf);
+}
+
+.sp-panel > summary::-webkit-details-marker { display: none; }
+.sp-panel > summary::marker { content: ""; }
+.sp-panel > summary::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.sp-panel[open] > summary::before { transform: translateY(0.08rem) rotate(45deg); }
+.sp-panel:not([open]) > :not(summary) { display: none; }
+.sp-panel[open] > summary .fold-aside { display: none; }
+
+.sp-panel .fold-title { font-weight: 600; flex: 1; }
+.sp-panel .fold-aside { color: var(--muted, #b5a48f); font-size: 0.85rem; }
+
+.sp-panel .fold-body {
+  padding: 0 18px 16px;
+  border-top: 1px solid var(--line, #3d3226);
+}
+
+.sp-panel .quiet { margin: 10px 0; color: var(--muted, #b5a48f); }
+.sp-panel .ok { color: var(--green, #c6de7a); }
+.sp-panel .bad-text { color: var(--danger, #e07a62); }
+
+.sp-panel .controls,
+.sp-panel .stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.sp-panel .stack { flex-direction: column; align-items: stretch; }
+.sp-panel .grow { flex: 1; min-width: 10rem; }
+
+.sp-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted, #b5a48f);
+  font-size: 0.85rem;
+}
+
+.sp-panel label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-panel input,
+.sp-panel select,
+.sp-panel textarea,
+.sp-panel button {
+  font: inherit;
+  color: var(--ink, #f4ecdf);
+  background: #1a1511;
+  border: 1px solid var(--line, #3d3226);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.sp-panel textarea { width: 100%; resize: vertical; }
+
+.sp-panel button {
+  background: var(--amber, #e6a04a);
+  color: #2a1c0b;
+  border: 0;
+  cursor: pointer;
+}
+
+.sp-panel button.ghost {
+  background: transparent;
+  color: var(--ink, #f4ecdf);
+  border: 1px solid var(--line, #3d3226);
+}
+
+.sp-panel button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sp-panel .bands {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted, #b5a48f);
+}
+
+.sp-panel .bands:empty { display: none; }
+.sp-panel .bands li { margin: 4px 0; }
+
+.sp-radio-details-dialog {
+  border: 1px solid var(--line, #3d3226);
+  border-radius: 12px;
+  background: var(--panel, #221c16);
+  color: var(--ink, #f4ecdf);
+  padding: 1rem 1.2rem;
+  max-width: min(36rem, 92vw);
+}
+.sp-radio-details-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.sp-radio-details-dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+.sp-radio-details-dialog dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0 0 1rem;
+}
+.sp-radio-details-dialog dt { color: var(--muted, #b5a48f); }
+.sp-radio-details-dialog dd { margin: 0; }
+
+/* Desk switcher — Receiver ↔ mode desks */
+.sp-app-nav {
+  margin: 0 20px 0.75rem;
+  padding: 0.55rem 0.85rem 0.65rem;
+  border: 1px solid var(--line, #3d3226);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel, #221c16) 88%, transparent);
+}
+.sp-app-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.sp-app-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line, #3d3226);
+  color: var(--ink, #f4ecdf);
+  text-decoration: none;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  background: transparent;
+}
+a.sp-app-link:hover {
+  border-color: var(--amber, var(--accent, #c9a227));
+  color: var(--amber, var(--accent, #c9a227));
+}
+.sp-app-link.is-current {
+  background: var(--amber, var(--accent, #c9a227));
+  border-color: transparent;
+  color: #1a140c;
+  font-weight: 600;
+}
+.sp-app-link.is-soon {
+  opacity: 0.45;
+  cursor: default;
+  border-style: dashed;
+}
+.sp-app-nav-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+}

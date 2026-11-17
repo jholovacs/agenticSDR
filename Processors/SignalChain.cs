@@ -16,6 +16,7 @@ public sealed class SignalChain : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Thread[] _workers;
     private readonly PipelineStageInfo[] _info;
+    private int _inflight;
     private bool _disposed;
 
     public SignalChain(IEnumerable<ISignalProcessor> stages)
@@ -74,16 +75,20 @@ public sealed class SignalChain : IDisposable
         return list;
     }
 
-    /// <summary>Wait until queued work is idle (tests / clip listen). Not used on the live radio loop.</summary>
+    /// <summary>
+    /// Wait until queued and in-flight work is idle (tests / clip listen).
+    /// Idle means every stage queue is empty and no worker is inside Process.
+    /// Not used on the live radio loop.
+    /// </summary>
     public async Task WaitIdleAsync(CancellationToken cancellationToken, int settleMs = 50)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            bool busy = _inputs.Any(ch => ch.Reader.Count > 0);
+            bool busy = Volatile.Read(ref _inflight) > 0 || _inputs.Any(ch => ch.Reader.Count > 0);
             if (!busy)
             {
                 await Task.Delay(settleMs, cancellationToken);
-                if (_inputs.All(ch => ch.Reader.Count == 0))
+                if (Volatile.Read(ref _inflight) == 0 && _inputs.All(ch => ch.Reader.Count == 0))
                     return;
             }
             else
@@ -117,31 +122,39 @@ public sealed class SignalChain : IDisposable
                     break;
                 }
 
+                Interlocked.Increment(ref _inflight);
                 SignalProcessResult result;
                 try
                 {
-                    result = processor is IAsyncSignalProcessor asyncProcessor
-                        ? asyncProcessor.ProcessAsync(frame, ct).GetAwaiter().GetResult()
-                        : processor.Process(frame, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception)
-                {
-                    // Keep the chain alive; a bad frame must not kill later stages.
-                    result = SignalProcessResult.Pass(frame);
-                }
+                    try
+                    {
+                        result = processor is IAsyncSignalProcessor asyncProcessor
+                            ? asyncProcessor.ProcessAsync(frame, ct).GetAwaiter().GetResult()
+                            : processor.Process(frame, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                        // Keep the chain alive; a bad frame must not kill later stages.
+                        result = SignalProcessResult.Pass(frame);
+                    }
 
-                foreach (AttributedText text in result.Texts)
-                {
-                    if (!string.IsNullOrWhiteSpace(text.Text))
-                        _results.Writer.TryWrite(text);
-                }
+                    foreach (AttributedText text in result.Texts)
+                    {
+                        if (!string.IsNullOrWhiteSpace(text.Text))
+                            _results.Writer.TryWrite(text);
+                    }
 
-                if (next is not null)
-                    next.TryWrite(result.Frame);
+                    if (next is not null)
+                        next.TryWrite(result.Frame);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _inflight);
+                }
             }
         }
         finally
