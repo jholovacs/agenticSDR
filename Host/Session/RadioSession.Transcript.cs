@@ -1,0 +1,704 @@
+using System.Globalization;
+using System.Numerics;
+using System.Threading.Channels;
+using Microsoft.AspNetCore.Http.Features;
+using AgenticSdr.Dsp;
+using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
+using AgenticSdr.Processors;
+using AgenticSdr.Radio;
+
+namespace AgenticSdr.Host;
+
+public sealed partial class RadioSession
+{
+
+    private void AppendMorse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        text = text.Trim();
+        lock (_statusGate)
+        {
+            string shown = _transcript.Count > 0 && _transcript[^1].Kind == "morse" ? _transcript[^1].Text : "";
+            string grown = TranscriptLog.Grow(shown, _morseWindow, text).Trim();
+            _morseWindow = text;
+            if (grown.Length == 0)
+                return;
+            if (_transcript.Count > 0 && _transcript[^1].Kind == "morse")
+                _transcript[^1] = new TranscriptSpan("morse", grown, "Morse");
+            else
+                _transcript.Add(new TranscriptSpan("morse", grown, "Morse"));
+            PublishTranscript();
+        }
+    }
+
+    private void AppendSpeech(string text) => AppendSpan("speech", text, "Speech");
+
+    private void AppendRds(string text) => AppendSpan("rds", text, "RDS");
+
+    /// <summary>Split a WBFM clip's combined text into RDS lines vs speech.</summary>
+    private void AppendWbfmDecoded(string decoded)
+    {
+        foreach (string raw in decoded.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (raw.StartsWith("RDS ", StringComparison.Ordinal) || raw.StartsWith("Listening for RDS", StringComparison.Ordinal))
+                AppendRds(raw);
+            else if (raw.StartsWith("Speech was not read", StringComparison.Ordinal))
+                AppendNote(raw);
+            else
+                AppendSpeech(raw);
+        }
+    }
+
+    private void AppendFt8(string text) => AppendSpan("ft8", text);
+
+    private void AppendDigi(RadioMode mode, string text)
+    {
+        HookCallsigns();
+        callsigns.PrefetchFromText(text);
+        AppendSpan(CampSchedule.Canonical(mode), callsigns.EnrichText(text));
+    }
+
+    /// <summary>
+    /// Print digimode text as separate timed lines. A whole-slot Format() block used to look stuck
+    /// when the next slot decoded the same CQ (identical text was dropped by AppendSpan) or when
+    /// a slow FT8 search stalled the audio loop so later slots never arrived cleanly.
+    /// </summary>
+    private void AppendDigiLines(RadioMode mode, string formatted, ref bool headerShown)
+    {
+        if (string.IsNullOrWhiteSpace(formatted))
+            return;
+
+        HookCallsigns();
+        callsigns.PrefetchFromText(formatted);
+        string kind = CampSchedule.Canonical(mode);
+        string stamp = DateTime.UtcNow.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        string[] lines = formatted.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        string? pending = null;
+        foreach (string raw in lines)
+        {
+            string line = raw.TrimEnd();
+            if (line.Length == 0)
+                continue;
+
+            bool banner = line is "FT8" or "JS8" or "Olivia" or "JTTY" or "VarAC"
+                || line.StartsWith("FT8 ", StringComparison.Ordinal)
+                || line.StartsWith("JS8 ", StringComparison.Ordinal)
+                || line.StartsWith("Olivia ", StringComparison.Ordinal)
+                || line.StartsWith("JTTY ", StringComparison.Ordinal)
+                || line.StartsWith("VarAC ", StringComparison.Ordinal);
+            if (banner)
+            {
+                FlushDigiLine(kind, ref pending);
+                if (headerShown)
+                    continue;
+                headerShown = true;
+                AppendSpan(kind, line);
+                continue;
+            }
+
+            // Indented explanation stays on the same transcript span as the message above.
+            if (raw.Length > 0 && char.IsWhiteSpace(raw[0]))
+            {
+                string meaning = callsigns.EnrichText(line.TrimStart());
+                if (pending is null)
+                    pending = $"{stamp}  {meaning}";
+                else
+                    pending += "\n           " + meaning;
+                continue;
+            }
+
+            FlushDigiLine(kind, ref pending);
+            pending = $"{stamp}  {callsigns.EnrichText(line)}";
+        }
+
+        FlushDigiLine(kind, ref pending);
+    }
+
+    private void FlushDigiLine(string kind, ref string? pending)
+    {
+        if (pending is null)
+            return;
+        AppendSpan(kind, pending);
+        pending = null;
+    }
+
+    private void HookCallsigns()
+    {
+        if (_callsignHooks || !callsigns.Enabled)
+            return;
+        _callsignHooks = true;
+        callsigns.Resolved += OnCallsignResolved;
+    }
+
+    private void OnCallsignResolved(CallsignInfo info)
+    {
+        string? note = info.Note ?? info.Label;
+        if (!info.Found || string.IsNullOrWhiteSpace(note))
+            return;
+        lock (_statusGate)
+        {
+            if (!_announcedCalls.Add(info.Call))
+                return;
+        }
+
+        AppendNote($"{info.Call} — {note}");
+    }
+
+    private static string FormatDigi(RadioMode mode, float[] audio, int rate) => mode switch
+    {
+        RadioMode.Ft8 => Ft8Decoder.Format(Ft8Decoder.Decode(audio, rate)),
+        RadioMode.Js8 => Js8Decoder.Format(Js8Decoder.Decode(audio, rate)),
+        RadioMode.Olivia => OliviaDecoder.Format(OliviaDecoder.Decode(audio, rate)),
+        RadioMode.Jtty => JttyDecoder.Format(JttyDecoder.Decode(audio, rate)),
+        RadioMode.Varac => XaraMonitor.FormatAudio(audio, rate),
+        _ => ""
+    };
+
+    /// <summary>Clip length. FT8 pads past 15 s; JS8 uses ~32 s so Slow and stacked Fast/Turbo slots fit.</summary>
+    private static int DigiListenSeconds(RadioMode mode) => mode switch
+    {
+        RadioMode.Ft8 => 18,
+        RadioMode.Js8 => 32,
+        RadioMode.Olivia => 10,
+        RadioMode.Jtty => 16,
+        RadioMode.Varac => 20,
+        _ => 15
+    };
+
+    /// <summary>Live digi chop length — the protocol period, not the clip pad.</summary>
+    private static int DigiPeriodSeconds(RadioMode mode) => mode switch
+    {
+        RadioMode.Ft8 => 15,
+        // 30 s is the LCM of Normal (15), Fast (10), Turbo (6), and Slow (30).
+        RadioMode.Js8 => 30,
+        _ => DigiListenSeconds(mode)
+    };
+
+    private void AppendPacket(string text) => AppendSpan("packet", text, "Packet");
+
+    private void AppendRibbit(string text) => AppendSpan("ribbit", text, "Ribbit");
+
+    private void AppendNote(string text) => AppendSpan("note", text, "receiver note");
+
+    private void AppendSpan(string kind, string text, string? source = null)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        text = text.Trim();
+        lock (_statusGate)
+        {
+            if (_transcript.Count > 0 && _transcript[^1].Kind == kind && _transcript[^1].Text == text)
+                return;
+            _transcript.Add(new TranscriptSpan(kind, text, source ?? KindSource(kind)));
+            PublishTranscript();
+        }
+    }
+
+    private static string KindSource(string kind) => kind switch
+    {
+        "morse" => "Morse",
+        "speech" => "Speech",
+        "ft8" => "FT8",
+        "js8" => "JS8",
+        "olivia" => "Olivia",
+        "jtty" => "JTTY",
+        "varac" => "VarAC",
+        "packet" => "Packet",
+        "ribbit" => "Ribbit",
+        "rds" => "RDS",
+        "note" => "receiver note",
+        _ => kind
+    };
+
+    private void PublishTranscript()
+    {
+        const int maxChars = 12_000;
+        int total = _transcript.Sum(span => span.Text.Length + 1);
+        while (_transcript.Count > 1 && total > maxChars)
+        {
+            total -= _transcript[0].Text.Length + 1;
+            _transcript.RemoveAt(0);
+        }
+
+        _liveText = _transcript.Count == 0 ? null : string.Join('\n', _transcript.Select(span => span.Text));
+    }
+
+    /// <summary>
+    /// When the tune is a known channel or calling dial, briefly measure the spectrum and nudge the
+    /// LO so a mistuned dongle still lands on the carrier / digi tone stack.
+    /// </summary>
+    private async Task<double> RefinePublishedTuneAsync(
+        IRadioDevice device,
+        double tuneHz,
+        RadioMode mode,
+        CancellationToken cancellationToken)
+    {
+        if (!Region2BandPlan.TryPublishedStation(tuneHz, mode, out double publishedHz, out RadioMode publishedMode))
+            return tuneHz;
+
+        RadioMode useMode = mode == RadioMode.Unknown ? publishedMode : mode;
+        double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
+        double expectedRf = DialFrequency.ExpectedRfHz(publishedHz, useMode);
+        double captureHz = Math.Clamp(
+            expectedRf + offset,
+            device.Capabilities.MinFrequencyHz,
+            device.Capabilities.MaxFrequencyHz);
+        Capture capture = await CaptureAsync(device, captureHz, 120, cancellationToken);
+        int fft = capture.Samples.Length >= 65_536 ? 16_384 : 8_192;
+        double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, fft);
+        double snapped = DialFrequency.SnapPublishedTuneHz(
+            db, capture.CenterHz, capture.SampleRate, publishedHz, useMode);
+        if (Math.Abs(snapped - publishedHz) >= 1)
+        {
+            SetStatus(
+                "listening",
+                0.5,
+                $"Published channel offset {snapped - publishedHz:+0;-0} Hz — retuning.");
+        }
+
+        return snapped;
+    }
+
+    /// <summary>
+    /// Digimodes are weak multi-tone USB windows above published dials. Speech scan misses that comb, so each dial is probed on its own.
+    /// </summary>
+    private async Task ProbeDigiDialsAsync(
+        IRadioDevice device,
+        HamBand band,
+        List<ScanHit> hits,
+        CancellationToken cancellationToken)
+    {
+        foreach (CallingChannel channel in band.Calling)
+        {
+            if (channel.Mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
+                or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit))
+                continue;
+            if (channel.FrequencyHz < device.Capabilities.MinFrequencyHz
+                || channel.FrequencyHz > device.Capabilities.MaxFrequencyHz)
+                continue;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            string label = CampSchedule.Canonical(channel.Mode).ToUpperInvariant();
+            SetStatus(
+                "scanning",
+                0.92,
+                $"Checking {label} at {channel.FrequencyHz / 1e6:0.000} MHz");
+
+            double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
+            double tune = Math.Clamp(
+                channel.FrequencyHz + offset,
+                device.Capabilities.MinFrequencyHz,
+                device.Capabilities.MaxFrequencyHz);
+            // Fine FFT so narrow digi windows are many bins.
+            Capture capture = await CaptureAsync(device, tune, 350, cancellationToken);
+            int fft = capture.Samples.Length >= 131_072 ? 65_536 : 16_384;
+            double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, fft);
+            Ft8Score score = DigiActivity.Score(
+                channel.Mode,
+                db,
+                capture.CenterHz,
+                capture.SampleRate,
+                channel.FrequencyHz,
+                channel.ToleranceHz);
+            if (!score.Active)
+                continue;
+
+            int existing = hits.FindIndex(hit => NearDigiDial(hit.FrequencyHz, channel.Mode, channel.FrequencyHz, channel.ToleranceHz));
+            double width = channel.Mode switch
+            {
+                RadioMode.Olivia => OliviaDecoder.BandwidthHz,
+                RadioMode.Jtty => JttyDecoder.SpanHz,
+                RadioMode.Varac => XaraMonitor.BandwidthHz,
+                RadioMode.Packet or RadioMode.Ribbit => 12_500,
+                _ => 3_000
+            };
+            var hit = new ScanHit(
+                channel.FrequencyHz,
+                channel.Mode.ToString(),
+                DigiActivity.ActivityConfidence(score),
+                width,
+                Math.Round(score.SnrDb, 1),
+                channel.Name + " (activity)",
+                band.Id);
+            if (existing >= 0)
+                hits[existing] = hit;
+            else
+                hits.Add(hit);
+        }
+    }
+
+    private static bool NearDigiDial(double frequencyHz, RadioMode mode, double dialHz, double toleranceHz)
+    {
+        if (Region2BandPlan.TryDigiDial(frequencyHz, mode, out double matched) && Math.Abs(matched - dialHz) < 1)
+            return true;
+        if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+            return frequencyHz >= dialHz - 500 && frequencyHz <= dialHz + toleranceHz;
+        return Math.Abs(frequencyHz - dialHz) <= toleranceHz;
+    }
+
+    /// <summary>
+    /// Auto mode: measure the spectrum first. A published digi dial (e.g. 7.090 JTTY) is only used when
+    /// the peak still looks digi — AM/LSB voice on the same kHz must not snap to JTTY.
+    /// </summary>
+    private async Task<(RadioMode Mode, double TuneHz, double Confidence, bool DmrFramed)> ResolveAutoModeAsync(
+        IRadioDevice device,
+        double frequencyHz,
+        CancellationToken cancellationToken)
+    {
+        bool nearDigi = Region2BandPlan.TryAnyDigiDial(frequencyHz, out RadioMode digiMode, out double digiDial);
+        Measurement? measured = await MeasureAsync(device, frequencyHz, cancellationToken);
+        if (measured is null)
+        {
+            if (nearDigi)
+                return (digiMode, digiDial, 0.35, false);
+            return (RadioMode.Nbfm, frequencyHz, 0.2, false);
+        }
+
+        BandHint hint = Region2BandPlan.HintAt(measured.Peak.FrequencyHz);
+        Classification classification = ModeClassifier.Classify(measured.Peak, hint);
+        RadioMode mode = classification.Mode == RadioMode.Unknown ? RadioMode.Nbfm : classification.Mode;
+        double confidence = classification.Confidence;
+        double tuneHz = ModeClassifier.CarrierFrequency(measured.Peak, mode);
+        bool dmrFramed = HearsDmr(measured);
+        if (dmrFramed)
+            return (RadioMode.Dmr, tuneHz, 0.9, true);
+
+        // Digi tones often look like USB/CW to the classifier. On a published digi dial,
+        // prefer the dial mode unless the peak is clearly wide voice (AM / NBFM / WBFM).
+        // Packet / Ribbit *are* NBFM-looking — still snap to the published FM-data dial.
+        bool fmDataDial = digiMode is RadioMode.Packet or RadioMode.Ribbit;
+        bool wideVoice = mode is RadioMode.Am or RadioMode.Wbfm
+            || (mode is RadioMode.Nbfm && !fmDataDial);
+        if (nearDigi && (fmDataDial || !wideVoice))
+            return (digiMode, digiDial, Math.Max(confidence, 0.42), false);
+
+        return (mode, tuneHz, confidence, false);
+    }
+
+    private async Task<Measurement?> MeasureAsync(IRadioDevice device, double frequencyHz, CancellationToken cancellationToken, double thresholdDb = 8)
+    {
+        double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
+        double tune = Math.Clamp(frequencyHz + offset, device.Capabilities.MinFrequencyHz, device.Capabilities.MaxFrequencyHz);
+        Capture capture = await CaptureAsync(device, tune, 160, cancellationToken);
+        double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, 8192);
+        bool wide = Region2BandPlan.HintAt(frequencyHz).PreferredMode == RadioMode.Wbfm;
+        List<SpectralPeak> peaks = PeakPicker.Find(
+            db,
+            capture.CenterHz,
+            capture.SampleRate,
+            thresholdDb: thresholdDb,
+            maxBandwidthHz: wide ? 300_000 : 20_000,
+            collapseImages: capture.RealValued,
+            contourDropDb: wide ? 30 : 18,
+            minBandwidthHz: wide ? 40_000 : 0);
+        SpectralPeak? best = null;
+        double bestDistance = double.MaxValue;
+        foreach (SpectralPeak peak in peaks)
+        {
+            double distance = Math.Abs(peak.FrequencyHz - frequencyHz);
+            if (distance < bestDistance)
+            {
+                best = peak;
+                bestDistance = distance;
+            }
+        }
+
+        if (best is null || bestDistance > 150_000)
+            return null;
+        SpectralPeak chosen = capture.DirectSampling ? best with { PossibleImage = true } : best;
+        return new Measurement(chosen, capture.Samples, capture.CenterHz, capture.SampleRate);
+    }
+
+    private async Task<(List<double[]> Frames, bool DirectSampling, double CenterHz, double SampleRate)> CaptureSpectraAsync(
+        IRadioDevice device,
+        double frequencyHz,
+        int dwellMs,
+        Action<int, int> onSlice,
+        CancellationToken cancellationToken)
+    {
+        int sliceMs = HopPlanner.SliceMilliseconds;
+        int slices = Math.Max(1, dwellMs / sliceMs);
+        int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
+        int unit = Math.Max(1, device.ReadAlignment / stride);
+        int samples = Math.Max(unit, (int)(device.SampleRateHz * sliceMs / 1000.0));
+        samples = Math.Max(unit, samples / unit * unit);
+        var buffer = new byte[samples * stride];
+        var frames = new List<double[]>(slices);
+        bool direct = false;
+        double centerHz = frequencyHz;
+        double sampleRate = device.SampleRateHz;
+        var chunk = new byte[Aligned(device, 262_144)];
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            device.Tune(frequencyHz);
+            lock (_statusGate)
+                _directSampling = device.DirectSampling;
+            direct = device.DirectSampling;
+            centerHz = device.CenterFrequencyHz;
+            sampleRate = device.SampleRateHz;
+            var junk = new byte[Aligned(device, 32 * 1024)];
+            device.Read(junk);
+            for (int slice = 0; slice < slices; slice++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                onSlice(slice, slices);
+                int got = 0;
+                while (got + device.ReadAlignment <= buffer.Length)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int ask = Math.Min(chunk.Length, (buffer.Length - got) / device.ReadAlignment * device.ReadAlignment);
+                    byte[] block = ask == chunk.Length ? chunk : new byte[ask];
+                    int n = device.Read(block);
+                    if (n <= 0)
+                        throw new RadioException("The radio returned no samples.");
+                    int copy = Math.Min(n, buffer.Length - got);
+                    Buffer.BlockCopy(block, 0, buffer, got, copy);
+                    got += copy;
+                }
+
+                (Complex[] iq, _) = ToIq(device, buffer);
+                frames.Add(SpectrumAnalyzer.AveragePowerDb(iq, 4096));
+            }
+        }, cancellationToken);
+
+        return (frames, direct, centerHz, sampleRate);
+    }
+
+    private async Task<Capture> CaptureAsync(IRadioDevice device, double frequencyHz, int milliseconds, CancellationToken cancellationToken)
+    {
+        int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
+        int unit = Math.Max(1, device.ReadAlignment / stride);
+        int samples = Math.Max(unit, (int)(device.SampleRateHz * milliseconds / 1000.0));
+        samples = Math.Max(unit, samples / unit * unit);
+        var buffer = new byte[samples * stride];
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            device.Tune(frequencyHz);
+            lock (_statusGate)
+                _directSampling = device.DirectSampling;
+            var junk = new byte[Aligned(device, 32 * 1024)];
+            device.Read(junk);
+            int got = 0;
+            var chunk = new byte[Aligned(device, 262_144)];
+            while (got + device.ReadAlignment <= buffer.Length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int ask = Math.Min(chunk.Length, (buffer.Length - got) / device.ReadAlignment * device.ReadAlignment);
+                byte[] block = ask == chunk.Length ? chunk : new byte[ask];
+                int n = device.Read(block);
+                if (n <= 0)
+                    throw new RadioException("The radio returned no samples.");
+                int copy = Math.Min(n, buffer.Length - got);
+                Buffer.BlockCopy(block, 0, buffer, got, copy);
+                got += copy;
+            }
+        }, cancellationToken);
+
+        (Complex[] iq, bool realValued) = ToIq(device, buffer);
+        return new Capture(iq, device.CenterFrequencyHz, device.SampleRateHz, device.DirectSampling, realValued);
+    }
+
+    private async Task CaptureDemodAsync(
+        IRadioDevice device,
+        double frequencyHz,
+        double seconds,
+        Demodulator demod,
+        RadioMode mode,
+        CancellationToken cancellationToken)
+    {
+        long target = (long)(seconds * device.SampleRateHz);
+        int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
+        var chunk = new byte[Aligned(device, 262_144)];
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            device.Tune(frequencyHz);
+            lock (_statusGate)
+                _directSampling = device.DirectSampling;
+            FocusTuner(device, mode);
+            var junk = new byte[Aligned(device, 32 * 1024)];
+            device.Read(junk);
+            // Align after junk so the first Costas symbols are not clipped by tuner settle.
+            if (mode is RadioMode.Ft8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 15);
+            else if (mode is RadioMode.Js8)
+                AlignDigiSlot(cancellationToken, periodSeconds: 30);
+            // One Hilbert stream for the whole listen — per-chunk FIR resets destroy FT8 Costas.
+            Iq.DirectSamplingState? ds = device.DirectSampling ? new Iq.DirectSamplingState() : null;
+            long got = 0;
+            while (got < target)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int n = device.Read(chunk);
+                if (n <= 0)
+                    throw new RadioException("The radio returned no samples.");
+                int usable = n / stride * stride;
+                (Complex[] iq, _) = ToIq(device, chunk.AsSpan(0, usable), ds);
+                demod.Push(iq);
+                got += iq.Length;
+                SetStatus("listening", 0.35 + 0.6 * Math.Min(1, got / (double)target), $"Receiving {frequencyHz / 1e6:0.000000} MHz");
+            }
+        }, cancellationToken);
+    }
+
+    private static int Aligned(IRadioDevice device, int bytes)
+    {
+        int align = device.ReadAlignment;
+        if (bytes < align)
+            bytes = align;
+        return bytes / align * align;
+    }
+
+    private static (Complex[] Samples, bool RealValued) ToIq(
+        IRadioDevice device,
+        ReadOnlySpan<byte> bytes,
+        Iq.DirectSamplingState? directSampling = null)
+    {
+        if (device.Encoding == SampleEncoding.Cu8)
+            return Iq.Convert(bytes, device.DirectSampling, directSampling);
+
+        int count = bytes.Length / 8;
+        var iq = new Complex[count];
+        for (int i = 0; i < count; i++)
+        {
+            float real = BitConverter.ToSingle(bytes.Slice(i * 8, 4));
+            float imag = BitConverter.ToSingle(bytes.Slice(i * 8 + 4, 4));
+            iq[i] = new Complex(real, imag);
+        }
+
+        return (iq, false);
+    }
+
+    /// <summary>
+    /// Wait until just before the next UTC digimode boundary of <paramref name="periodSeconds"/>.
+    /// <paramref name="earlySeconds"/> leaves room for tuner setup before the exact align.
+    /// </summary>
+    private async Task WaitForDigiSlot(CancellationToken cancellationToken, double periodSeconds, double earlySeconds = 0)
+    {
+        double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % periodSeconds;
+        double untilBoundary = into < 0.15 ? 0 : periodSeconds - into;
+        double wait = Math.Max(0, untilBoundary - Math.Max(0, earlySeconds));
+        if (wait <= 0.05)
+            return;
+
+        var started = DateTime.UtcNow;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            double left = wait - (DateTime.UtcNow - started).TotalSeconds;
+            if (left <= 0.05)
+                break;
+            SetStatus("listening", 0.05 + 0.25 * (1 - Math.Clamp(left / wait, 0, 1)), $"Waiting {Math.Ceiling(left):0} s for the next {periodSeconds:0} s digimode slot.");
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(250, Math.Max(20, left * 1000))), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Block until about 0.45 s before the UTC digimode boundary so capture starts slightly early.
+    /// Starting after the boundary (old behavior) plus USB/tune latency often clipped the first Costas
+    /// array and left Costas sync hits that never CRC — the 28.074 / 14.074 “no translate” failure mode.
+    /// </summary>
+    private static void AlignDigiSlot(CancellationToken cancellationToken, double periodSeconds)
+    {
+        double earlyAt = periodSeconds - 0.45;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % periodSeconds;
+            // Early pad before the boundary, or a few hundred ms after it (do not wait a whole slot).
+            if (into >= earlyAt || into < 0.20)
+                return;
+            int sleepMs = (int)Math.Clamp((earlyAt - into) * 1000.0, 5, 40);
+            Thread.Sleep(sleepMs);
+        }
+    }
+
+    private static string ReadyMessage(RadioMode mode, string? decoded) => mode switch
+    {
+        RadioMode.Cw when string.IsNullOrWhiteSpace(decoded) => "CW clip ready.",
+        RadioMode.Cw => $"CW clip ready: {decoded}",
+        RadioMode.Ft8 when string.IsNullOrWhiteSpace(decoded) => "FT8 clip ready. No messages decoded.",
+        RadioMode.Ft8 => $"FT8 clip ready. {decoded!.Count(ch => ch == '\n') + 1} message(s).",
+        RadioMode.Js8 when string.IsNullOrWhiteSpace(decoded) => "JS8 clip ready. No messages decoded.",
+        RadioMode.Js8 => $"JS8 clip ready. {decoded!.Count(ch => ch == '\n') + 1} message(s).",
+        RadioMode.Olivia when string.IsNullOrWhiteSpace(decoded) => "Olivia clip ready. No text decoded.",
+        RadioMode.Olivia => $"Olivia clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
+        RadioMode.Jtty when string.IsNullOrWhiteSpace(decoded) => "JTTY clip ready. No text decoded.",
+        RadioMode.Jtty => $"JTTY clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
+        RadioMode.Varac when string.IsNullOrWhiteSpace(decoded) => "VarAC clip ready. No text decoded (xara/zara monitor may be missing).",
+        RadioMode.Varac => $"VarAC clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
+        RadioMode.Packet when string.IsNullOrWhiteSpace(decoded) => "Packet clip ready. No frames decoded.",
+        RadioMode.Packet => $"Packet clip ready. {decoded!.Count(ch => ch == '\n') + 1} frame(s).",
+        RadioMode.Ribbit when string.IsNullOrWhiteSpace(decoded) => "Ribbit clip ready. No OFDM comb detected.",
+        RadioMode.Ribbit => $"Ribbit clip ready. {decoded}",
+        _ when SpeechDecoder.IsVoice(mode) && !string.IsNullOrWhiteSpace(decoded) => $"Audio clip ready. {decoded}",
+        _ => "Audio clip ready."
+    };
+
+    private async Task<string> DescribeSourceAsync(double frequencyHz, RadioMode mode, CancellationToken cancellationToken)
+    {
+        string label = Region2BandPlan.SourceLabel(frequencyHz);
+        if (mode != RadioMode.Nbfm || !TryLocation(out double latitude, out double longitude))
+            return label;
+
+        try
+        {
+            string? call = await repeaters.TryFindAsync(frequencyHz, latitude, longitude, cancellationToken);
+            return string.IsNullOrWhiteSpace(call) ? label : $"{call} ({label})";
+        }
+        catch (Exception ex)
+        {
+            log.LogInformation(ex, "Repeater lookup failed.");
+            return label;
+        }
+    }
+
+    private bool TryLocation(out double latitude, out double longitude)
+    {
+        if (options.Latitude is not null && options.Longitude is not null)
+        {
+            latitude = options.Latitude.Value;
+            longitude = options.Longitude.Value;
+            return true;
+        }
+
+        return Maidenhead.TryParse(options.Grid, out latitude, out longitude);
+    }
+
+    private IRadioDevice RequireDevice() =>
+        _device ?? throw new InvalidOperationException("Open the radio first.");
+
+    private CancellationTokenSource Begin(CancellationToken external)
+    {
+        lock (_statusGate)
+        {
+            if (_cancel.IsCancellationRequested)
+            {
+                _cancel.Dispose();
+                _cancel = new CancellationTokenSource();
+            }
+
+            return CancellationTokenSource.CreateLinkedTokenSource(external, _cancel.Token);
+        }
+    }
+
+    private void SetStatus(string phase, double progress, string? message)
+    {
+        lock (_statusGate)
+        {
+            _phase = phase;
+            _progress = progress;
+            _message = message;
+        }
+    }
+
+    /// <summary>One tuned block of I/Q, plus whether direct sampling and a possible mirror image apply.</summary>
+    private sealed record Capture(Complex[] Samples, double CenterHz, double SampleRate, bool DirectSampling, bool RealValued);
+
+    /// <summary>A measured peak together with the samples it was measured in, so a steady local carrier can be told from voice or data.</summary>
+    private sealed record Measurement(SpectralPeak Peak, Complex[] Samples, double CenterHz, double SampleRate);
+}

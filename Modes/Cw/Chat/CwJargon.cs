@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Chat;
 
 /// <summary>
 /// Plain-language help for common CW Q-codes, prosigns, and abbreviations — for RX copy or TX drafts.

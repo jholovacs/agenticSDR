@@ -27,7 +27,8 @@ public enum AmateurMode
     Olivia,
     Jtty,
     Varac,
-    Packet
+    Packet,
+    Ribbit
 }
 
 /// <summary>
@@ -154,7 +155,13 @@ public static class AmateurWords
                 return true;
             case "packet":
             case "aprs":
+            case "ax25":
                 mode = AmateurMode.Packet;
+                return true;
+            case "ribbit":
+            case "rattlegram":
+            case "ori":
+                mode = AmateurMode.Ribbit;
                 return true;
             default:
                 return false;
@@ -181,6 +188,7 @@ public static class AmateurWords
         AmateurMode.Jtty => "JTTY",
         AmateurMode.Varac => "VarAC",
         AmateurMode.Packet => "packet",
+        AmateurMode.Ribbit => "Ribbit",
         _ => mode.ToString()
     };
 

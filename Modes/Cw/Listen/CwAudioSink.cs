@@ -1,4 +1,4 @@
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Listen;
 
 /// <summary>
 /// One live PCM sink for the open page — same pattern as Host <c>/api/live</c>:

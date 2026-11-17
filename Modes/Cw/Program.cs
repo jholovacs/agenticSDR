@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using AgenticSdr.Cw;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:5091");

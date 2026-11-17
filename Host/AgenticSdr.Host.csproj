@@ -5,6 +5,7 @@
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
     <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
     <ProjectReference Include="..\Privilege\AgenticSdr.Privilege.csproj" />
+    <ProjectReference Include="..\Shared\AgenticSdr.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,7 +33,7 @@
 
   <!-- Shared UI: radio listener and operator panels. -->
   <Target Name="CopySharedUi" BeforeTargets="Build;ResolveProjectStaticWebAssets">
-    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css;..\Ui\station-panels.js;..\Ui\station-panels.css;..\Ui\agent-panels.js;..\Ui\agent-panels.css"
+    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css;..\Ui\desk-panels.js;..\Ui\desk-panels.css;..\Ui\agent-panels.js;..\Ui\agent-panels.css"
           DestinationFolder="wwwroot"
           SkipUnchangedFiles="true" />
   </Target>

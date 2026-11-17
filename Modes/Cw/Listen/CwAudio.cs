@@ -1,6 +1,6 @@
 using AgenticSdr.Dsp;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Listen;
 
 /// <summary>CW local preview and baseband encoding. Cap is 18 WPM.</summary>
 public static class CwAudio

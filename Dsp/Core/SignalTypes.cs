@@ -50,6 +50,12 @@ public enum RadioMode
     /// <summary>1200-baud AX.25 AFSK packet radio / APRS on VHF or UHF.</summary>
     Packet,
 
+    /// <summary>
+    /// Ribbit (ORI) OFDM text messaging over FM/SSB audio — smartphone HT messaging.
+    /// Identification looks for the ~2 kHz OFDM comb; full message decode is best-effort.
+    /// </summary>
+    Ribbit,
+
     /// <summary>Wide discriminator audio, without the voice filter or de-emphasis.</summary>
     Raw
 }

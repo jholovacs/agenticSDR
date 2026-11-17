@@ -1,4 +1,4 @@
-/* Shared radio listener — used by Host and Station. */
+/* Shared radio listener — used by Host and mode desks. */
 .rl-pipeline-stages {
   list-style: none;
   display: flex;
@@ -66,6 +66,7 @@
 .rl-decoded .jtty,
 .rl-decoded .varac { color: #7dd3c0; }
 .rl-decoded .packet { color: #7eb8e8; }
+.rl-decoded .ribbit { color: #9ad4a8; }
 .rl-decoded .rds { color: #c4b5fd; }
 
 .rl-radio-status {

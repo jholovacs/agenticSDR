@@ -1,7 +1,7 @@
 using AgenticSdr.Privilege;
 using AgenticSdr.Radio;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Transmit;
 
 public sealed record CwTransmitRequest(
     string Text,

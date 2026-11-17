@@ -1,7 +1,8 @@
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Radio;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Listen;
 
 /// <summary>USB radio held by the CW desk. Preference is shared with Host via <see cref="RadioPreferenceStore"/>.</summary>
 public sealed class CwRadioHolder : IDisposable

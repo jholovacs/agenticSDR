@@ -1,4 +1,4 @@
-namespace AgenticSdr.Privilege;
+namespace AgenticSdr.Shared;
 
 /// <summary>
 /// User-scoped files shared by Host and every mode desk (operator, antenna, fold prefs).

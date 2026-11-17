@@ -147,7 +147,7 @@
    * options: apiBase, onError, onSnapshot(snapshot), open
    */
   function mountOperator(root, options = {}) {
-    if (!root) throw new Error("StationPanels.mountOperator needs a root element.");
+    if (!root) throw new Error("DeskPanels.mountOperator needs a root element.");
     const client = createClient(options);
     const open = options.open !== false;
     root.innerHTML = `
@@ -263,7 +263,7 @@
    * options: apiBase, onError, open, aside (optional element for fold summary)
    */
   function mountAntenna(root, options = {}) {
-    if (!root) throw new Error("StationPanels.mountAntenna needs a root element.");
+    if (!root) throw new Error("DeskPanels.mountAntenna needs a root element.");
     const client = createClient(options);
     const open = options.open !== false;
     root.innerHTML = `
@@ -412,7 +412,7 @@
    * options: apiBase, onError, open, enableDraft (default true), onHeld(), draftPlaceholder()
    */
   function mountRepeater(root, options = {}) {
-    if (!root) throw new Error("StationPanels.mountRepeater needs a root element.");
+    if (!root) throw new Error("DeskPanels.mountRepeater needs a root element.");
     const client = createClient(options);
     const open = options.open !== false;
     const enableDraft = options.enableDraft !== false;
@@ -869,7 +869,7 @@
    * beforeClose(): return false / Promise&lt;false&gt; to cancel Stop radio
    */
   function mountRadio(root, options = {}) {
-    if (!root) throw new Error("StationPanels.mountRadio needs a root element.");
+    if (!root) throw new Error("DeskPanels.mountRadio needs a root element.");
     const client = createClient(options);
     const open = options.open !== false;
     const ownEvents = options.ownEvents !== false;
@@ -1140,7 +1140,76 @@
     };
   }
 
-  window.StationPanels = {
+  /**
+   * Shared desk switcher: Receiver + mode desks on their loopback ports.
+   * Fetches /api/apps when present; otherwise uses the built-in catalog.
+   */
+  const FALLBACK_APPS = [
+    { id: "receiver", name: "Receiver", url: "http://127.0.0.1:5088/", kind: "receive", available: true, blurb: "Explore and Camp — receive only" },
+    { id: "cw", name: "CW", url: "http://127.0.0.1:5091/", kind: "mode", available: true, blurb: "Morse desk — listen + experimental transmit" },
+    { id: "ft8", name: "FT8", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" },
+    { id: "js8", name: "JS8", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" },
+    { id: "olivia", name: "Olivia", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" },
+    { id: "jtty", name: "JTTY", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" },
+    { id: "packet", name: "Packet", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" },
+    { id: "ribbit", name: "Ribbit", url: "", kind: "mode", available: false, blurb: "Mode library ready — desk follows CW" }
+  ];
+
+  function mountAppNav(root, options = {}) {
+    if (!root) throw new Error("DeskPanels.mountAppNav needs a root element.");
+    const current = String(options.current || "").toLowerCase();
+    const client = createClient({ ...options, onError: () => {} });
+
+    root.classList.add("sp-app-nav");
+    root.setAttribute("aria-label", "Agentic SDR apps");
+    root.innerHTML = `
+      <div class="sp-app-nav-row" role="list"></div>
+      <p class="sp-app-nav-note quiet">Each app is its own process. Only one should hold the USB radio at a time.</p>
+    `;
+    const row = q(root, ".sp-app-nav-row");
+
+    function paint(apps, currentId) {
+      const list = Array.isArray(apps) && apps.length ? apps : FALLBACK_APPS;
+      const here = String(currentId || current || "").toLowerCase();
+      row.replaceChildren();
+      for (const app of list) {
+        const id = String(app.id || "").toLowerCase();
+        const available = !!app.available && !!app.url;
+        const isCurrent = id === here || !!app.current;
+        const el = document.createElement(available && !isCurrent ? "a" : "span");
+        el.className = "sp-app-link";
+        el.setAttribute("role", "listitem");
+        el.dataset.id = id;
+        if (isCurrent) {
+          el.classList.add("is-current");
+          el.setAttribute("aria-current", "page");
+        }
+        if (!available) {
+          el.classList.add("is-soon");
+          el.title = app.blurb || "Desk not available yet";
+        } else {
+          el.title = app.blurb || app.name || id;
+        }
+        if (available && !isCurrent) {
+          el.href = app.url;
+        }
+        el.textContent = app.name || id;
+        row.append(el);
+      }
+    }
+
+    paint(FALLBACK_APPS, current);
+    client.get("/api/apps", { quiet: true }).then((body) => {
+      if (!body) return;
+      paint(body.apps, body.current || current);
+    });
+
+    return { refresh: () => client.get("/api/apps", { quiet: true }).then((body) => {
+      if (body) paint(body.apps, body.current || current);
+    }) };
+  }
+
+  window.DeskPanels = {
     compactNumber,
     licenseSelectValue,
     licenseLabel,
@@ -1148,6 +1217,7 @@
     loadUiPrefs,
     saveUiPrefs,
     rememberFolds,
+    mountAppNav,
     mountOperator,
     mountAntenna,
     mountRadio,

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace AgenticSdr.Privilege;
+namespace AgenticSdr.Shared;
 
 /// <summary>
 /// The antenna the user described. Length is stored in meters. Orientation is "vertical" or "horizontal".

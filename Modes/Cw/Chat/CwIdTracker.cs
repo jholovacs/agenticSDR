@@ -1,6 +1,6 @@
 using AgenticSdr.Privilege;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Chat;
 
 /// <summary>
 /// Part 97-style CW identification: callsign at least every 10 minutes, and on sign-off.

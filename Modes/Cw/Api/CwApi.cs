@@ -1,13 +1,16 @@
 using System.Globalization;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Radio;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Api;
 
 public static class CwApi
 {
     public static void Map(WebApplication app)
     {
+        app.MapGet("/api/apps", () => Results.Ok(DeskCatalog.Payload(DeskCatalog.CwId)));
+
         app.MapGet("/api/operator", (OperatorSession session) =>
             Results.Ok(OperatorPayload(session.Current)));
 

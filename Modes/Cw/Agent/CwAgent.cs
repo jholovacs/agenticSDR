@@ -3,8 +3,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Agent;
 
 public sealed record CwAgentAction(string Tool, string Arguments, string Result);
 

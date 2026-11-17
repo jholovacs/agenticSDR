@@ -1,4 +1,4 @@
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Chat;
 
 public sealed record ChatMessage(string Id, string Direction, string Text, DateTimeOffset At);
 

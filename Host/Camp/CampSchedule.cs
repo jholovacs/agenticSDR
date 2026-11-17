@@ -202,6 +202,7 @@ public static class CampSchedule
         RadioMode.Dmr => "dmr",
         RadioMode.M17 => "m17",
         RadioMode.Packet => "packet",
+        RadioMode.Ribbit => "ribbit",
         RadioMode.Raw => "raw",
         _ => "nbfm"
     };

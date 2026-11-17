@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using Whisper.net;
 using Whisper.net.Ggml;
 

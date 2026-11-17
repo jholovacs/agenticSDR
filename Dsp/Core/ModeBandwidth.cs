@@ -17,7 +17,8 @@ public static class ModeBandwidth
         RadioMode.Jtty => new Pass(100, 2_700, 500, 250),
         RadioMode.Varac => new Pass(400, 3_000, 2_300, 1_000),
         RadioMode.Am => new Pass(4_000, 12_000, 10_000, 10_000),
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet => new Pass(2_000, 16_000, 12_500, 12_500),
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
+            new Pass(2_000, 16_000, 12_500, 12_500),
         RadioMode.Wbfm => new Pass(50_000, 250_000, 200_000, 200_000),
         RadioMode.Raw => new Pass(4_000, 40_000, 20_000, 12_500),
         _ => null

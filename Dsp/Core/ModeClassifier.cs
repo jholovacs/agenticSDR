@@ -36,6 +36,17 @@ public static class ModeClassifier
             mode = RadioMode.Varac;
             confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
         }
+        // Packet / Ribbit ride NBFM-looking channels on VHF/UHF — prefer the dial over generic FM.
+        else if (hint?.PreferredMode == RadioMode.Packet && bw is > 4_500 and <= 20_000 && peak.SnrDb >= 0)
+        {
+            mode = RadioMode.Packet;
+            confidence = peak.SnrDb >= 6 ? 0.52 : 0.44;
+        }
+        else if (hint?.PreferredMode == RadioMode.Ribbit && bw is > 4_500 and <= 20_000 && peak.SnrDb >= 0)
+        {
+            mode = RadioMode.Ribbit;
+            confidence = peak.SnrDb >= 6 ? 0.50 : 0.42;
+        }
         else if (bw < 1_000 && peak.SnrDb >= 8)
         {
             mode = RadioMode.Cw;
@@ -88,7 +99,8 @@ public static class ModeClassifier
             confidence = 0.4;
         }
 
-        bool digiMode = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+        bool digiMode = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
+            or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit;
         if (hint is not null && hint.PreferredMode == mode && mode != RadioMode.Unknown && !digiMode)
             confidence = Math.Min(0.95, confidence + 0.1);
         else if (hint is not null && hint.PreferredMode == mode && digiMode)
@@ -131,8 +143,9 @@ public static class ModeClassifier
             "dmr" => RadioMode.Dmr,
             "m17" => RadioMode.M17,
             "packet" or "ax25" or "aprs" or "afsk" or "pkt" => RadioMode.Packet,
+            "ribbit" or "rattlegram" or "ori" => RadioMode.Ribbit,
             "raw" => RadioMode.Raw,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, wbfm, dmr, m17, packet, or raw.")
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, wbfm, dmr, m17, packet, ribbit, or raw.")
         };
     }
 }

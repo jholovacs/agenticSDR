@@ -87,6 +87,7 @@ public static class Part97
             AmateurMode.Am => (frequencyHz - AmHalfHz, frequencyHz + AmHalfHz),
             AmateurMode.Nbfm => (frequencyHz - FmHalfHz, frequencyHz + FmHalfHz),
             AmateurMode.Packet when frequencyHz >= 30_000_000 => (frequencyHz - FmHalfHz, frequencyHz + FmHalfHz),
+            AmateurMode.Ribbit when frequencyHz >= 30_000_000 => (frequencyHz - FmHalfHz, frequencyHz + FmHalfHz),
             _ => (frequencyHz, frequencyHz + SidebandHz)
         };
     }

@@ -1,4 +1,6 @@
-StationPanels.mountRadio(document.getElementById("radio-host"), {
+DeskPanels.mountAppNav(document.getElementById("app-nav"), { current: "receiver" });
+
+DeskPanels.mountRadio(document.getElementById("radio-host"), {
   apiBase: "",
   ownEvents: false,
   open: true
@@ -362,6 +364,7 @@ function transcriptSource(span) {
   if (kind === "jtty") return "JTTY";
   if (kind === "varac") return "VarAC";
   if (kind === "packet") return "Packet";
+  if (kind === "ribbit") return "Ribbit";
   if (kind === "speech") return "Speech";
   if (kind === "rds") return "RDS";
   if (kind === "note") return "receiver note";
@@ -403,7 +406,7 @@ function renderTranscript(spans) {
   updateTranscriptButton();
   morse.replaceChildren();
   if (spans.length === 0) {
-    morse.textContent = "Morse, FT8, JS8, Olivia, JTTY, VarAC, packet, RDS, and speech appear here.";
+    morse.textContent = "Morse, FT8, JS8, Olivia, JTTY, VarAC, packet, Ribbit, RDS, and speech appear here.";
     return;
   }
 
@@ -412,6 +415,7 @@ function renderTranscript(spans) {
     const block = document.createElement("span");
     block.className = span.kind === "morse" ? "morse"
       : span.kind === "packet" ? "packet"
+      : span.kind === "ribbit" ? "ribbit"
       : span.kind === "ft8" || span.kind === "js8" || span.kind === "olivia" || span.kind === "jtty" || span.kind === "varac" ? "ft8"
       : span.kind === "rds" ? "rds"
       : span.kind === "note" ? "note"
@@ -862,7 +866,8 @@ function modeToken(value) {
     varac: "VarAC",
     dmr: "DMR",
     m17: "M17",
-    packet: "PKT"
+    packet: "PKT",
+    ribbit: "Ribbit"
   };
   return names[String(value || "").toLowerCase()] || "Audio";
 }
@@ -1086,7 +1091,8 @@ function channelWidthHz(mode) {
     case "nbfm":
     case "dmr":
     case "m17":
-    case "packet": return 12_500;
+    case "packet":
+    case "ribbit": return 12_500;
     case "wbfm": return 200_000;
     case "raw": return 20_000;
     default: return null;
@@ -1357,8 +1363,8 @@ function loadVolume() {
   const slider = document.querySelector("#volume");
   if (Number.isFinite(saved) && saved >= 0 && saved <= 100) slider.value = String(saved);
   applyVolume();
-  if (window.StationPanels?.loadUiPrefs) {
-    StationPanels.loadUiPrefs().then((prefs) => {
+  if (window.DeskPanels?.loadUiPrefs) {
+    DeskPanels.loadUiPrefs().then((prefs) => {
       if (prefs.volume == null || !Number.isFinite(Number(prefs.volume))) return;
       slider.value = String(Math.max(0, Math.min(100, Number(prefs.volume))));
       try { localStorage.setItem("agentic-sdr-volume", slider.value); } catch { /* ignore */ }
@@ -1752,8 +1758,8 @@ async function restoreAntenna() {
   paintFoldSummaries();
 }
 function rememberFolds() {
-  if (window.StationPanels?.rememberFolds) {
-    StationPanels.rememberFolds(document);
+  if (window.DeskPanels?.rememberFolds) {
+    DeskPanels.rememberFolds(document);
     return;
   }
   const folds = document.querySelectorAll("details.fold");
@@ -1814,7 +1820,7 @@ const tips = {
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, and ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}.`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "channel-width": "How wide the demodulator listens for this mode after the radio samples arrive (CW narrow, broadcast FM wide).",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
@@ -2102,8 +2108,8 @@ document.querySelector("#volume").addEventListener("input", () => {
   const value = document.querySelector("#volume").value;
   try { localStorage.setItem("agentic-sdr-volume", value); } catch { /* The slider still changes the level for this visit. */ }
   applyVolume();
-  if (window.StationPanels?.saveUiPrefs)
-    StationPanels.saveUiPrefs({ volume: Number(value) }).catch(() => {});
+  if (window.DeskPanels?.saveUiPrefs)
+    DeskPanels.saveUiPrefs({ volume: Number(value) }).catch(() => {});
 });
 document.querySelector("#camp-squelch").addEventListener("input", () => {
   const value = Number(document.querySelector("#camp-squelch").value);

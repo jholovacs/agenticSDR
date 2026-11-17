@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AgenticSdr.Shared;
 
 namespace AgenticSdr.Privilege;
 

@@ -48,6 +48,16 @@ public static class DigiActivity
                 JttyDecoder.SpanHz * 1.5,
                 minHotBins: 2,
                 aboveNoiseDb: 3.0),
+            // Packet / Ribbit occupy an NBFM channel around the published dial.
+            RadioMode.Packet or RadioMode.Ribbit => ScoreWindow(
+                powerDb,
+                centerHz,
+                sampleRate,
+                dialHz - Math.Max(toleranceHz, 6_000),
+                dialHz + Math.Max(toleranceHz, 6_000),
+                minHotBins: 6,
+                minClusters: 1,
+                aboveNoiseDb: 3.0),
             _ => new Ft8Score(false, -40, 0, 0, 0)
         };
     }

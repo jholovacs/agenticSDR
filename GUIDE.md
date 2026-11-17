@@ -1,6 +1,6 @@
 # A beginner’s guide to this receiver
 
-This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet/APRS, M17, RDS, and speech are also written out as text. DMR prints signaling metadata, not proprietary voice.
+This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet/APRS, Ribbit, M17, RDS, and speech are also written out as text. DMR prints signaling metadata, not proprietary voice.
 
 You and an AI share one radio. The web page at http://127.0.0.1:5088, an instruct model you configure, and the tools in Cursor or Antigravity talk to the same session. Only one of them can tune or listen at a time, because a USB radio has one input.
 
@@ -14,7 +14,7 @@ Unfamiliar words are defined under **Words** below. On the page, hover a control
 4. Enter the antenna, or press **Guess from signals**. Length can be meters or feet. **Vertical** means the wire stands up. **Horizontal** means the wire runs sideways, and **axis toward ° true** is the compass direction one end points. 0° is true north, 90° is east, 180° is south, 270° is west. A guess listens at several spots and takes the strongest part of the dial as the antenna’s natural frequency. The receiver’s own noise at the bottom of the dial, and a broadcast band full of stations, are left out of that choice. A vertical is a quarter of that wave. A horizontal wire would be twice as long. Strength does not show which way the wire points, so a close guess is called vertical and you can correct it.
 5. Press **Use this antenna**. Bands the antenna can hear move to the top and are marked **best**. The closest match is selected for you.
 6. Confirm the radio hears something with a **known channel** before you learn to scan (next section).
-7. In Explore: press **Scan band**. The table fills with strong signals. Press **Listen** on a row, or type a frequency and mode yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop**. Morse text updates about once a second. FT8 and JS8 gather one 15-second turn, then print messages while the next turn plays. Olivia, JTTY, VarAC, Packet, and M17 print when a decode succeeds.
+7. In Explore: press **Scan band**. The table fills with strong signals. Press **Listen** on a row, or type a frequency and mode yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop**. Morse text updates about once a second. FT8 and JS8 gather one 15-second turn, then print messages while the next turn plays. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode succeeds.
 
 ### Explore vs Camp
 
@@ -62,7 +62,7 @@ One pass looks like this:
 2. **Read.** It fills a buffer with samples. On the NESDR those samples are unsigned 8-bit I/Q. Other radios, opened through SoapySDR or LimeSuiteNG, arrive as complex floats and are converted to the same shape.
 3. **Spectrum.** A Fourier transform shows how much energy sits at each frequency near the center. Peaks that stand well above the noise are kept.
 4. **Guess.** Bandwidth, shape, and the band plan suggest a mode: voice, Morse, broadcast FM, digimode dials, and so on.
-5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately (in Explore, or in Camp when the squelch opens). CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 and JS8 are read as text at the end of each 15-second turn. Olivia, JTTY, VarAC, Packet, and M17 print when a decode lands. Voice clips can also be transcribed with a small English speech model.
+5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately (in Explore, or in Camp when the squelch opens). CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 and JS8 are read as text at the end of each 15-second turn. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode lands. Voice clips can also be transcribed with a small English speech model.
 
 A scan watches the band for at least 15 seconds. Where the band is wider than one snapshot, the radio hops, and each stop lasts at least a few seconds. A conversation is kept when the energy arrives as a burst, a pause, and another burst, or as one transmission that starts and stops. A station that stays on, such as weather radio, is kept when it stands clearly above the noise. Each mode is measured at its own width: Morse a few hundred hertz, sideband voice about 2.7 kHz, AM about 10 kHz, narrow FM about 12.5 kHz, and broadcast FM about 200 kHz. A phone segment is also watched for Morse, because a keyed signal can share that channel with voice. Hops overlap so a signal hiding in the hole at the center of one hop is visible in a neighbor.
 
@@ -93,7 +93,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 | Explore vs Camp, schedule, squelch | `CampBook`, `CampWatch`, `CampSchedule` |
 | Finding peaks | `PeakPicker` and `SpectrumAnalyzer` |
 | Guessing the mode | `ModeClassifier` |
-| Audio and text | `Demodulator`, `WbfmMux` / `RdsDecoder`, `MorseDecoder`, `Ft8Decoder`, `Js8Decoder`, `OliviaDecoder`, `JttyDecoder`, `XaraMonitor`, `M17Reader`, `PacketDecoder`, `SpeechDecoder` |
+| Audio and text | `Demodulator`, `WbfmMux` / `RdsDecoder`, `MorseDecoder`, `Ft8Decoder`, `Js8Decoder`, `OliviaDecoder`, `JttyDecoder`, `XaraMonitor`, `M17Reader`, `PacketDecoder`, `RibbitDecoder`, `SpeechDecoder` |
 | The page and the AI tools | `WebApi`, `SdrTools`, `InstructAgent` |
 
 `Radio` talks to hardware. `Dsp` is the math and does not know which dongle you own. `Host` is the page, the session, and the AI tools. `Tests` checks the math and, when the NESDR is plugged in, that the radio is not silent.
@@ -218,7 +218,9 @@ Each decoded FT8 line shows strength and tone pitch beside the compact message, 
 
 **VarAC.** Keyboard chat and messaging that rides on the VARA HF modem. This program tunes published VarAC USB dials (for example 14.105 MHz), looks for occupancy on scan, and decodes with the bundled MIT **xaramonitor** library (xara’s passive HF monitor, vendored under `native/xaramonitor`). Rebuild that DLL with Rust if you change it. An external `xara-monitor` binary is only a fallback. VARA is ARQ: a packet either decodes completely or not at all. Occupancy without a full packet prints a short status line, not empty silence.
 
-**Packet (AX.25).** 1200 baud AFSK packet and APRS-style frames. Decoded addresses and payloads print in the text pane when the tones are clean. Amateur APRS watering holes (for example around 144.390 MHz in much of North America) are in the band plan as source labels.
+**Packet (AX.25).** 1200 baud AFSK packet and APRS-style frames. Decoded addresses and payloads print in the text pane when the tones are clean. Amateur APRS watering holes (144.390 MHz, ISS 145.825 MHz, 70 cm 445.925 MHz in much of North America) are in the band plan. Auto and scan treat those dials as Packet even when the peak looks like ordinary NBFM.
+
+**Ribbit (ORI / Rattlegram).** OFDM text messaging over FM or SSB audio (~256 carriers at 6.25 Hz around 1500 Hz). The receiver identifies the OFDM comb and prints occupancy when you listen in Ribbit mode; while on NBFM or Packet it can note a Ribbit-looking signal. Full polar-coded message text still needs the native Ribbit/Rattlegram modem — identification and the decode pipeline are wired today.
 
 **M17.** An open digital voice mode. When `m17voice.dll` is present, framed Codec2 speech is played and callsign / link notes can appear in the text pane. Without that native library, M17 is not decoded.
 
@@ -236,4 +238,4 @@ Each decoded FT8 line shows strength and tone pitch beside the compact message, 
 
 ## What this program will not do
 
-It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec (signaling metadata is allowed). It does not ship EA5HVK’s proprietary VARA binary; VarAC decode uses the MIT xara monitor built into `xaramonitor.dll`. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen for Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet, M17 notes, RDS, speech, and DMR signaling. Speech uses a small English model downloaded once into `models/`.
+It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec (signaling metadata is allowed). It does not ship EA5HVK’s proprietary VARA binary; VarAC decode uses the MIT xara monitor built into `xaramonitor.dll`. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen for Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet, Ribbit OFDM notes, M17 notes, RDS, speech, and DMR signaling. Speech uses a small English model downloaded once into `models/`.

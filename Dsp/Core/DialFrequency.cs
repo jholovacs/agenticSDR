@@ -154,7 +154,7 @@ public static class DialFrequency
     {
         RadioMode.Wbfm => 75_000,
         RadioMode.Am => 5_000,
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet => 5_000,
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit => 5_000,
         RadioMode.Cw => DefaultSearchHz,
         RadioMode.Usb or RadioMode.Lsb => 1_000,
         RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac => DefaultSearchHz,

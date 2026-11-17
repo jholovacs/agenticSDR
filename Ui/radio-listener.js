@@ -18,7 +18,8 @@
     ["varac", "VarAC"],
     ["dmr", "DMR"],
     ["m17", "M17"],
-    ["packet", "Packet (AX.25)"]
+    ["packet", "Packet (AX.25)"],
+    ["ribbit", "Ribbit"]
   ];
 
   const PRESETS = [
@@ -268,7 +269,7 @@
       lines.push(`<span class="${kind}">${escapeHtml(row.text)}</span>`
         + (row.source ? `<span class="src">${escapeHtml(row.source)}</span>` : ""));
     }
-    el.innerHTML = lines.join("\n") || "Morse, FT8, speech, and packet appear here.";
+    el.innerHTML = lines.join("\n") || "Morse, FT8, speech, packet, and Ribbit appear here.";
   }
 
   /**
@@ -658,7 +659,7 @@
   }
 
   /**
-   * Render a Station-style receive panel into root, then connect it.
+   * Render a desk-style receive panel into root, then connect it.
    */
   function mount(root, options = {}) {
     if (!root) throw new Error("RadioListener.mount needs a root element.");
@@ -727,7 +728,7 @@
         <button type="button" class="ghost rl-pipeline-reset">Reset to mode default</button>
       </div>
       <h3 class="rl-heading">Decoded text</h3>
-      <pre class="rl-decoded">Morse, FT8, speech, and packet appear here.</pre>
+      <pre class="rl-decoded">Morse, FT8, speech, packet, and Ribbit appear here.</pre>
     `;
 
     const q = (sel) => root.querySelector(sel);

@@ -2,7 +2,7 @@ using System.Numerics;
 using AgenticSdr.Dsp;
 using AgenticSdr.Radio;
 
-namespace AgenticSdr.Cw;
+namespace AgenticSdr.Cw.Listen;
 
 /// <summary>
 /// While the CW desk is not transmitting, tune the open radio, stream demodulated audio

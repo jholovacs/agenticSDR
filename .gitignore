@@ -2,15 +2,21 @@ bin/
 obj/
 .tmp/
 
-# Copied from Ui/ on build for Host and Station wwwroot.
+# Copied from Ui/ on build into app wwwroots.
 Host/wwwroot/radio-listener.js
 Host/wwwroot/radio-listener.css
-Host/wwwroot/station-panels.js
-Host/wwwroot/station-panels.css
-Station/wwwroot/radio-listener.js
-Station/wwwroot/radio-listener.css
-Station/wwwroot/station-panels.js
-Station/wwwroot/station-panels.css
+Host/wwwroot/desk-panels.js
+Host/wwwroot/desk-panels.css
+Host/wwwroot/agent-panels.js
+Host/wwwroot/agent-panels.css
+Modes/*/wwwroot/radio-listener.js
+Modes/*/wwwroot/radio-listener.css
+Modes/*/wwwroot/desk-panels.js
+Modes/*/wwwroot/desk-panels.css
+Modes/*/wwwroot/agent-panels.js
+Modes/*/wwwroot/agent-panels.css
+Modes/*/wwwroot/station-panels.js
+Modes/*/wwwroot/station-panels.css
 packaging/stage/
 packaging/out/
 *.user

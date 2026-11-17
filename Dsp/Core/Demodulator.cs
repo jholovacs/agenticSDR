@@ -40,7 +40,7 @@ public sealed class Demodulator
     /// </summary>
     public static double ChannelCutoffHz(RadioMode mode) => mode switch
     {
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet => 8_000,
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit => 8_000,
         RadioMode.Am => 5_000,
         RadioMode.Usb or RadioMode.Lsb => 4_000,
         RadioMode.Cw => 1_200,
@@ -311,6 +311,7 @@ public sealed class Demodulator
             RadioMode.Jtty => JttyDecoder.Format(JttyDecoder.Decode(audio, rate)),
             RadioMode.Varac => FormatVarac(audio, rate),
             RadioMode.Packet => PacketDecoder.Decode(audio, rate),
+            RadioMode.Ribbit => RibbitDecoder.Decode(audio, rate),
             RadioMode.Wbfm => FinishRds(_wbfmMux),
             _ => null
         };

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading.Channels;
 using AgenticSdr.Dsp;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 
@@ -16,6 +17,7 @@ public static class WebApi
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/status", (RadioSession session) => session.Status);
+        app.MapGet("/api/apps", () => Results.Ok(DeskCatalog.Payload(DeskCatalog.ReceiverId)));
         app.MapGet("/api/camp", (CampBook camp) => camp.View(DateTime.Now));
         app.MapPut("/api/camp/mode", (CampModeBody body, CampBook camp) =>
         {

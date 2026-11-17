@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using AgenticSdr.Host;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AgenticSdr.Tests;

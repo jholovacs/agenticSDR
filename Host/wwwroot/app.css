@@ -9,6 +9,8 @@
   --green: #c6de7a;
   --danger: #e07a62;
   --shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  --desk-gutter: 20px;
+  --desk-radius: 16px;
   font-family: "Segoe UI", "Avenir Next", sans-serif;
 }
 
@@ -261,6 +263,11 @@ dialog p { margin: 12px 0; color: var(--muted); }
 .panel { border-radius: 16px; padding: 16px; }
 .fold.panel { padding: 0; }
 .fold { margin: 0 20px 12px; }
+/* Desk/agent mounts use .sp-panel; keep the same outer inset as Host folds. */
+.sp-panel.fold {
+  margin: 0 20px 12px;
+  border-radius: 16px;
+}
 .layout .fold { margin: 0; }
 .fold > summary {
   display: flex;
@@ -448,6 +455,7 @@ pre {
 
 pre .morse { color: var(--amber); }
 pre .packet { color: #38bdf8; }
+pre .ribbit { color: #9ad4a8; }
 pre .ft8 { color: #7dd3c0; white-space: pre-wrap; }
 pre .rds { color: #c4b5fd; }
 pre .speech { color: var(--green); }

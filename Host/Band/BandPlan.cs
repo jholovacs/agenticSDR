@@ -149,6 +149,7 @@ public static class Region2BandPlan
                 Call("2 m SSB calling", 144_200_000, RadioMode.Usb, 3_000),
                 Call("2 m VarAC FM", 144_950_000, RadioMode.Nbfm, 7_500),
                 Call("2 m APRS packet", 144_390_000, RadioMode.Packet, 7_500),
+                Call("2 m ISS APRS", 145_825_000, RadioMode.Packet, 7_500),
                 Call("2 m national FM simplex calling", 146_520_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("1.25m", "1.25 m", 222_000_000, 225_000_000,
@@ -170,6 +171,7 @@ public static class Region2BandPlan
                 Call("70 cm FT8", 432_174_000, RadioMode.Ft8, 3_600),
                 Call("70 cm weak-signal calling", 432_100_000, RadioMode.Usb, 3_000),
                 Call("70 cm VarAC FM", 439_600_000, RadioMode.Nbfm, 7_500),
+                Call("70 cm APRS packet", 445_925_000, RadioMode.Packet, 7_500),
                 Call("70 cm FM simplex calling", 446_000_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("33cm", "33 cm", 902_000_000, 928_000_000,
@@ -421,7 +423,8 @@ public static class Region2BandPlan
     public static bool TryDigiDial(double frequencyHz, RadioMode mode, out double dialHz)
     {
         dialHz = 0;
-        if (mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac))
+        if (mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
+            or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit))
             return false;
 
         double best = double.MaxValue;
@@ -462,7 +465,11 @@ public static class Region2BandPlan
         mode = RadioMode.Unknown;
         dialHz = 0;
         double best = double.MaxValue;
-        foreach (RadioMode candidate in new[] { RadioMode.Ft8, RadioMode.Js8, RadioMode.Olivia, RadioMode.Jtty, RadioMode.Varac })
+        foreach (RadioMode candidate in new[]
+                 {
+                     RadioMode.Ft8, RadioMode.Js8, RadioMode.Olivia, RadioMode.Jtty,
+                     RadioMode.Varac, RadioMode.Packet, RadioMode.Ribbit
+                 })
         {
             if (!TryDigiDial(frequencyHz, candidate, out double candidateDial))
                 continue;

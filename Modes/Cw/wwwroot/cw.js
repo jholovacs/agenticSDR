@@ -154,7 +154,7 @@
       txWatts: Number(txWatts.value),
       toneHz: Number(txTone.value)
     };
-    StationPanels.saveUiPrefs(patch).catch(() => {});
+    DeskPanels.saveUiPrefs(patch).catch(() => {});
   }
 
   function restoreVolume() {
@@ -167,7 +167,7 @@
   }
 
   async function restoreSharedPrefs() {
-    const prefs = await StationPanels.loadUiPrefs();
+    const prefs = await DeskPanels.loadUiPrefs();
     if (prefs.volume != null && Number.isFinite(Number(prefs.volume))) {
       rxVolume.value = String(Math.max(0, Math.min(100, Number(prefs.volume))));
       try { localStorage.setItem(VOLUME_KEY, rxVolume.value); } catch { /* ignore */ }
@@ -491,7 +491,9 @@
     }
   }
 
-  StationPanels.mountRadio($("radio-host"), {
+  DeskPanels.mountAppNav($("app-nav"), { current: "cw" });
+
+  DeskPanels.mountRadio($("radio-host"), {
     apiBase: "",
     onError: showError,
     beforeClose: async () => {
@@ -516,12 +518,12 @@
       refresh().catch((err) => showError(err.message));
     }
   });
-  StationPanels.mountOperator($("operator-host"), {
+  DeskPanels.mountOperator($("operator-host"), {
     apiBase: "",
     onError: showError,
     onSnapshot: () => refresh().catch((err) => showError(err.message))
   });
-  StationPanels.mountAntenna($("antenna-host"), {
+  DeskPanels.mountAntenna($("antenna-host"), {
     apiBase: "",
     onError: showError
   });
@@ -684,7 +686,7 @@
   txTone.addEventListener("change", () => persistDeskPrefs());
   restoreVolume();
 
-  StationPanels.rememberFolds();
+  DeskPanels.rememberFolds();
   forceCaps();
   paintListenButtons();
   restoreSharedPrefs()

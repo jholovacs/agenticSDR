@@ -12,6 +12,8 @@ public class ProcessorTests
         Assert.Equal(["morse", "speech"], ModePipelines.DefaultIds(RadioMode.Usb));
         Assert.Equal(["morse"], ModePipelines.DefaultIds(RadioMode.Cw));
         Assert.Equal(["ft8"], ModePipelines.DefaultIds(RadioMode.Ft8));
+        Assert.Equal(["packet"], ModePipelines.DefaultIds(RadioMode.Packet));
+        Assert.Equal(["ribbit"], ModePipelines.DefaultIds(RadioMode.Ribbit));
     }
 
     [Fact]

@@ -4,10 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>AgenticSdr.Privilege</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Radio\AgenticSdr.Radio.csproj" />
+    <ProjectReference Include="..\Shared\AgenticSdr.Shared.csproj" />
   </ItemGroup>
 
 </Project>

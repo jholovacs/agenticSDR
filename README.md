@@ -145,9 +145,18 @@ SoapySDR is the path for radios that are not RTL2832U dongles and not opened thr
 
 `list_sdr_families` returns this catalog to an MCP client. A module that is installed but not named above still opens.
 
+## Solution layout
+
+| Area | Projects |
+| --- | --- |
+| **Core** | `Radio`, `Dsp`, `Processors`, `Shared` (paths, LLM, UI prefs, desk catalog, antenna prefs), `Privilege` (Part 97, operator, TX gate) |
+| **Apps** | `Host` (receiver), `Modes/Cw` (desk), other `Modes/*` TX libraries |
+| **Tests / Tools** | `Tests`, `tools/Ft8Analyze`, `tools/RdsAnalyze` |
+| **Ui** | Shared `desk-panels.*`, `radio-listener.*`, `agent-panels.*` (copied into each app `wwwroot` on build) |
+
 ## Mode desks (experimental transmit)
 
-Each digimode is its own project under `Modes/`. Shared Part 97 / operator / click gating lives in `Privilege/`. **Transmit is experimental** — until a radio radiates RF, a valid click yields local sidetone / simulated TX with `Radiated=false`. Nothing radiates unless:
+Each digimode is its own project under `Modes/`. Shared Part 97 / operator / click gating lives in `Privilege/`; cross-app config lives in `Shared/`. **Transmit is experimental** — until a radio radiates RF, a valid click yields local sidetone / simulated TX with `Radiated=false`. Nothing radiates unless:
 
 1. the control operator is signed in (call sign + license class attestation),
 2. Part 97 allows that frequency, mode, and power for the license,
@@ -156,7 +165,7 @@ Each digimode is its own project under `Modes/`. Shared Part 97 / operator / cli
 
 `dotnet run --project Modes/Cw` serves the CW desk at http://127.0.0.1:5091 (≤18 WPM listen; experimental transmit). FT8, JS8, Olivia, JTTY, and Packet ship as libraries with the same gate; desks for those modes follow the CW pattern.
 
-Shared front-end panels live under `Ui/` (`station-panels.*` for Operator). Mode apps and Host copy what they need into `wwwroot` on build.
+Each running app shows an **Apps** bar (Receiver · CW · …) that links the loopback desks. Start the processes you need (`make run`, `make cw`); only one should hold the USB radio at a time. `GET /api/apps` returns the same catalog.
 
 ## Develop and test
 

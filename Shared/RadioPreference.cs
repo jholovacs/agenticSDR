@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticSdr.Radio;
 
-namespace AgenticSdr.Privilege;
+namespace AgenticSdr.Shared;
 
 /// <summary>Last radio the operator opened. Shared by Host and mode desks.</summary>
 public sealed record RadioPreference(

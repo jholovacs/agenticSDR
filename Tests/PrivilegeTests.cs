@@ -1,6 +1,7 @@
 using AgenticSdr.Dsp;
 using AgenticSdr.Host;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Tests;

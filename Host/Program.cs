@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using AgenticSdr.Dsp;
 using AgenticSdr.Host;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 using ModelContextProtocol.AspNetCore;

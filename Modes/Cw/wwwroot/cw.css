@@ -27,7 +27,10 @@ body {
   justify-content: space-between;
   gap: 1.5rem;
   flex-wrap: wrap;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+#app-nav.sp-app-nav {
+  margin: 0 0 1rem;
 }
 .brand { display: flex; gap: 0.9rem; align-items: flex-start; }
 .led {

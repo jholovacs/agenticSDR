@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AgenticSdr.Privilege;
+namespace AgenticSdr.Shared;
 
 /// <summary>
 /// An OpenAI-compatible instruct model. BaseUrl is the address that ends in /v1.

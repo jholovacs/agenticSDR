@@ -1,4 +1,4 @@
-namespace AgenticSdr.Privilege;
+namespace AgenticSdr.Shared;
 
 /// <summary>
 /// Parse and summarize antenna settings for any desk. Host still runs the full band-match planner.

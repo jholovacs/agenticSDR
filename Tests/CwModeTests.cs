@@ -1,5 +1,9 @@
 using AgenticSdr.Cw;
+using AgenticSdr.Cw.Chat;
+using AgenticSdr.Cw.Listen;
+using AgenticSdr.Cw.Transmit;
 using AgenticSdr.Privilege;
+using AgenticSdr.Shared;
 using AgenticSdr.Radio;
 
 namespace AgenticSdr.Tests;
