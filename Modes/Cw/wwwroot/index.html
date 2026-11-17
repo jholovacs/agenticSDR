@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CW — Agentic SDR</title>
+  <link rel="stylesheet" href="/cw.css?v=19">
+  <link rel="stylesheet" href="/station-panels.css?v=6">
+  <link rel="stylesheet" href="/agent-panels.css?v=1">
+</head>
+<body>
+  <header class="face">
+    <div class="brand">
+      <span class="led" id="led"></span>
+      <div>
+        <p class="eyebrow">Mode desk</p>
+        <h1>CW</h1>
+        <p class="quiet">Morse chat at ≤18 WPM. Start the radio, set the dial, then Listen to decode CW into the thread. Transmit is experimental.</p>
+      </div>
+    </div>
+    <div class="identity">
+      <p id="who">No operator</p>
+      <p id="radio-line">No radio attached</p>
+    </div>
+  </header>
+
+  <p id="error" class="error" hidden></p>
+  <div id="radio-host"></div>
+  <div id="operator-host"></div>
+  <div id="antenna-host"></div>
+  <div id="model-host"></div>
+  <div id="prompt-host"></div>
+
+  <details class="panel fold" open data-fold="cw-chat">
+    <summary>
+      <span class="fold-title">CW chat</span>
+      <span id="chat-aside" class="fold-aside">Idle</span>
+    </summary>
+    <div class="fold-body chat-panel">
+      <div class="controls chat-tune">
+        <label>Dial MHz
+          <input id="dial-mhz" type="number" min="0.1" step="0.001" value="14.050" required>
+        </label>
+        <label>Watts
+          <input id="tx-watts" type="number" min="0.1" max="1500" step="0.1" value="50" required>
+        </label>
+        <label>Tone Hz
+          <input id="tx-tone" type="number" min="400" max="1000" step="1" value="700">
+        </label>
+        <label>Volume
+          <input id="rx-volume" type="range" min="0" max="100" value="80">
+        </label>
+        <button type="button" id="listen-btn" disabled>Listen</button>
+        <button type="button" id="listen-stop" class="ghost" hidden>Stop</button>
+        <span id="listen-state" class="quiet">Start the radio, then click Listen.</span>
+        <span id="id-state" class="quiet"></span>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="tx-form" class="stack compose">
+        <p class="quiet">Transmit is <strong>experimental</strong> — local sidetone / simulated TX until a radio radiates. Part 97 click-gating still applies.</p>
+        <label class="grow">Message
+          <textarea id="tx-text" rows="3" maxlength="500" required placeholder="CQ CQ DE W1AW K" spellcheck="false" autocomplete="off" autocapitalize="characters"></textarea>
+        </label>
+        <label class="check">
+          <input id="tx-authorized" type="checkbox" required>
+          I am the control operator and authorize this experimental CW transmission
+        </label>
+        <div class="controls">
+          <button type="submit" id="tx-btn">Transmit (experimental)</button>
+        </div>
+        <p id="tx-result" class="quiet"></p>
+        <audio id="tx-audio" controls hidden></audio>
+      </form>
+    </div>
+  </details>
+
+  <dialog id="privilege-dialog" class="signoff-dialog">
+    <h2>No transmit privilege</h2>
+    <p class="quiet">Your license class is not authorized for experimental CW transmit on this frequency at this power.</p>
+    <p id="privilege-reason" class="signoff-text"></p>
+    <div class="controls">
+      <button type="button" id="privilege-ok">OK</button>
+    </div>
+  </dialog>
+
+  <dialog id="signoff-dialog" class="signoff-dialog">
+    <h2 id="signoff-title">Sign off?</h2>
+    <p id="signoff-reason" class="quiet"></p>
+    <p class="signoff-text"><code id="signoff-message"></code></p>
+    <p class="quiet">Yes authorizes an experimental transmission of your call sign with the prosign. This is the operator click.</p>
+    <div class="controls">
+      <button type="button" id="signoff-yes">Yes, transmit (experimental)</button>
+      <button type="button" class="ghost" id="signoff-skip">Skip</button>
+      <button type="button" class="ghost" id="signoff-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <script src="/radio-listener.js?v=2"></script>
+  <script src="/station-panels.js?v=6"></script>
+  <script src="/agent-panels.js?v=1"></script>
+  <script src="/cw.js?v=20"></script>
+</body>
+</html>

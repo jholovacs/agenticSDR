@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Radio\AgenticSdr.Radio.csproj" />
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
     <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
+    <ProjectReference Include="..\Privilege\AgenticSdr.Privilege.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,9 +30,9 @@
     <None Include="native\libxaramonitor.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('native\libxaramonitor.dylib')" />
   </ItemGroup>
 
-  <!-- Shared radio listener UI (Host + Station). -->
+  <!-- Shared UI: radio listener and operator panels. -->
   <Target Name="CopySharedUi" BeforeTargets="Build;ResolveProjectStaticWebAssets">
-    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css"
+    <Copy SourceFiles="..\Ui\radio-listener.js;..\Ui\radio-listener.css;..\Ui\station-panels.js;..\Ui\station-panels.css;..\Ui\agent-panels.js;..\Ui\agent-panels.css"
           DestinationFolder="wwwroot"
           SkipUnchangedFiles="true" />
   </Target>

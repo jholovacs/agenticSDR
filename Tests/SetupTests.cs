@@ -1,4 +1,5 @@
 using AgenticSdr.Host;
+using AgenticSdr.Privilege;
 
 namespace AgenticSdr.Tests;
 

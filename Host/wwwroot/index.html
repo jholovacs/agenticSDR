@@ -7,8 +7,10 @@
   <link rel="icon" href="/favicon.ico?v=2" sizes="any">
   <link rel="icon" href="/favicon.png?v=2" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
-  <link rel="stylesheet" href="/app.css?v=34">
+  <link rel="stylesheet" href="/app.css?v=35">
   <link rel="stylesheet" href="/radio-listener.css?v=1">
+  <link rel="stylesheet" href="/station-panels.css?v=5">
+  <link rel="stylesheet" href="/agent-panels.css?v=1">
 </head>
 <body>
   <header class="face">
@@ -31,18 +33,7 @@
 
   <p id="error" class="error" hidden></p>
 
-  <details class="panel fold" open data-fold="radio">
-    <summary data-tip="radio"><span class="fold-title">Radio</span><span id="radio-summary" class="fold-aside"></span></summary>
-    <div class="controls">
-    <label data-tip="device">Radio
-      <select id="radio"></select>
-    </label>
-    <span data-tip="start"><button id="radio-start" type="button">Start radio</button></span>
-    <span data-tip="stop-radio"><button id="radio-stop" type="button" class="ghost">Stop radio</button></span>
-    <span data-tip="details"><button id="radio-details" type="button" class="ghost">Radio details</button></span>
-    <p class="antenna-note">Start opens the selected USB radio. Stop releases it. A scan that is running stops too.</p>
-    </div>
-  </details>
+  <div id="radio-host"></div>
 
   <details class="panel fold" open data-fold="antenna">
     <summary data-tip="antenna"><span class="fold-title">Antenna</span><span id="antenna-summary" class="fold-aside"></span></summary>
@@ -71,45 +62,8 @@
     </div>
   </details>
 
-  <details class="panel fold" open data-fold="model">
-    <summary data-tip="model"><span class="fold-title">Model</span><span id="model-summary" class="fold-aside"></span></summary>
-    <div class="fold-body">
-    <p class="fold-note">Point at an OpenAI-compatible chat server (Ollama, LM Studio, a cloud API). List the models it offers, pick one, then ask in Prompt.</p>
-    <div class="controls">
-    <label data-tip="endpoint">Endpoint
-      <input id="llm-base" type="url" placeholder="http://10.10.26.10:11434" autocomplete="off">
-    </label>
-    <label data-tip="model-name">Model
-      <input id="llm-model" list="llm-models" placeholder="llama3.2" autocomplete="off">
-      <datalist id="llm-models"></datalist>
-    </label>
-    <label data-tip="key">API key
-      <input id="llm-key" type="password" autocomplete="off" placeholder="Optional for Ollama">
-    </label>
-    <span data-tip="list-models"><button id="llm-models-btn" type="button">List models</button></span>
-    <span data-tip="save-model"><button id="llm-save" type="button" class="ghost">Save</button></span>
-    <span data-tip="forget"><button id="llm-forget" type="button" class="ghost">Forget key</button></span>
-    <div id="llm-model-picks" class="llm-picks" hidden></div>
-    <p id="llm-note" class="antenna-note">For Ollama, the endpoint can be just the host, such as http://10.10.26.10:11434.</p>
-    </div>
-    </div>
-  </details>
-
-  <details class="panel fold prompt-pane" open data-fold="prompt">
-    <summary data-tip="prompt"><span class="fold-title">Prompt</span><span id="prompt-summary" class="fold-aside"></span></summary>
-    <div class="fold-body">
-    <p class="fold-note">Tell the agent what to do with the radio.</p>
-    <div id="prompt-log" class="prompt-log" aria-live="polite">
-      <p id="prompt-empty" class="empty">Nothing asked yet. Try “Scan 2 m and tell me what you hear.”</p>
-    </div>
-    <form id="prompt-form" class="prompt-form">
-      <label class="ask" data-tip="ask">What should the radio do?
-        <textarea id="llm-ask" rows="3" placeholder="Scan 2 m and tell me what you hear."></textarea>
-      </label>
-      <span data-tip="send"><button id="llm-send" type="submit">Send</button></span>
-    </form>
-    </div>
-  </details>
+  <div id="model-host"></div>
+  <div id="prompt-host"></div>
 
   <details class="panel fold" open data-fold="tune">
     <summary data-tip="tune"><span class="fold-title">Scan and listen</span><span id="tune-summary" class="fold-aside"></span></summary>
@@ -144,8 +98,8 @@
     </label>
     <span data-tip="noaa"><button id="noaa" type="button" class="ghost">NOAA check</button></span>
     </div>
-    <details class="known-channels" data-tip="known-channels">
-      <summary>Known channels</summary>
+    <details class="known-channels fold" open data-fold="known-channels" data-tip="known-channels">
+      <summary><span class="fold-title">Known channels</span></summary>
       <p class="fold-note">New to this radio? Open NOAA weather and click a WX channel. Hearing the forecast means the SDR is working. CB, GMRS, and digimode dials (FT8, JS8, Olivia, JTTY, VarAC such as 10 m · 28.074) are fixed lists you can tune the same way, without scanning.</p>
       <div id="known-channel-groups"></div>
     </details>
@@ -355,14 +309,6 @@
 
   <div id="tip" role="tooltip" hidden></div>
 
-  <dialog id="radio-details-panel" class="radio-details">
-    <h2 id="radio-details-title">Radio details</h2>
-    <dl id="radio-details-list"></dl>
-    <div class="signal-actions">
-      <button id="radio-details-close" type="button" class="ghost">Close</button>
-    </div>
-  </dialog>
-
   <dialog id="leave-recording">
     <h2 id="recording-question-title">Download the recording?</h2>
     <p id="recording-question">Download the recording?</p>
@@ -384,6 +330,8 @@
 
   <script src="/lame.min.js?v=5"></script>
   <script src="/radio-listener.js?v=1"></script>
-  <script src="/app.js?v=48"></script>
+  <script src="/station-panels.js?v=6"></script>
+  <script src="/agent-panels.js?v=1"></script>
+  <script src="/app.js?v=51"></script>
 </body>
 </html>

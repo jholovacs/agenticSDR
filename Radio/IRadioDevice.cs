@@ -34,6 +34,9 @@ public interface IRadioDevice : IDisposable
     /// <summary>The byte layout of <see cref="Read"/>.</summary>
     SampleEncoding Encoding { get; }
 
+    /// <summary>True when this open radio can put samples on the air (and implements <see cref="IRadioTransmitter"/>).</summary>
+    bool CanTransmit { get; }
+
     /// <summary>Read sizes must be a multiple of this many bytes. 512 for the RTL-SDR, 8 for SoapySDR complex floats.</summary>
     int ReadAlignment { get; }
 

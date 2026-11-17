@@ -23,7 +23,9 @@
     <ProjectReference Include="..\Dsp\AgenticSdr.Dsp.csproj" />
     <ProjectReference Include="..\Host\AgenticSdr.Host.csproj" />
     <ProjectReference Include="..\Processors\AgenticSdr.Processors.csproj" />
-    <ProjectReference Include="..\Station\AgenticSdr.Station.csproj" />
+    <ProjectReference Include="..\Privilege\AgenticSdr.Privilege.csproj" />
+    <ProjectReference Include="..\Modes\Cw\AgenticSdr.Cw.csproj" />
+    <ProjectReference Include="..\Modes\Ft8\AgenticSdr.Ft8.csproj" />
   </ItemGroup>
 
 </Project>

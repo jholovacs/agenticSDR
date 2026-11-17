@@ -1,10 +1,6 @@
-namespace AgenticSdr.Host;
+using AgenticSdr.Privilege;
 
-/// <summary>
-/// The antenna the user described. Length is stored in meters. Orientation is "vertical" or "horizontal".
-/// AzimuthDegrees is the compass direction a horizontal wire runs, degrees clockwise from true north. Vertical antennas leave it empty.
-/// </summary>
-public sealed record AntennaSpec(double LengthMeters, string Orientation, double? AzimuthDegrees, string LengthText);
+namespace AgenticSdr.Host;
 
 /// <summary>
 /// One band this antenna can hear. Harmonic is 1 for the natural frequency, then 3, 5, or 7.
@@ -36,44 +32,8 @@ public static class AntennaPlan
     public const double VelocityFactor = 0.95;
     private const double LocalAmLengthMeters = 15;
 
-    public static AntennaSpec Parse(double length, string? unit, string? orientation, double? azimuthDegrees)
-    {
-        string units = string.IsNullOrWhiteSpace(unit) ? "m" : unit.Trim().ToLowerInvariant();
-        double meters = units switch
-        {
-            "m" or "meter" or "meters" => length,
-            "ft" or "foot" or "feet" => length * 0.3048,
-            _ => throw new ArgumentException("Antenna unit must be m or ft.")
-        };
-
-        if (meters is < 0.05 or > 200)
-            throw new ArgumentException("Antenna length must be between 5 cm and 200 m.");
-
-        string pose = (orientation ?? "").Trim().ToLowerInvariant() switch
-        {
-            "vertical" or "v" => "vertical",
-            "horizontal" or "h" => "horizontal",
-            _ => throw new ArgumentException("Antenna orientation must be vertical or horizontal.")
-        };
-
-        double? azimuth = null;
-        if (pose == "horizontal")
-        {
-            if (azimuthDegrees is null || double.IsNaN(azimuthDegrees.Value))
-                throw new ArgumentException("A horizontal antenna needs a compass direction in degrees true.");
-            double turn = azimuthDegrees.Value % 360;
-            if (azimuthDegrees.Value is < -360 or > 360)
-                throw new ArgumentException("Compass direction must be from 0 to 360 degrees true.");
-            if (turn < 0)
-                turn += 360;
-            azimuth = turn;
-        }
-
-        string text = units is "ft" or "foot" or "feet"
-            ? $"{length:0.##} ft"
-            : $"{meters:0.##} m";
-        return new AntennaSpec(meters, pose, azimuth, text);
-    }
+    public static AntennaSpec Parse(double length, string? unit, string? orientation, double? azimuthDegrees) =>
+        AntennaSettings.Parse(length, unit, orientation, azimuthDegrees);
 
     public static AntennaAdvice Advise(AntennaSpec spec)
     {

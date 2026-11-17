@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AgenticSdr.Cw</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Privilege\AgenticSdr.Privilege.csproj" />
+    <ProjectReference Include="..\..\Dsp\AgenticSdr.Dsp.csproj" />
+    <ProjectReference Include="..\..\Radio\AgenticSdr.Radio.csproj" />
+  </ItemGroup>
+
+  <Target Name="CopySharedUi" BeforeTargets="Build;ResolveProjectStaticWebAssets">
+    <Copy SourceFiles="..\..\Ui\radio-listener.js;..\..\Ui\station-panels.js;..\..\Ui\station-panels.css;..\..\Ui\agent-panels.js;..\..\Ui\agent-panels.css"
+          DestinationFolder="wwwroot"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

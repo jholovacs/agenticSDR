@@ -1,18 +1,17 @@
 # Cross-platform entry points (Windows / Linux / macOS). Requires .NET SDK and Make.
-.PHONY: run test station help
+.PHONY: run test cw help
 
 help:
 	@echo Targets:
-	@echo   make run     - start the receiver at http://127.0.0.1:5088
-	@echo   make station - start the transmit desk at http://127.0.0.1:5090
-	@echo   make test    - run the unit tests
+	@echo   make run  - start the receiver at http://127.0.0.1:5088
+	@echo   make cw   - start the CW mode desk at http://127.0.0.1:5091
+	@echo   make test - run the unit tests
 
 run:
 	dotnet run --project Host
 
-station:
-	dotnet run --project Station
+cw:
+	dotnet run --project Modes/Cw
 
 test:
-	dotnet build Host/AgenticSdr.Host.csproj -c Debug --nologo
 	dotnet test Tests/AgenticSdr.Tests.csproj

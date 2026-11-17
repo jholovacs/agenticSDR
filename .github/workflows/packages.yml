@@ -37,11 +37,8 @@ jobs:
       - name: Build MIT native libraries
         run: bash tools/build-native.sh
       - name: Run unit tests
-        # Host must build before Station: Station links the Host DLL by path so its wwwroot
-        # is not merged into the desk. Live RTL skips only when no USB dongle is present.
-        run: |
-          dotnet build Host/AgenticSdr.Host.csproj -c Release --nologo
-          dotnet test Tests/AgenticSdr.Tests.csproj -c Release --nologo
+        # Live RTL skips only when no USB dongle is present.
+        run: dotnet test Tests/AgenticSdr.Tests.csproj -c Release --nologo
       - name: Show version for this build
         run: echo "VERSION=$VERSION"
 

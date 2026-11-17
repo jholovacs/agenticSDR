@@ -41,6 +41,7 @@ public sealed class LimeDevice : IRadioDevice
     public double SampleRateHz { get; }
 
     public SampleEncoding Encoding => SampleEncoding.Cf32;
+    public bool CanTransmit => Capabilities.CanTransmit;
 
     public int ReadAlignment => 8;
 

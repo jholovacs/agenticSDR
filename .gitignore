@@ -5,8 +5,12 @@ obj/
 # Copied from Ui/ on build for Host and Station wwwroot.
 Host/wwwroot/radio-listener.js
 Host/wwwroot/radio-listener.css
+Host/wwwroot/station-panels.js
+Host/wwwroot/station-panels.css
 Station/wwwroot/radio-listener.js
 Station/wwwroot/radio-listener.css
+Station/wwwroot/station-panels.js
+Station/wwwroot/station-panels.css
 packaging/stage/
 packaging/out/
 *.user

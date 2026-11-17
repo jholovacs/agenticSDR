@@ -1,8 +1,11 @@
+using AgenticSdr.Privilege;
+
 namespace AgenticSdr.Host;
 
 /// <summary>
 /// Where the OpenAI connection is stored. A copy next to the program wins, so development
 /// keeps using Host/llm.json. Otherwise the user's own file wins, then the system file a package wrote.
+/// Operator and antenna settings use <see cref="SharedPaths"/> so mode desks share them.
 /// </summary>
 public static class AppPaths
 {
@@ -33,12 +36,9 @@ public static class AppPaths
         return Path.Combine(directory ?? "", "schedule.json");
     }
 
-    public static string UserAntenna()
-    {
-        string llm = UserLlm();
-        string? directory = Path.GetDirectoryName(llm);
-        return Path.Combine(directory ?? "", "antenna.json");
-    }
+    public static string UserAntenna() => SharedPaths.AntennaJson();
+
+    public static string UserOperator() => SharedPaths.OperatorJson();
 
     public static string UserCallsignCache()
     {
@@ -92,21 +92,7 @@ public static class AppPaths
         return UserAntenna();
     }
 
-    public static string UserLlm()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AgenticSDR",
-                "llm.json");
-        }
-
-        string config = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") ?? "";
-        if (string.IsNullOrWhiteSpace(config))
-            config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-        return Path.Combine(config, "agenticsdr", "llm.json");
-    }
+    public static string UserLlm() => SharedPaths.LlmJson();
 
     public static string SelectLlm(string contentRoot)
     {

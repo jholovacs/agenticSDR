@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Threading.Channels;
 using AgenticSdr.Dsp;
+using AgenticSdr.Privilege;
 using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 
@@ -158,6 +159,27 @@ public static class WebApi
                 return Results.BadRequest(new { error = ex.Message });
             }
         });
+        app.MapGet("/api/radio/preference", (RadioSession session) =>
+        {
+            try
+            {
+                return Results.Ok(session.RadioPreferenceView());
+            }
+            catch (RadioException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapGet("/api/radio/simulate-transmit", (RadioPreferenceStore prefs) =>
+        {
+            bool enabled = prefs.SimulateTransmit();
+            return Results.Ok(new { enabled, simulateTransmit = enabled });
+        });
+        app.MapPost("/api/radio/simulate-transmit", (SimulateTransmitBody body, RadioPreferenceStore prefs) =>
+        {
+            prefs.SetSimulateTransmit(body.Enabled);
+            return Results.Ok(new { enabled = body.Enabled, simulateTransmit = body.Enabled, canTransmit = body.Enabled });
+        });
         app.MapPost("/api/open", async (OpenBody? body, RadioSession session, CancellationToken ct) =>
             await Run(async () =>
             {
@@ -281,6 +303,19 @@ public static class WebApi
                 await http.Response.WriteAsJsonAsync(new { error = ex.Message }, ct);
             }
         });
+        app.MapGet("/api/ui-prefs", (UiPrefsStore prefs) => Results.Ok(prefs.Load()));
+        app.MapPut("/api/ui-prefs", (UiPrefsPatch body, UiPrefsStore prefs) =>
+        {
+            try
+            {
+                return Results.Ok(prefs.Patch(body ?? new UiPrefsPatch()));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         app.MapGet("/api/llm", (LlmStore store) => store.View());
         app.MapPut("/api/llm", (LlmSave body, LlmStore store) =>
         {
@@ -399,6 +434,8 @@ public static class WebApi
 
 /// <summary>Body of POST /api/open. Index is the position from the device list.</summary>
 public sealed record OpenBody(int? Index);
+/// <summary>Body of POST /api/radio/simulate-transmit. Enables the shared test TX facade.</summary>
+public sealed record SimulateTransmitBody(bool Enabled);
 /// <summary>Body of POST /api/antenna. Unit is m or ft. Orientation is vertical or horizontal. Azimuth is degrees true for a horizontal wire.</summary>
 public sealed record AntennaBody(double Length, string? Unit, string? Orientation, double? AzimuthDegrees);
 /// <summary>Body of POST /api/scan. BandId is a value such as 2m, 40m, fm-bc, am-bc, noaa, cb, gmrs, or dmr.</summary>

@@ -12,4 +12,5 @@ public sealed record RadioCapabilities(
     double SampleRateHz,
     double? GainDb,
     int Ppm,
-    bool DirectSamplingBelow25MHz);
+    bool DirectSamplingBelow25MHz,
+    bool CanTransmit = false);

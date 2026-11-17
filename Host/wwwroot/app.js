@@ -1,3 +1,57 @@
+StationPanels.mountRadio(document.getElementById("radio-host"), {
+  apiBase: "",
+  ownEvents: false,
+  open: true
+});
+
+const promptPanel = AgentPanels.mountPrompt(document.getElementById("prompt-host"), {
+  apiBase: "",
+  onError: (message) => showError(message),
+  foldNote: "Tell the agent what to do with the radio.",
+  placeholder: "Scan 2 m and tell me what you hear.",
+  emptyText: "Nothing asked yet. Try “Scan 2 m and tell me what you hear.”",
+  canAsk: () => {
+    if (busy && !liveAbort) {
+      showError("The radio is busy. Press Stop, then send the prompt again.");
+      return false;
+    }
+    return true;
+  },
+  beforeAsk: () => {
+    if (!liveAbort) setBusy(true);
+    showError("");
+    return true;
+  },
+  onReply: async (reply) => {
+    if (reply.antenna) {
+      antennaUnit.value = "m";
+      antennaLength.value = reply.antenna.lengthMeters;
+      antennaOrientation.value = reply.antenna.orientation;
+      if (reply.antenna.azimuthDegrees != null)
+        antennaAzimuth.value = String(Math.round(reply.antenna.azimuthDegrees));
+      syncAzimuth();
+      antennaNote.textContent = reply.antenna.summary;
+      await loadBands();
+      paintFoldSummaries();
+    }
+    if (reply.scan) renderHits(reply.scan);
+  },
+  onSettled: () => {
+    if (liveAbort) setBusy(true);
+    else {
+      setBusy(false);
+      if (busyPanel?.open) busyPanel.close();
+    }
+    refreshStatus();
+  }
+});
+
+AgentPanels.mountModel(document.getElementById("model-host"), {
+  apiBase: "",
+  onError: (message) => showError(message),
+  onChange: () => paintFoldSummaries()
+});
+
 const band = document.querySelector("#band");
 const hits = document.querySelector("#hits");
 const empty = document.querySelector("#empty");
@@ -38,8 +92,6 @@ const radioSelect = document.querySelector("#radio");
 
 let busy = false;
 let liveAbort = null;
-let agentAbort = null;
-const agentHistory = [];
 let liveAudio = null;
 let recording = null;
 let recordingFileId = null;
@@ -208,9 +260,14 @@ async function loadRadios() {
         option.textContent = device.serial ? `${device.name} · ${device.serial}` : device.name;
         radioSelect.append(option);
       }
+      let preferred = "";
+      try {
+        const saved = await api("/api/radio/preference");
+        if (saved && saved.index != null) preferred = String(saved.index);
+      } catch { /* Keep the previous selection when preference is unavailable. */ }
       const keep = openIndex !== null && devices.some((device) => device.index === openIndex)
         ? String(openIndex)
-        : previous;
+        : (preferred || previous);
       if ([...radioSelect.options].some((option) => option.value === keep))
         radioSelect.value = keep;
     }
@@ -622,24 +679,6 @@ function paintFoldSummaries() {
   } else {
     antennaSummary.textContent = `${length}${unit}, vertical`;
   }
-
-  const modelName = document.querySelector("#llm-model").value.trim();
-  const base = document.querySelector("#llm-base").value.trim();
-  let modelText = "Not set";
-  if (modelName) modelText = modelName;
-  else if (base) {
-    try { modelText = new URL(base).host; }
-    catch { modelText = base; }
-  }
-  document.querySelector("#model-summary").textContent = modelText;
-
-  const turns = document.querySelectorAll("#prompt-log .turn");
-  let promptText = "Nothing asked yet";
-  if (turns.length) {
-    const body = turns[turns.length - 1].querySelector("p:last-child")?.textContent.replace(/\s+/g, " ").trim() || "";
-    promptText = body.length > 48 ? `${body.slice(0, 47)}…` : body;
-  }
-  document.querySelector("#prompt-summary").textContent = promptText;
 
   const bandName = band.selectedOptions[0]?.textContent.split(" · ")[0] || "";
   const freq = compactNumber(mhz.value, 6);
@@ -1318,6 +1357,14 @@ function loadVolume() {
   const slider = document.querySelector("#volume");
   if (Number.isFinite(saved) && saved >= 0 && saved <= 100) slider.value = String(saved);
   applyVolume();
+  if (window.StationPanels?.loadUiPrefs) {
+    StationPanels.loadUiPrefs().then((prefs) => {
+      if (prefs.volume == null || !Number.isFinite(Number(prefs.volume))) return;
+      slider.value = String(Math.max(0, Math.min(100, Number(prefs.volume))));
+      try { localStorage.setItem("agentic-sdr-volume", slider.value); } catch { /* ignore */ }
+      applyVolume();
+    }).catch(() => {});
+  }
 }
 
 function paintModeSwitch() {
@@ -1533,7 +1580,7 @@ async function playCamp(tune) {
 }
 
 antennaOrientation.addEventListener("change", syncAzimuth);
-for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#camp-freq", "#mode", "#llm-model", "#llm-base"]) {
+for (const id of ["#antenna-length", "#antenna-unit", "#antenna-azimuth", "#radio", "#band", "#mhz", "#camp-freq", "#mode"]) {
   document.querySelector(id).addEventListener("input", paintFoldSummaries);
   document.querySelector(id).addEventListener("change", paintFoldSummaries);
 }
@@ -1660,7 +1707,7 @@ async function stopWork() {
   if (busyPanel?.open) busyPanel.close();
   closePrompt();
   stopLivePlayback();
-  agentAbort?.abort();
+  promptPanel.abort();
   setBusy(false);
   if (operatingMode === "camp") {
     try { await api("/api/camp/pause", { method: "POST" }); } catch { /* The watch also stops when the page disconnects. */ }
@@ -1675,25 +1722,6 @@ window.addEventListener("pagehide", () => {
 });
 document.querySelector("#stop").addEventListener("click", stopWork);
 liveStop.addEventListener("click", stopWork);
-document.querySelector("#llm-save").addEventListener("click", () => {
-  saveModel(false).catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-forget").addEventListener("click", () => {
-  saveModel(true).catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-models-btn").addEventListener("click", () => {
-  listModels().catch((ex) => showError(ex.message));
-});
-document.querySelector("#prompt-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  askModel().catch((ex) => showError(ex.message));
-});
-document.querySelector("#llm-ask").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    askModel().catch((ex) => showError(ex.message));
-  }
-});
 document.querySelector("#noaa").addEventListener("click", () => {
   syncTuneFrequency("162.550000");
   mode.value = "nbfm";
@@ -1704,176 +1732,7 @@ restoreAntenna()
   .then(loadBands)
   .then(loadKnownChannels)
   .then(loadRadios)
-  .then(loadModel)
   .catch((ex) => showError(ex.message));
-
-async function loadModel() {
-  const view = await api("/api/llm");
-  document.querySelector("#llm-base").value = view.baseUrl || "";
-  document.querySelector("#llm-model").value = view.model || "";
-  document.querySelector("#llm-key").value = "";
-  document.querySelector("#llm-key").placeholder = view.hasKey
-    ? `Saved (ends ${view.keyHint}). Leave blank to keep it.`
-    : "Optional for a local server";
-  document.querySelector("#llm-note").textContent = view.baseUrl
-    ? `Using ${view.model || "a model"} at ${view.baseUrl}.`
-    : "An instruct model that speaks the OpenAI chat protocol can run the same actions as these buttons. Ask it in the prompt below.";
-  paintFoldSummaries();
-}
-
-async function saveModel(clearKey) {
-  showError("");
-  const view = await api("/api/llm", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      baseUrl: document.querySelector("#llm-base").value,
-      model: document.querySelector("#llm-model").value,
-      apiKey: clearKey ? "" : document.querySelector("#llm-key").value,
-      clearKey
-    })
-  });
-  document.querySelector("#llm-key").value = "";
-  document.querySelector("#llm-key").placeholder = view.hasKey
-    ? `Saved (ends ${view.keyHint}). Leave blank to keep it.`
-    : "Optional for a local server";
-  document.querySelector("#llm-note").textContent = view.baseUrl
-    ? `Saved ${view.model || "the model"} at ${view.baseUrl}.`
-    : "The endpoint was cleared.";
-  paintFoldSummaries();
-}
-
-async function listModels() {
-  showError("");
-  await saveModel(false);
-  const listed = await api("/api/llm/models");
-  const names = listed || [];
-  const datalist = document.querySelector("#llm-models");
-  const picks = document.querySelector("#llm-model-picks");
-  const modelInput = document.querySelector("#llm-model");
-  datalist.innerHTML = "";
-  picks.innerHTML = "";
-  picks.hidden = names.length === 0;
-  for (const name of names) {
-    const option = document.createElement("option");
-    option.value = name;
-    datalist.append(option);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = name;
-    button.classList.toggle("active", modelInput.value === name);
-    button.addEventListener("click", () => {
-      modelInput.value = name;
-      for (const peer of picks.querySelectorAll("button"))
-        peer.classList.toggle("active", peer === button);
-      saveModel(false).catch((ex) => showError(ex.message));
-    });
-    picks.append(button);
-  }
-  if (names.length && !modelInput.value.trim()) {
-    modelInput.value = names[0];
-    picks.querySelector("button")?.classList.add("active");
-    await saveModel(false);
-  }
-  document.querySelector("#llm-note").textContent = names.length
-    ? `Found ${names.length} model${names.length === 1 ? "" : "s"}. Click one to use it.`
-    : "The endpoint listed no models.";
-  paintFoldSummaries();
-}
-
-function addTurn(kind, who, text, steps) {
-  document.querySelector("#prompt-empty").hidden = true;
-  const turn = document.createElement("article");
-  turn.className = `turn ${kind}`;
-  const label = document.createElement("p");
-  label.className = "who";
-  label.textContent = who;
-  turn.append(label);
-  if (steps) {
-    const detail = document.createElement("p");
-    detail.className = "steps";
-    detail.textContent = steps;
-    turn.append(detail);
-  }
-  const body = document.createElement("p");
-  body.textContent = text;
-  turn.append(body);
-  const log = document.querySelector("#prompt-log");
-  log.append(turn);
-  log.scrollTop = log.scrollHeight;
-  paintFoldSummaries();
-  return turn;
-}
-
-async function askModel() {
-  const box = document.querySelector("#llm-ask");
-  const question = box.value.trim();
-  if (!question) return;
-  // Live listen keeps busy=true; prompts are still allowed so you can ask about the transcript.
-  if (busy && !liveAbort) {
-    showError("The radio is busy. Press Stop, then send the prompt again.");
-    return;
-  }
-  if (agentAbort) {
-    showError("The agent is already working on a prompt.");
-    return;
-  }
-  const live = liveAbort !== null;
-  if (!live) setBusy(true);
-  showError("");
-  const asked = addTurn("user", "You", question);
-  const pending = addTurn("agent", "Agent", "Working on it…");
-  asked.scrollIntoView({ block: "nearest" });
-  box.value = "";
-  agentAbort = new AbortController();
-  try {
-    const reply = await api("/api/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: question, history: agentHistory }),
-      signal: agentAbort.signal
-    });
-    agentHistory.push({ role: "user", content: question });
-    agentHistory.push({ role: "assistant", content: reply.answer });
-    while (agentHistory.length > 8) agentHistory.shift();
-    const steps = (reply.actions || []).map((action) => `${action.tool}: ${action.result}`).join("\n");
-    pending.querySelector("p:last-child").textContent = reply.answer;
-    paintFoldSummaries();
-    if (steps) {
-      const detail = document.createElement("p");
-      detail.className = "steps";
-      detail.textContent = steps;
-      pending.querySelector(".who").after(detail);
-    }
-    if (reply.antenna) {
-      antennaUnit.value = "m";
-      antennaLength.value = reply.antenna.lengthMeters;
-      antennaOrientation.value = reply.antenna.orientation;
-      if (reply.antenna.azimuthDegrees != null)
-        antennaAzimuth.value = String(Math.round(reply.antenna.azimuthDegrees));
-      syncAzimuth();
-      antennaNote.textContent = reply.antenna.summary;
-      await loadBands();
-      paintFoldSummaries();
-    }
-    if (reply.scan) renderHits(reply.scan);
-  } catch (ex) {
-    const reason = ex.name === "AbortError" ? "Stopped." : ex.message;
-    pending.querySelector("p:last-child").textContent = reason;
-    paintFoldSummaries();
-    box.value = question;
-    showError(reason);
-  } finally {
-    agentAbort = null;
-    // Keep busy while live audio is still playing; only clear after finite radio work.
-    if (liveAbort) setBusy(true);
-    else {
-      setBusy(false);
-      if (busyPanel?.open) busyPanel.close();
-    }
-    refreshStatus();
-  }
-}
 
 async function restoreAntenna() {
   const advice = await api("/api/antenna");
@@ -1893,6 +1752,10 @@ async function restoreAntenna() {
   paintFoldSummaries();
 }
 function rememberFolds() {
+  if (window.StationPanels?.rememberFolds) {
+    StationPanels.rememberFolds(document);
+    return;
+  }
   const folds = document.querySelectorAll("details.fold");
   let saved = {};
   try {
@@ -2236,8 +2099,11 @@ document.querySelector("#camp-stop").addEventListener("click", () => {
   stopCamping().catch((ex) => showError(ex.message));
 });
 document.querySelector("#volume").addEventListener("input", () => {
-  try { localStorage.setItem("agentic-sdr-volume", document.querySelector("#volume").value); } catch { /* The slider still changes the level for this visit. */ }
+  const value = document.querySelector("#volume").value;
+  try { localStorage.setItem("agentic-sdr-volume", value); } catch { /* The slider still changes the level for this visit. */ }
   applyVolume();
+  if (window.StationPanels?.saveUiPrefs)
+    StationPanels.saveUiPrefs({ volume: Number(value) }).catch(() => {});
 });
 document.querySelector("#camp-squelch").addEventListener("input", () => {
   const value = Number(document.querySelector("#camp-squelch").value);

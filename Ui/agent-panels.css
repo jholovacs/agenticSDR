@@ -1,0 +1,64 @@
+/**
+ * Shared Model + Prompt panels. Uses page tokens when present.
+ */
+
+.sp-panel .llm-picks {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 0;
+}
+.sp-panel .llm-picks[hidden] { display: none !important; }
+.sp-panel .llm-picks button {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line, #3d3226);
+  background: #1a1511;
+  color: var(--ink, #f4ecdf);
+  cursor: pointer;
+}
+.sp-panel .llm-picks button:hover { border-color: var(--amber, #e6a04a); }
+.sp-panel .llm-picks button.active {
+  border-color: var(--amber, #e6a04a);
+  background: #3a3228;
+}
+
+.sp-panel .sp-prompt-log {
+  min-height: 9rem;
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0.75rem 0;
+  padding: 12px;
+  background: #0c1016;
+  border: 1px solid var(--line, #2a3340);
+  border-radius: 10px;
+}
+.sp-panel .sp-turn { margin: 0 0 14px; }
+.sp-panel .sp-turn:last-child { margin-bottom: 0; }
+.sp-panel .sp-turn .sp-who {
+  margin: 0 0 4px;
+  color: var(--accent, var(--amber, #6db3ff));
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+.sp-panel .sp-turn p { margin: 0; white-space: pre-wrap; }
+.sp-panel .sp-turn.agent p { color: var(--ok, var(--green, #6dffa3)); }
+.sp-panel .sp-turn .sp-steps {
+  margin-bottom: 6px;
+  color: var(--muted, #9aa7b8);
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 0.84rem;
+}
+.sp-panel .sp-prompt-form {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+}
+.sp-panel .sp-prompt-form .sp-ask { flex: 1; min-width: 12rem; }
+.sp-panel .sp-prompt-form textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+}

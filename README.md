@@ -18,7 +18,7 @@ The bring-up radio is a Nooelec NESDR SMArt v5 (RTL2832U). It tunes about 100 kH
 | **AI** | On-page instruct model + MCP tools/resources at `/mcp` |
 | **Known channels** | NOAA WX, CB, GMRS, and published digimode dials without scanning |
 
-Trunking follow and decryption are out of scope. Transmit is not part of this receiver. The separate Station desk is where a licensed operator authorizes outbound messages.
+Trunking follow and decryption are out of scope. Transmit is not part of this receiver. Mode projects under `Modes/` (CW, FT8, JTTY, Olivia, …) are where a licensed operator authorizes outbound messages.
 
 ## Download
 
@@ -145,17 +145,31 @@ SoapySDR is the path for radios that are not RTL2832U dongles and not opened thr
 
 `list_sdr_families` returns this catalog to an MCP client. A module that is installed but not named above still opens.
 
-## Station
+## Mode desks (experimental transmit)
 
-`dotnet run --project Station` serves http://127.0.0.1:5090. It is a control-operator desk for US amateur privileges (47 CFR Part 97, ITU Region 2). The operator enters a call sign and license class. That entry is an attestation, not an FCC database lookup. An agent can draft a message, or log copy it heard, through MCP at http://127.0.0.1:5090/mcp. The desk checks frequency, mode, and power against that license, and the text has to include the operator's call sign. Nothing is authorized until the operator checks the box and clicks **Transmit**. The desk does not key a radio.
+Each digimode is its own project under `Modes/`. Shared Part 97 / operator / click gating lives in `Privilege/`. **Transmit is experimental** — until a radio radiates RF, a valid click yields local sidetone / simulated TX with `Radiated=false`. Nothing radiates unless:
+
+1. the control operator is signed in (call sign + license class attestation),
+2. Part 97 allows that frequency, mode, and power for the license,
+3. the open SDR reports `CanTransmit` and implements `IRadioTransmitter`, and
+4. an authorized operator clicks **Transmit** (`OperatorClick` — agents cannot forge this).
+
+`dotnet run --project Modes/Cw` serves the CW desk at http://127.0.0.1:5091 (≤18 WPM listen; experimental transmit). FT8, JS8, Olivia, JTTY, and Packet ship as libraries with the same gate; desks for those modes follow the CW pattern.
+
+Shared front-end panels live under `Ui/` (`station-panels.*` for Operator). Mode apps and Host copy what they need into `wwwroot` on build.
 
 ## Develop and test
 
 ```bash
 dotnet test
 dotnet run --project Host
+dotnet run --project Modes/Cw
 ```
 
-`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8, Olivia/JTTY, RDS helpers, packet, M17 plumbing, camp/schedule, callsign lookup, and the band plan. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
+`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8, Olivia/JTTY, RDS helpers, packet, M17 plumbing, camp/schedule, callsign lookup, the band plan, Part 97 privileges, and click-gated CW transmit. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
 
 Packaging scripts: `packaging/build-msi.sh`, `packaging/build-deb.sh`, `packaging/build-mac.sh`. CI workflow: `.github/workflows/packages.yml`.
+
+## Author
+
+Jeremy Holovacs, KJ5SKJ · DM62

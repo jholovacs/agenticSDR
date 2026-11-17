@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
 using AgenticSdr.Dsp;
+using AgenticSdr.Privilege;
 using AgenticSdr.Processors;
 using AgenticSdr.Radio;
 
@@ -109,6 +110,7 @@ public sealed class RadioSession(
     SpeechDecoder speech,
     ProcessorCatalog processors,
     AntennaStore antennas,
+    RadioPreferenceStore radioPreference,
     ILogger<RadioSession> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -518,14 +520,17 @@ public sealed class RadioSession(
         {
             _device?.Dispose();
             _device = null;
-            IRadioDevice device = await Task.Run(() =>
+            (IRadioDevice device, RadioDeviceInfo info) = await Task.Run(() =>
             {
                 IReadOnlyList<RadioDeviceInfo> devices = RadioDevices.List();
                 if (index < 0 || index >= devices.Count)
                     throw new RadioException($"No SDR at index {index}. {devices.Count} device(s) are visible.");
-                return RadioDevices.Open(devices[index], options.SampleRateHz, options.AutoGain ? null : options.GainDb, options.Ppm);
+                RadioDeviceInfo chosen = devices[index];
+                IRadioDevice opened = RadioDevices.Open(chosen, options.SampleRateHz, options.AutoGain ? null : options.GainDb, options.Ppm);
+                return (opened, chosen);
             }, cancellationToken);
             _device = device;
+            radioPreference.Save(info);
             lock (_statusGate)
             {
                 _deviceName = device.Capabilities.Name;
@@ -542,6 +547,21 @@ public sealed class RadioSession(
         {
             _gate.Release();
         }
+    }
+
+    public object RadioPreferenceView()
+    {
+        IReadOnlyList<RadioDeviceInfo> devices = RadioDevices.List();
+        int index = radioPreference.ResolveIndex(devices);
+        RadioPreference? saved = radioPreference.Load();
+        return new
+        {
+            index,
+            serial = saved?.Serial,
+            driver = saved?.Driver,
+            name = saved?.Name ?? (index < devices.Count ? devices[index].Name : null),
+            simulateTransmit = saved?.SimulateTransmit ?? false
+        };
     }
 
     public void Close()

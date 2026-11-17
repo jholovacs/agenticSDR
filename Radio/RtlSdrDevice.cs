@@ -24,6 +24,7 @@ public sealed class RtlSdrDevice : IRadioDevice
     public double CenterFrequencyHz { get; private set; }
     public double SampleRateHz { get; }
     public SampleEncoding Encoding => SampleEncoding.Cu8;
+    public bool CanTransmit => Capabilities.CanTransmit;
     public int ReadAlignment => 512;
 
     public static IReadOnlyList<RadioDeviceInfo> List()

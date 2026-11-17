@@ -1,3 +1,5 @@
+using AgenticSdr.Privilege;
+
 namespace AgenticSdr.Host;
 
 /// <summary>

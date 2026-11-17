@@ -1,5 +1,5 @@
 /**
- * Shared radio listener for Host (5088) and Station (5090).
+ * Shared radio listener for Host (5088) and mode desks that proxy receive.
  * Mount a full panel, or connect to existing controls.
  */
 (() => {
@@ -109,6 +109,13 @@
       const node = context.createBufferSource();
       node.buffer = buffer;
       node.connect(liveGain || context.destination);
+      node.onended = () => {
+        try { node.disconnect(); } catch { /* already gone */ }
+      };
+      // Keep a short lead-in. If the tab stalled, re-pad once instead of
+      // scheduling a clicky trail of near-past buffers.
+      if (nextTime < context.currentTime - 0.05)
+        nextTime = context.currentTime + 0.12;
       const start = Math.max(nextTime, context.currentTime + 0.02);
       node.start(start);
       nextTime = start + buffer.duration;
