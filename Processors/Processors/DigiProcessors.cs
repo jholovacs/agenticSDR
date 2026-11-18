@@ -65,6 +65,10 @@ public sealed class JttyProcessor() : DigiProcessorBase(
     "jtty", "JTTY", "jtty",
     (audio, rate) => JttyDecoder.Format(JttyDecoder.Decode(audio, rate)));
 
+public sealed class WsprProcessor() : DigiProcessorBase(
+    "wspr", "WSPR", "wspr",
+    (audio, rate) => WsprDecoder.Format(WsprDecoder.Decode(audio, rate)));
+
 public sealed class VaracProcessor() : DigiProcessorBase(
     "varac", "VarAC", "varac",
     XaraMonitor.FormatAudio);

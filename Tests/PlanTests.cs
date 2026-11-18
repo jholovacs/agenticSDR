@@ -42,12 +42,17 @@ public class BandPlanTests
     }
 
     [Fact]
-    public void Known_service_channels_list_cb_gmrs_noaa_and_digi()
+    public void Known_service_channels_list_cb_gmrs_noaa_marine_iss_and_digi()
     {
         IReadOnlyList<KnownChannelGroup> groups = Region2BandPlan.KnownServiceChannels();
-        Assert.Equal(["cb", "gmrs", "noaa", "ft8", "js8", "olivia", "jtty", "varac"], groups.Select(group => group.Id).ToArray());
+        Assert.Equal(["cb", "gmrs", "noaa", "marine", "iss", "ft8", "js8", "olivia", "jtty", "wspr", "varac"], groups.Select(group => group.Id).ToArray());
         Assert.Contains(groups.Single(group => group.Id == "cb").Channels, channel => channel.Label == "19 highway" && channel.FrequencyHz == 27_185_000 && channel.Mode == "am");
         Assert.Contains(groups.Single(group => group.Id == "noaa").Channels, channel => channel.Label == "WX1" && channel.FrequencyHz == 162_550_000 && channel.Mode == "nbfm");
+        Assert.Contains(groups.Single(group => group.Id == "marine").Channels, channel => channel.Label == "16 distress calling" && channel.FrequencyHz == 156_800_000 && channel.Mode == "nbfm");
+        Assert.Contains(groups.Single(group => group.Id == "marine").Channels, channel => channel.Label == "2182 kHz distress" && channel.FrequencyHz == 2_182_000 && channel.Mode == "usb");
+        Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.Label == "voice downlink" && channel.FrequencyHz == 145_800_000 && channel.Mode == "nbfm");
+        Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.Label == "APRS" && channel.FrequencyHz == 145_825_000 && channel.Mode == "packet");
+        Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.FrequencyHz == 437_800_000 && channel.Mode == "nbfm");
         Assert.DoesNotContain(groups.Single(group => group.Id == "gmrs").Channels, channel => channel.Name.Contains("input", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(22, groups.Single(group => group.Id == "gmrs").Channels.Count);
         Assert.Contains(groups.Single(group => group.Id == "ft8").Channels, channel => channel.FrequencyHz == 28_074_000 && channel.Mode == "ft8" && channel.Label.Contains("10 m", StringComparison.Ordinal));
@@ -55,6 +60,20 @@ public class BandPlanTests
         Assert.Contains(groups.Single(group => group.Id == "olivia").Channels, channel => channel.Mode == "olivia");
         Assert.Contains(groups.Single(group => group.Id == "jtty").Channels, channel => channel.Mode == "jtty");
         Assert.Contains(groups.Single(group => group.Id == "varac").Channels, channel => channel.FrequencyHz == 14_105_000 && channel.Mode == "varac");
+    }
+
+    [Fact]
+    public void Iss_downlinks_enable_doppler_window_and_labels()
+    {
+        Assert.Equal(DopplerFilter.VhfHalfWindowHz, Region2BandPlan.IssDopplerMaxHz(145_800_000));
+        Assert.Equal(DopplerFilter.UhfHalfWindowHz, Region2BandPlan.IssDopplerMaxHz(437_800_000));
+        Assert.Equal(0, Region2BandPlan.IssDopplerMaxHz(146_520_000));
+        Assert.Equal("2 m ISS voice downlink", Region2BandPlan.SourceLabel(145_800_000));
+        Assert.Equal("2 m ISS APRS", Region2BandPlan.SourceLabel(145_825_000));
+        Assert.Equal(RadioMode.Packet, Region2BandPlan.HintAt(145_825_000).PreferredMode);
+        Assert.Equal(RadioMode.Nbfm, Region2BandPlan.HintAt(437_800_000).PreferredMode);
+        Assert.True(DialFrequency.PublishedSearchHz(RadioMode.Nbfm, 145_800_000) >= DopplerFilter.VhfHalfWindowHz);
+        Assert.True(DialFrequency.PublishedSearchHz(RadioMode.Nbfm, 437_800_000) >= DopplerFilter.UhfHalfWindowHz);
     }
 
     [Fact]

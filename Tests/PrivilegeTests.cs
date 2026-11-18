@@ -85,6 +85,8 @@ public class PrivilegeTests
     [InlineData(LicenseClass.Extra, AmateurMode.Nbfm, 100_000_000, 5, false)]
     [InlineData(LicenseClass.Extra, AmateurMode.Am, 27_185_000, 5, false)]
     [InlineData(LicenseClass.Extra, AmateurMode.Nbfm, 162_550_000, 5, false)]
+    [InlineData(LicenseClass.Extra, AmateurMode.Nbfm, 156_800_000, 5, false)]
+    [InlineData(LicenseClass.Extra, AmateurMode.Usb, 2_182_000, 5, false)]
     [InlineData(LicenseClass.Extra, AmateurMode.Nbfm, 462_562_500, 5, false)]
     [InlineData(LicenseClass.Extra, AmateurMode.Am, 1_000_000, 5, false)]
     [InlineData(LicenseClass.Extra, AmateurMode.Data, 219_500_000, 5, false)]

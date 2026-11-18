@@ -15,7 +15,7 @@ public sealed partial class RadioSession
     public Task<ScanReport> ScanAsync(string bandId, CancellationToken cancellationToken)
     {
         HamBand band = Region2BandPlan.Find(bandId)
-            ?? throw new ArgumentException($"Unknown band '{bandId}'. Use list_ham_bands for ids such as 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, or dmr.");
+            ?? throw new ArgumentException($"Unknown band '{bandId}'. Use list_ham_bands for ids such as 2m, 70cm, 40m, fm-bc, am-bc, noaa, marine, cb, gmrs, or dmr.");
 
         return BorrowRadioAsync(ct => ScanWhileHoldingAsync(band, ct), cancellationToken);
     }
@@ -113,7 +113,7 @@ public sealed partial class RadioSession
                     }
                     else
                     {
-                        bool digiDial = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+                        bool digiDial = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac;
                         if (SignalContent.ShouldIgnore(refined.FrequencyHz, measured.Peak, digiDial, measured.Samples, measured.SampleRate, measured.CenterHz, knownChannel))
                         {
                             ignored++;
@@ -131,7 +131,7 @@ public sealed partial class RadioSession
 
                 Classification classification = ModeClassifier.Classify(refined, hint);
                 // Digi dials only claim occupancy until a listen decodes text — do not inflate them to 70%.
-                bool digiHint = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+                bool digiHint = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac;
                 if (knownChannel && hint.PreferredMode != RadioMode.Unknown && !digiHint)
                     classification = new Classification(hint.PreferredMode, Math.Max(classification.Confidence, 0.7), classification.BandwidthHz, refined.SnrDb);
                 if (ranked[i].Mode == RadioMode.Cw && ModeBandwidth.Fits(RadioMode.Cw, refined.BandwidthHz))
@@ -194,7 +194,7 @@ public sealed partial class RadioSession
 
             SpectralPeak peak = measured.Peak;
             BandHint hint = Region2BandPlan.HintAt(peak.FrequencyHz);
-            bool digiDial = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac;
+            bool digiDial = hint.PreferredMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac;
             if (SignalContent.ShouldIgnore(frequencyHz, peak, digiDial, measured.Samples, measured.SampleRate, measured.CenterHz))
             {
                 SetStatus("idle", 1, "That carrier has no voice or data. It looks like a local spur.");
@@ -247,7 +247,7 @@ public sealed partial class RadioSession
                 (mode, tuneHz, confidence, _) = await ResolveAutoModeAsync(device, frequencyHz, ct);
             }
 
-            if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac)
+            if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac)
             {
                 if (Region2BandPlan.TryDigiDial(tuneHz, mode, out double dial) || Region2BandPlan.TryDigiDial(frequencyHz, mode, out dial))
                     tuneHz = dial;
@@ -258,6 +258,8 @@ public sealed partial class RadioSession
                     await WaitForDigiSlot(ct, periodSeconds: 15, earlySeconds: 2.0);
                 else if (mode is RadioMode.Js8)
                     await WaitForDigiSlot(ct, periodSeconds: 30, earlySeconds: 2.0);
+                else if (mode is RadioMode.Wspr)
+                    await WaitForDigiSlot(ct, periodSeconds: 120, earlySeconds: 2.0);
             }
 
             SetStatus("listening", 0.25, "Checking published-channel frequency…");
@@ -284,7 +286,8 @@ public sealed partial class RadioSession
                     shiftHz,
                     device.SampleRateHz,
                     demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main,
-                    allowUsbSidebandFlip: device.DirectSampling);
+                    allowUsbSidebandFlip: device.DirectSampling,
+                    dopplerMaxHz: Region2BandPlan.IssDopplerMaxHz(tuneHz));
                 await CaptureDemodAsync(device, loHz, seconds, demod, demodMode, ct);
                 result = demod.Finish(normalize: true);
             }
@@ -337,7 +340,7 @@ public sealed partial class RadioSession
             {
                 if (mode == RadioMode.Cw || sidebandMorse)
                     AppendMorse(decoded);
-                else if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac)
+                else if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac)
                     AppendDigi(mode, decoded);
                 else if (mode == RadioMode.Packet)
                     AppendPacket(decoded);

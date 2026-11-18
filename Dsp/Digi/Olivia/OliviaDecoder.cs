@@ -20,10 +20,10 @@ public static class OliviaDecoder
 {
     public const int SampleRate = 8_000;
     /// <summary>
-    /// Nominal USB audio center. Listings disagree (Wikipedia dial+1500 vs many fldigi setups at ~1000),
-    /// so decode searches both; DigiActivity still uses this as the band midpoint.
+    /// Published calling channels use dial + 1500 Hz as the tone-stack center (fldigi / Olivia group).
+    /// Decode still hunts 1000 and 1250 Hz cursors used by some operators.
     /// </summary>
-    public const double CenterHz = 1_250;
+    public const double CenterHz = 1_500;
     /// <summary>Calling-frequency bandwidth used for occupancy scoring and UI width.</summary>
     public const double BandwidthHz = 250;
     public const int Tones = 8;
@@ -31,10 +31,13 @@ public static class OliviaDecoder
     private const int BlockSymbols = 64;
     private const ulong Scrambler = 0xE257E6D0291574ECUL;
     private const int ScrambleShift = 13;
-    /// <summary>Walsh peak²/noise mean; weak HF copy sits lower than a clean round-trip.</summary>
-    private const double MinConfidence = 14.0;
-    /// <summary>Common waterfall cursors used for Olivia above the USB dial.</summary>
-    private static readonly double[] NominalCenters = [1_000, 1_250, 1_500];
+    /// <summary>
+    /// Walsh peak²/noise mean. Clean self-tests sit well above 20; usable on-air HF often lands ~10–18.
+    /// LooksLikeChat still rejects noise Walsh peaks.
+    /// </summary>
+    private const double MinConfidence = 10.0;
+    /// <summary>Common waterfall cursors used for Olivia above the USB dial (calling = 1500 first).</summary>
+    private static readonly double[] NominalCenters = [1_500, 1_000, 1_250];
 
     /// <summary>Profiles tried in order; first is the HF calling convention.</summary>
     public static readonly OliviaProfile[] Profiles =
@@ -42,6 +45,7 @@ public static class OliviaDecoder
         new(8, 250, "8/250"),
         new(8, 500, "8/500"),
         new(16, 500, "16/500"),
+        new(16, 1_000, "16/1000"),
         new(32, 1_000, "32/1000")
     ];
 
@@ -69,6 +73,7 @@ public static class OliviaDecoder
             return [];
 
         float[] wave = Resample(audio, sampleRate, SampleRate);
+        SoftAgc(wave);
         if (!HasToneEnergy(wave))
             return [];
 
@@ -77,7 +82,7 @@ public static class OliviaDecoder
         var seen = new HashSet<int>();
         void Offer(double hz)
         {
-            int key = (int)Math.Round(hz / 12.5) * 12; // ~12.5 Hz buckets
+            int key = (int)Math.Round(hz / 12.5); // 12.5 Hz buckets (half of 8/250 tone spacing)
             if (hz < 600 || hz > 2_400 || !seen.Add(key))
                 return;
             centers.Add(hz);
@@ -86,21 +91,20 @@ public static class OliviaDecoder
         foreach (double nominal in NominalCenters)
         {
             double offset = DialFrequency.EstimateBandOffsetHz(
-                wave, SampleRate, nominal, BandwidthHz * 0.5, DialFrequency.DefaultSearchHz + 100);
-            foreach (double c in DialFrequency.CenterCandidates(nominal, offset, polishHz: 75, polishStepHz: 25))
+                wave, SampleRate, nominal, BandwidthHz * 0.5, DialFrequency.DefaultSearchHz + 150, stepHz: 12.5);
+            foreach (double c in DialFrequency.CenterCandidates(nominal, offset, polishHz: 100, polishStepHz: 12.5))
                 Offer(c);
         }
 
-        // One more pass: peak energy anywhere in the Olivia USB window.
         double wide = DialFrequency.EstimateBandOffsetHz(
-            wave, SampleRate, CenterHz, 500, DialFrequency.DefaultSearchHz + 200);
+            wave, SampleRate, CenterHz, 500, DialFrequency.DefaultSearchHz + 250, stepHz: 12.5);
         Offer(CenterHz + wide);
 
         OliviaMessage? best = null;
         double bestConf = 0;
-        foreach (OliviaProfile profile in Profiles)
+        void Consider(OliviaProfile profile, IEnumerable<double> tryCenters)
         {
-            foreach (double center in centers)
+            foreach (double center in tryCenters)
             {
                 if (TryDecode(wave, profile, center, out OliviaMessage message, out double conf)
                     && conf > bestConf)
@@ -109,10 +113,18 @@ public static class OliviaDecoder
                     best = message;
                 }
             }
+        }
 
-            // Keep the calling profile's hit if it is clearly good; otherwise try wider T/BW.
-            if (best is not null && bestConf >= MinConfidence * 1.5)
-                break;
+        // Calling 8/250 first — most HF watering-hole traffic.
+        Consider(Profiles[0], centers);
+        if (best is null || bestConf < MinConfidence * 1.5)
+        {
+            for (int i = 1; i < Profiles.Length; i++)
+            {
+                Consider(Profiles[i], centers);
+                if (best is not null && bestConf >= MinConfidence * 1.5)
+                    break;
+            }
         }
 
         return best is null ? [] : [best];
@@ -200,7 +212,8 @@ public static class OliviaDecoder
         string bestText = "";
         double bestConf = 0;
         double bestSnr = 0;
-        int timingStep = Math.Max(1, sps / 8);
+        // sps/16 (~2 ms at 8/250) catches weak locks the coarser sps/8 grid misses.
+        int timingStep = Math.Max(1, sps / 16);
         for (int timing = 0; timing < sps; timing += timingStep)
         {
             var softBlocks = new List<double[]>();
@@ -241,16 +254,35 @@ public static class OliviaDecoder
         return true;
     }
 
+    /// <summary>Raise quiet HF digi audio to a stable RMS so Goertzel magnitudes stay comparable.</summary>
+    private static void SoftAgc(float[] wave)
+    {
+        double sum = 0;
+        for (int i = 0; i < wave.Length; i++)
+            sum += wave[i] * wave[i];
+        double rms = Math.Sqrt(sum / Math.Max(1, wave.Length));
+        // Only lift truly quiet HF digi; leave normal/noisy clips alone so noise does not get “boosted” into false Walsh peaks.
+        if (rms < 1e-9 || rms > 0.05)
+            return;
+        float gain = (float)(0.12 / rms);
+        for (int i = 0; i < wave.Length; i++)
+            wave[i] *= gain;
+    }
+
     /// <summary>Reject Walsh peaks that only invent punctuation soup from noise.</summary>
     private static bool LooksLikeChat(string text)
     {
+        text = text.Trim();
         int letters = 0;
         int printable = 0;
         int weird = 0;
+        int spaces = 0;
         foreach (char ch in text)
         {
             if (ch is >= ' ' and <= '~')
                 printable++;
+            if (ch == ' ')
+                spaces++;
             if (char.IsLetterOrDigit(ch) || ch is ' ' or '.' or ',' or '?' or '!' or '/' or '-')
                 letters++;
             else if (ch is >= ' ' and <= '~')
@@ -259,13 +291,56 @@ public static class OliviaDecoder
 
         if (printable < 4)
             return false;
-        // Real keyboard chat is mostly letters/spaces; noise Walsh peaks spray punctuation.
-        if (letters < printable * 0.7 || weird > printable * 0.25)
+        // Real keyboard chat is mostly letters/spaces; any bracket/symbol soup is noise.
+        if (letters < printable * 0.75 || weird > 0)
             return false;
-        // Reject short punctuation soup with no space (typical false Walsh peaks).
-        if (printable < 12 && !text.Contains(' ', StringComparison.Ordinal) && weird > 0)
+
+        int upper = 0, lower = 0, digits = 0;
+        foreach (char ch in text)
+        {
+            if (char.IsUpper(ch)) upper++;
+            else if (char.IsLower(ch)) lower++;
+            else if (char.IsDigit(ch)) digits++;
+        }
+
+        // On-air Olivia is almost always typed uppercase; lowercase/digit soup is Walsh noise.
+        if (lower > 0 || upper < 3)
+            return false;
+        if (digits > upper)
+            return false;
+
+        // Short no-space blobs: allow a single UPPERCASE word (HELLO, callsign) only.
+        if (spaces == 0)
+        {
+            if (printable is < 4 or > 10)
+                return false;
+            foreach (char ch in text)
+            {
+                if (!char.IsLetterOrDigit(ch))
+                    return false;
+            }
+        }
+        else if (printable < 6)
+            return false;
+        // Reject highly repetitive Walsh garbage (e.g. GZZGZZGZZ…).
+        if (printable >= 8 && DistinctRatio(text) < 0.35)
             return false;
         return true;
+    }
+
+    private static double DistinctRatio(string text)
+    {
+        var set = new HashSet<char>();
+        int n = 0;
+        foreach (char ch in text)
+        {
+            if (ch == ' ')
+                continue;
+            set.Add(char.ToUpperInvariant(ch));
+            n++;
+        }
+
+        return n == 0 ? 0 : set.Count / (double)n;
     }
 
     private static string DecodeStream(List<double[]> symbols, int bitsPerSymbol, out double bestConf)
@@ -411,6 +486,11 @@ public static class OliviaDecoder
         return binary & ((1 << bitsPerSymbol) - 1);
     }
 
+    /// <summary>
+    /// Jalocha / fldigi forward FHT (fine→coarse): (a,b) → (a+b, b−a).
+    /// Must match InverseFht; the older (a+b, a−b) both-ways transform was self-consistent
+    /// but could not decode on-air Olivia from fldigi-family transmitters.
+    /// </summary>
     private static void ForwardFht(double[] data)
     {
         int n = data.Length;
@@ -423,13 +503,30 @@ public static class OliviaDecoder
                     double a = data[i + j];
                     double b = data[i + j + step];
                     data[i + j] = a + b;
-                    data[i + j + step] = a - b;
+                    data[i + j + step] = b - a;
                 }
             }
         }
     }
 
-    private static void InverseFht(double[] data) => ForwardFht(data);
+    /// <summary>Jalocha / fldigi inverse FHT (coarse→fine): (a,b) → (a−b, a+b).</summary>
+    private static void InverseFht(double[] data)
+    {
+        int n = data.Length;
+        for (int step = n / 2; step > 0; step >>= 1)
+        {
+            for (int i = 0; i < n; i += step << 1)
+            {
+                for (int j = 0; j < step; j++)
+                {
+                    double a = data[i + j];
+                    double b = data[i + j + step];
+                    data[i + j] = a - b;
+                    data[i + j + step] = a + b;
+                }
+            }
+        }
+    }
 
     private static float[] Resample(ReadOnlySpan<float> audio, int fromRate, int toRate)
     {

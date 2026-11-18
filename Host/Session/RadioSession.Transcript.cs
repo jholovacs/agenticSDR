@@ -82,11 +82,12 @@ public sealed partial class RadioSession
             if (line.Length == 0)
                 continue;
 
-            bool banner = line is "FT8" or "JS8" or "Olivia" or "JTTY" or "VarAC"
+            bool banner = line is "FT8" or "JS8" or "Olivia" or "JTTY" or "WSPR" or "VarAC"
                 || line.StartsWith("FT8 ", StringComparison.Ordinal)
                 || line.StartsWith("JS8 ", StringComparison.Ordinal)
                 || line.StartsWith("Olivia ", StringComparison.Ordinal)
                 || line.StartsWith("JTTY ", StringComparison.Ordinal)
+                || line.StartsWith("WSPR ", StringComparison.Ordinal)
                 || line.StartsWith("VarAC ", StringComparison.Ordinal);
             if (banner)
             {
@@ -152,27 +153,56 @@ public sealed partial class RadioSession
         RadioMode.Js8 => Js8Decoder.Format(Js8Decoder.Decode(audio, rate)),
         RadioMode.Olivia => OliviaDecoder.Format(OliviaDecoder.Decode(audio, rate)),
         RadioMode.Jtty => JttyDecoder.Format(JttyDecoder.Decode(audio, rate)),
+        RadioMode.Wspr => WsprDecoder.Format(WsprDecoder.Decode(audio, rate)),
         RadioMode.Varac => XaraMonitor.FormatAudio(audio, rate),
         _ => ""
     };
 
-    /// <summary>Clip length. FT8 pads past 15 s; JS8 uses ~32 s so Slow and stacked Fast/Turbo slots fit.</summary>
+    /// <summary>Message line from a Format() banner block (skips the header / explanation).</summary>
+    private static string DigiMessageBody(string formatted)
+    {
+        foreach (string raw in formatted.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            string line = raw.TrimEnd();
+            if (line.Length == 0 || (raw.Length > 0 && char.IsWhiteSpace(raw[0])))
+                continue;
+            if (line.StartsWith("Olivia ", StringComparison.Ordinal)
+                || line.StartsWith("JTTY ", StringComparison.Ordinal)
+                || line.StartsWith("WSPR ", StringComparison.Ordinal)
+                || line.StartsWith("FT8 ", StringComparison.Ordinal)
+                || line.StartsWith("JS8 ", StringComparison.Ordinal)
+                || line.StartsWith("VarAC ", StringComparison.Ordinal)
+                || line is "FT8" or "JS8" or "Olivia" or "JTTY" or "WSPR" or "VarAC")
+                continue;
+            return line;
+        }
+
+        return "";
+    }
+
+    /// <summary>Clip / rolling-buffer length. FT8 pads past 15 s; JS8 uses ~32 s so Slow and stacked Fast/Turbo slots fit.</summary>
     private static int DigiListenSeconds(RadioMode mode) => mode switch
     {
         RadioMode.Ft8 => 18,
         RadioMode.Js8 => 32,
-        RadioMode.Olivia => 10,
+        // 8/250 needs ~2 s per FEC block; keep several blocks so a CQ fits in one window.
+        RadioMode.Olivia => 16,
         RadioMode.Jtty => 16,
+        // Full ~110.6 s beacon plus pad inside the 120 s UTC slot.
+        RadioMode.Wspr => 125,
         RadioMode.Varac => 20,
         _ => 15
     };
 
-    /// <summary>Live digi chop length — the protocol period, not the clip pad.</summary>
+    /// <summary>Live digi chop / decode cadence — protocol period for FT8/JS8/WSPR; sliding step for Olivia/JTTY.</summary>
     private static int DigiPeriodSeconds(RadioMode mode) => mode switch
     {
         RadioMode.Ft8 => 15,
         // 30 s is the LCM of Normal (15), Fast (10), Turbo (6), and Slow (30).
         RadioMode.Js8 => 30,
+        RadioMode.Wspr => 120,
+        // Overlapping 4 s steps on a longer buffer so mid-block CQs still decode.
+        RadioMode.Olivia or RadioMode.Jtty => 4,
         _ => DigiListenSeconds(mode)
     };
 
@@ -204,6 +234,7 @@ public sealed partial class RadioSession
         "js8" => "JS8",
         "olivia" => "Olivia",
         "jtty" => "JTTY",
+        "wspr" => "WSPR",
         "varac" => "VarAC",
         "packet" => "Packet",
         "ribbit" => "Ribbit",
@@ -272,7 +303,7 @@ public sealed partial class RadioSession
     {
         foreach (CallingChannel channel in band.Calling)
         {
-            if (channel.Mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
+            if (channel.Mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr
                 or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit))
                 continue;
             if (channel.FrequencyHz < device.Capabilities.MinFrequencyHz
@@ -310,6 +341,7 @@ public sealed partial class RadioSession
             {
                 RadioMode.Olivia => OliviaDecoder.BandwidthHz,
                 RadioMode.Jtty => JttyDecoder.SpanHz,
+                RadioMode.Wspr => WsprDecoder.BandwidthHz,
                 RadioMode.Varac => XaraMonitor.BandwidthHz,
                 RadioMode.Packet or RadioMode.Ribbit => 12_500,
                 _ => 3_000
@@ -333,7 +365,7 @@ public sealed partial class RadioSession
     {
         if (Region2BandPlan.TryDigiDial(frequencyHz, mode, out double matched) && Math.Abs(matched - dialHz) < 1)
             return true;
-        if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+        if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr or RadioMode.Varac)
             return frequencyHz >= dialHz - 500 && frequencyHz <= dialHz + toleranceHz;
         return Math.Abs(frequencyHz - dialHz) <= toleranceHz;
     }
@@ -527,6 +559,8 @@ public sealed partial class RadioSession
                 AlignDigiSlot(cancellationToken, periodSeconds: 15);
             else if (mode is RadioMode.Js8)
                 AlignDigiSlot(cancellationToken, periodSeconds: 30);
+            else if (mode is RadioMode.Wspr)
+                AlignDigiSlot(cancellationToken, periodSeconds: 120);
             // One Hilbert stream for the whole listen — per-chunk FIR resets destroy FT8 Costas.
             Iq.DirectSamplingState? ds = device.DirectSampling ? new Iq.DirectSamplingState() : null;
             long got = 0;
@@ -629,6 +663,8 @@ public sealed partial class RadioSession
         RadioMode.Olivia => $"Olivia clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
         RadioMode.Jtty when string.IsNullOrWhiteSpace(decoded) => "JTTY clip ready. No text decoded.",
         RadioMode.Jtty => $"JTTY clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
+        RadioMode.Wspr when string.IsNullOrWhiteSpace(decoded) => "WSPR clip ready. No beacon decoded.",
+        RadioMode.Wspr => $"WSPR clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
         RadioMode.Varac when string.IsNullOrWhiteSpace(decoded) => "VarAC clip ready. No text decoded (xara/zara monitor may be missing).",
         RadioMode.Varac => $"VarAC clip ready. {decoded!.Count(ch => ch == '\n') + 1} line(s).",
         RadioMode.Packet when string.IsNullOrWhiteSpace(decoded) => "Packet clip ready. No frames decoded.",

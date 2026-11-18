@@ -148,6 +148,7 @@ public sealed partial class RadioSession(
     private int _campChannels = 1;
     private int _campSquelch = 50;
     private int _radioBorrow;
+    private string _lastLiveDigiBody = "";
 
     /// <summary>True while a scan, guess, inspect, or clip listen holds the radio away from camp.</summary>
     public bool RadioBorrowed => Volatile.Read(ref _radioBorrow) > 0;

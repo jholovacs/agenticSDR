@@ -141,13 +141,44 @@ function mhzText(hz) {
   return (hz / 1e6).toFixed(6);
 }
 
+async function copyText(text, el) {
+  const value = String(text || "").trim();
+  if (!value)
+    return;
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (!el)
+    return;
+  const previous = el.dataset.copyLabel || el.textContent;
+  el.dataset.copyLabel = previous;
+  el.textContent = "Copied";
+  el.classList.add("copied");
+  clearTimeout(el._copyTimer);
+  el._copyTimer = setTimeout(() => {
+    el.textContent = el.dataset.copyLabel || previous;
+    el.classList.remove("copied");
+  }, 900);
+}
+
 function setBusy(value) {
   busy = value;
   const live = liveAbort !== null;
   document.querySelectorAll("button").forEach((button) => {
     if (button.closest("dialog")) return;
     if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop" || button.id === "camp-stop") return;
-    if (button.id === "record" || button.id === "record-transcript" || button.classList.contains("row-listen")) return;
+    if (button.id === "record" || button.id === "record-transcript"
+      || button.classList.contains("row-listen") || button.classList.contains("freq-copy")) return;
     // Prompts stay usable while live audio plays (get_transcript, questions about what you hear).
     if (button.id === "llm-send") return;
     if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa" || button.classList.contains("channel-tune"))) return;
@@ -362,6 +393,7 @@ function transcriptSource(span) {
   if (kind === "js8") return "JS8";
   if (kind === "olivia") return "Olivia";
   if (kind === "jtty") return "JTTY";
+  if (kind === "wspr") return "WSPR";
   if (kind === "varac") return "VarAC";
   if (kind === "packet") return "Packet";
   if (kind === "ribbit") return "Ribbit";
@@ -406,7 +438,7 @@ function renderTranscript(spans) {
   updateTranscriptButton();
   morse.replaceChildren();
   if (spans.length === 0) {
-    morse.textContent = "Morse, FT8, JS8, Olivia, JTTY, VarAC, packet, Ribbit, RDS, and speech appear here.";
+    morse.textContent = "Morse, FT8, JS8, WSPR, Olivia, JTTY, VarAC, packet, Ribbit, RDS, and speech appear here.";
     return;
   }
 
@@ -416,7 +448,7 @@ function renderTranscript(spans) {
     block.className = span.kind === "morse" ? "morse"
       : span.kind === "packet" ? "packet"
       : span.kind === "ribbit" ? "ribbit"
-      : span.kind === "ft8" || span.kind === "js8" || span.kind === "olivia" || span.kind === "jtty" || span.kind === "varac" ? "ft8"
+      : span.kind === "ft8" || span.kind === "js8" || span.kind === "olivia" || span.kind === "jtty" || span.kind === "wspr" || span.kind === "varac" ? "ft8"
       : span.kind === "rds" ? "rds"
       : span.kind === "note" ? "note"
       : "speech";
@@ -643,7 +675,7 @@ function bandIdForFrequency(frequencyHz) {
 async function tuneKnownChannel(frequencyHz, heard, bandId) {
   showError("");
   syncTuneFrequency(mhzText(frequencyHz));
-  const digiGroups = new Set(["ft8", "js8", "olivia", "jtty", "varac"]);
+  const digiGroups = new Set(["ft8", "js8", "olivia", "jtty", "wspr", "varac", "iss"]);
   const bandChoice = digiGroups.has(bandId) ? (bandIdForFrequency(frequencyHz) || bandId) : bandId;
   if ([...band.options].some((option) => option.value === bandChoice))
     band.value = bandChoice;
@@ -771,19 +803,25 @@ function renderHits(report) {
   empty.hidden = rows.length > 0;
   scanNote.textContent = report?.warning || (report ? `${rows.length} signal${rows.length === 1 ? "" : "s"}` : "None yet");
   for (const hit of rows) {
+    const freq = mhzText(hit.frequencyHz);
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td class="num">${mhzText(hit.frequencyHz)}</td>
+      <td class="num"><button type="button" class="freq-copy" title="Copy ${freq} MHz">${freq}</button></td>
       <td>${hit.mode}</td>
       <td class="num">${Math.round(hit.confidence * 100)}%</td>
       <td class="num">${(hit.bandwidthHz / 1000).toFixed(1)}</td>
       <td class="num">${hit.snrDb.toFixed(0)}</td>
       <td>${hit.source}</td>
       <td><button type="button" class="ghost row-listen">Listen</button></td>`;
-    row.querySelector("button").addEventListener("click", () => {
+    const copyBtn = row.querySelector(".freq-copy");
+    copyBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      copyText(freq, copyBtn).catch(() => showError("Could not copy the frequency."));
+    });
+    row.querySelector(".row-listen").addEventListener("click", () => {
       document.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
       row.classList.add("selected");
-      syncTuneFrequency(mhzText(hit.frequencyHz));
+      syncTuneFrequency(freq);
       mode.value = hit.mode.toLowerCase();
       suggestedMode = mode.value;
       fillHearModes();
@@ -863,6 +901,7 @@ function modeToken(value) {
     js8: "JS8",
     olivia: "Olivia",
     jtty: "JTTY",
+    wspr: "WSPR",
     varac: "VarAC",
     dmr: "DMR",
     m17: "M17",
@@ -1086,6 +1125,7 @@ function channelWidthHz(mode) {
     case "js8": return 2_700;
     case "olivia": return 250;
     case "jtty": return 127; // occupied BW; 4×31.25 Hz tones (~94 Hz tone span)
+    case "wspr": return 6;
     case "varac": return 2_300;
     case "am": return 10_000;
     case "nbfm":
@@ -1816,11 +1856,11 @@ const tips = {
   ask: "The sentence for the model, such as “Scan 2 m and tell me what you hear.”",
   send: "Sends that sentence. The model asks this program to do the work.",
   tune: "Pick a band or a frequency and listen.",
-  band: `A named range of ${wiki("Radio_frequency", "frequencies")}. Amateur bands follow the ${wiki("Amateur_radio_frequency_allocations", "amateur allocations")}. Below 24 MHz on an RTL-SDR the tuner steps aside and the chip samples the antenna more directly (${wiki("High_frequency", "HF")}). Also listed: ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("Digital_mobile_radio", "DMR")}, and ${wiki("NOAA_Weather_Radio", "NOAA weather")}.`,
+  band: `A named range of ${wiki("Radio_frequency", "frequencies")}. Amateur bands follow the ${wiki("Amateur_radio_frequency_allocations", "amateur allocations")}. Below 24 MHz on an RTL-SDR the tuner steps aside and the chip samples the antenna more directly (${wiki("High_frequency", "HF")}). Also listed: ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("Digital_mobile_radio", "DMR")}, Marine VHF, and ${wiki("NOAA_Weather_Radio", "NOAA weather")}.`,
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("WSPR", "WSPR")} (120 s Type-1 beacons), Olivia (use mode Olivia on a calling dial, not plain USB), ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "channel-width": "How wide the demodulator listens for this mode after the radio samples arrive (CW narrow, broadcast FM wide).",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
@@ -1833,9 +1873,9 @@ const tips = {
   hear: "Mode to demodulate. Camp needs an explicit mode; it does not guess.",
   freq: "Frequency to listen to or camp on.",
   noaa: `Listens to one ${wiki("NOAA_Weather_Radio", "NOAA weather radio")} channel so you can tell the radio is working.`,
-  "known-channels": `Fixed ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("NOAA_Weather_Radio", "NOAA weather")}, and ${wiki("FT8", "FT8")} dial frequencies. Start with NOAA to check a new SDR. Open FT8 and click a dial such as 10 m · 28.074 when you want that mode without scanning.`,
+  "known-channels": `Fixed ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("NOAA_Weather_Radio", "NOAA weather")}, Marine VHF/HF, ${wiki("International_Space_Station", "ISS")} downlinks, and ${wiki("FT8", "FT8")} / ${wiki("WSPR", "WSPR")} dial frequencies. Start with NOAA to check a new SDR. Open ISS for voice or APRS during a pass — Doppler AFC keeps the downlink centered. Open Marine for channel 16, FT8 for a dial such as 10 m · 28.074, or WSPR for 20 m · 14.0956 when you want that mode without scanning.`,
   signals: "Peaks from the last scan.",
-  "col-mhz": `Frequency in megahertz. See ${wiki("Radio_frequency", "radio frequency")}.`,
+  "col-mhz": `Frequency in megahertz. Click a value to copy it. See ${wiki("Radio_frequency", "radio frequency")}.`,
   "col-mode": "The kind of signal the scan guessed.",
   "col-conf": "How sure that mode guess is. Listening is the check.",
   "col-khz": `How wide the signal is, in kilohertz. See ${wiki("Bandwidth_(signal_processing)", "bandwidth")}.`,
@@ -1844,7 +1884,7 @@ const tips = {
   selected: "The frequency you are hearing or camping on, with live audio and decoded text.",
   record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",
   transcript: `Downloads ${wiki("Morse_code", "Morse")}, ${wiki("FT8", "FT8")}, ${wiki("Radio_Data_System", "RDS")}, and ${wiki("Speech_recognition", "speech")} text as XML, with the time and which decoder wrote each line.`,
-  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")} / JS8 / Olivia / JTTY / VarAC (xara/zara monitor), ${wiki("Speech_recognition", "speech")}, DMR talkgroup / radio ID / alias text, and broadcast-FM ${wiki("Radio_Data_System", "RDS")} name and radio text.`,
+  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")} / JS8 / ${wiki("WSPR", "WSPR")} / Olivia / JTTY / VarAC (xara/zara monitor), ${wiki("Speech_recognition", "speech")}, DMR talkgroup / radio ID / alias text, and broadcast-FM ${wiki("Radio_Data_System", "RDS")} name and radio text.`,
   "operating-mode": "Explore scans and listens with the audio on. Camp is the camping workspace: camping starts when you press Camp, or when a schedule window is due.",
   volume: "How loud this page plays the radio. Camping stays silent until there is activity, then uses this level.",
   squelch: "How strong a station must be before Camp opens the speaker. Low is open; high stays quiet until a clear signal. The mark on the SNR meter is this threshold.",

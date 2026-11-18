@@ -62,9 +62,9 @@ public sealed class SdrTools(RadioSession session, CampBook camp, ClipStore clip
     [McpServerTool, Description("The current antenna and the bands it matches.")]
     public AntennaAdvice get_antenna() => session.Antenna();
 
-    [McpServerTool, Description("Scan one band for strong signals. Returns frequency, mode, bandwidth, SNR, and a source label. bandId examples: 2m, 70cm, 20m, 40m, fm-bc, am-bc, noaa, cb, gmrs, dmr.")]
+    [McpServerTool, Description("Scan one band for strong signals. Returns frequency, mode, bandwidth, SNR, and a source label. bandId examples: 2m, 70cm, 20m, 40m, fm-bc, am-bc, noaa, marine, cb, gmrs, dmr.")]
     public Task<ScanReport> scan_band(
-        [Description("Band id such as 2m, 70cm, 40m, fm-bc, am-bc, noaa, cb, gmrs, or dmr.")] string bandId,
+        [Description("Band id such as 2m, 70cm, 40m, fm-bc, am-bc, noaa, marine, cb, gmrs, or dmr.")] string bandId,
         CancellationToken cancellationToken = default) =>
         Guard(() => session.ScanAsync(bandId, cancellationToken));
 

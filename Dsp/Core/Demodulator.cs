@@ -38,13 +38,14 @@ public sealed class Demodulator
     /// <summary>
     /// Audio cutoff after the ×10 and ×5 decimation. The decimation itself stays ×10 then ×5 at 2.4 MS/s.
     /// </summary>
-    public static double ChannelCutoffHz(RadioMode mode) => mode switch
+    public static double ChannelCutoffHz(RadioMode mode, double dopplerMaxHz = 0) => mode switch
     {
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit => 8_000,
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
+            8_000 + Math.Max(0, dopplerMaxHz),
         RadioMode.Am => 5_000,
         RadioMode.Usb or RadioMode.Lsb => 4_000,
         RadioMode.Cw => 1_200,
-        RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac => 4_200,
+        RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac => 4_200,
         RadioMode.Raw => 20_000,
         _ => 16_000
     };
@@ -94,13 +95,15 @@ public sealed class Demodulator
     private readonly RealFir? _mpxDecim;
     private readonly List<float> _mpxScratch = [];
     private readonly List<float> _mpxDecimated = [];
+    private readonly DopplerFilter? _doppler;
 
     public Demodulator(
         RadioMode mode,
         double offsetHz = 0,
         double inputRate = InputRate,
         WbfmProgram wbfmProgram = WbfmProgram.Main,
-        bool allowUsbSidebandFlip = false)
+        bool allowUsbSidebandFlip = false,
+        double dopplerMaxHz = 0)
     {
         _mode = mode == RadioMode.Unknown ? RadioMode.Nbfm : mode;
         _inputRate = inputRate;
@@ -135,7 +138,7 @@ public sealed class Demodulator
             _decim1 = 10;
             _decim2 = 5;
             _stage1 = new ComplexDecimator(Filters.Lowpass(95, 90_000, InputRate), 10);
-            double channelHz = ChannelCutoffHz(_mode);
+            double channelHz = ChannelCutoffHz(_mode, dopplerMaxHz);
             _stage2 = new ComplexDecimator(Filters.Lowpass(127, channelHz, InputRate / 10), 5);
             _wbfmComplexRate = 0;
             _wbfmMux = null;
@@ -149,12 +152,16 @@ public sealed class Demodulator
             _decim2 = second;
             double midRate = inputRate / first;
             _stage1 = new ComplexDecimator(Filters.Lowpass(95, 0.45 * midRate, inputRate), first);
-            double voice = Math.Min(ChannelCutoffHz(_mode), audio * 0.40);
+            double voice = Math.Min(ChannelCutoffHz(_mode, dopplerMaxHz), audio * 0.40);
             _stage2 = new ComplexDecimator(Filters.Lowpass(127, voice, midRate), second);
             _wbfmComplexRate = 0;
             _wbfmMux = null;
             _mpxDecim = null;
         }
+
+        _doppler = dopplerMaxHz > 0 && _mode is RadioMode.Nbfm or RadioMode.Packet or RadioMode.Ribbit
+            ? new DopplerFilter(dopplerMaxHz, _audioRate)
+            : null;
 
         _ft8OutRate = _audioRate;
         if (_mode is RadioMode.Usb or RadioMode.Lsb)
@@ -175,7 +182,7 @@ public sealed class Demodulator
     }
 
     private static bool IsUsbDigi(RadioMode mode) =>
-        mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty;
+        mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr;
 
     public static DemodResult Demodulate(
         ReadOnlySpan<Complex> iq,
@@ -199,6 +206,9 @@ public sealed class Demodulator
 
     /// <summary>Sample rate of the audio Push has been producing. USB digimodes are 12 kHz. Everything else is about 48 kHz.</summary>
     public int PlaybackRate => IsUsbDigi(_mode) ? _ft8OutRate : _audioRate;
+
+    /// <summary>Tracked Doppler residual (Hz) when AFC is enabled; otherwise 0.</summary>
+    public double DopplerOffsetHz => _doppler?.OffsetHz ?? 0;
 
     /// <summary>1 for mono (and SCA). 2 for broadcast-FM main program (interleaved L/R, mono duplicated when unlocked).</summary>
     public int Channels => _wbfmMux?.Channels ?? 1;
@@ -261,6 +271,7 @@ public sealed class Demodulator
             return;
 
         List<Complex> baseBand = _scratchB;
+        _doppler?.Process(baseBand);
 
         switch (_mode)
         {
@@ -280,6 +291,7 @@ public sealed class Demodulator
             case RadioMode.Js8:
             case RadioMode.Olivia:
             case RadioMode.Jtty:
+            case RadioMode.Wspr:
                 DemodFt8(baseBand);
                 break;
             case RadioMode.Varac:
@@ -309,6 +321,7 @@ public sealed class Demodulator
             RadioMode.Js8 => Js8Decoder.Format(Js8Decoder.Decode(audio, rate)),
             RadioMode.Olivia => OliviaDecoder.Format(OliviaDecoder.Decode(audio, rate)),
             RadioMode.Jtty => JttyDecoder.Format(JttyDecoder.Decode(audio, rate)),
+            RadioMode.Wspr => WsprDecoder.Format(WsprDecoder.Decode(audio, rate)),
             RadioMode.Varac => FormatVarac(audio, rate),
             RadioMode.Packet => PacketDecoder.Decode(audio, rate),
             RadioMode.Ribbit => RibbitDecoder.Decode(audio, rate),

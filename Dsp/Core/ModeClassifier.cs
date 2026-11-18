@@ -20,16 +20,23 @@ public static class ModeClassifier
             mode = hint.PreferredMode;
             confidence = peak.SnrDb >= 6 ? 0.48 : 0.40;
         }
-        else if (!amLike && hint?.PreferredMode == RadioMode.Olivia && bw < 1_500 && peak.SnrDb >= 0)
+        // Olivia is often several dB below the noise floor and still copyable — do not require SNR ≥ 0.
+        else if (!amLike && hint?.PreferredMode == RadioMode.Olivia && bw < 1_500 && peak.SnrDb >= -8)
         {
             mode = RadioMode.Olivia;
-            confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
+            confidence = peak.SnrDb >= 6 ? 0.46 : peak.SnrDb >= 0 ? 0.38 : 0.32;
         }
         // JTTY occupies ~127 Hz; a multi-kHz AM/LSB footprint must not inherit the 7.090 dial label.
         else if (!amLike && hint?.PreferredMode == RadioMode.Jtty && bw < 800 && peak.SnrDb >= 0)
         {
             mode = RadioMode.Jtty;
             confidence = peak.SnrDb >= 6 ? 0.46 : 0.38;
+        }
+        // WSPR is ~6 Hz; peaks look like tiny CW. Prefer the dial even at negative SNR.
+        else if (!amLike && hint?.PreferredMode == RadioMode.Wspr && bw < 800 && peak.SnrDb >= -12)
+        {
+            mode = RadioMode.Wspr;
+            confidence = peak.SnrDb >= 6 ? 0.46 : peak.SnrDb >= 0 ? 0.38 : 0.30;
         }
         else if (!amLike && hint?.PreferredMode == RadioMode.Varac && bw < 3_200 && peak.SnrDb >= 0)
         {
@@ -100,7 +107,7 @@ public static class ModeClassifier
         }
 
         bool digiMode = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
-            or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit;
+            or RadioMode.Wspr or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit;
         if (hint is not null && hint.PreferredMode == mode && mode != RadioMode.Unknown && !digiMode)
             confidence = Math.Min(0.95, confidence + 0.1);
         else if (hint is not null && hint.PreferredMode == mode && digiMode)
@@ -138,6 +145,7 @@ public static class ModeClassifier
             "js8" or "js8call" => RadioMode.Js8,
             "olivia" => RadioMode.Olivia,
             "jtty" => RadioMode.Jtty,
+            "wspr" or "whisper" => RadioMode.Wspr,
             "varac" or "vara" or "xara" or "zara" => RadioMode.Varac,
             "wbfm" or "wfm" or "fmwb" => RadioMode.Wbfm,
             "dmr" => RadioMode.Dmr,
@@ -145,7 +153,7 @@ public static class ModeClassifier
             "packet" or "ax25" or "aprs" or "afsk" or "pkt" => RadioMode.Packet,
             "ribbit" or "rattlegram" or "ori" => RadioMode.Ribbit,
             "raw" => RadioMode.Raw,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, varac, wbfm, dmr, m17, packet, ribbit, or raw.")
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, wspr, varac, wbfm, dmr, m17, packet, ribbit, or raw.")
         };
     }
 }

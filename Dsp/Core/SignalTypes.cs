@@ -35,6 +35,9 @@ public enum RadioMode
     /// <summary>JTTY (WSJT-X 3.2) 4-tone GFSK keyboard/contest mode (receive).</summary>
     Jtty,
 
+    /// <summary>WSPR Type-1 beacons (call + grid + dBm) in 120-second UTC slots on published dials.</summary>
+    Wspr,
+
     /// <summary>VarAC keyboard chat over VARA HF. Decode uses an optional xara/zara monitor beside the app.</summary>
     Varac,
 

@@ -270,4 +270,49 @@ public class DemodTests
 
         return Math.Sqrt(iSum * iSum + qSum * qSum) / Math.Max(1, count);
     }
+
+    [Fact]
+    public void Doppler_filter_estimates_and_mixes_offset_toward_dc()
+    {
+        const double rate = 48_000;
+        const double offsetHz = 3_200;
+        int n = 4_096;
+        var samples = new List<Complex>(n);
+        for (int i = 0; i < n; i++)
+        {
+            double phase = 2 * Math.PI * offsetHz * i / rate;
+            samples.Add(new Complex(Math.Cos(phase), Math.Sin(phase)));
+        }
+
+        double estimated = DopplerFilter.EstimateOffsetHz(samples, rate, DopplerFilter.VhfHalfWindowHz);
+        Assert.InRange(estimated, offsetHz - 200, offsetHz + 200);
+
+        var filter = new DopplerFilter(DopplerFilter.VhfHalfWindowHz, rate);
+        // Feed enough audio for the AFC loop to update, then measure residual.
+        for (int round = 0; round < 8; round++)
+        {
+            var block = new List<Complex>(n);
+            for (int i = 0; i < n; i++)
+            {
+                double phase = 2 * Math.PI * offsetHz * (round * n + i) / rate;
+                block.Add(new Complex(Math.Cos(phase), Math.Sin(phase)));
+            }
+
+            filter.Process(block);
+            if (round == 7)
+            {
+                Assert.InRange(filter.OffsetHz, offsetHz * 0.5, offsetHz * 1.2);
+                double residual = DopplerFilter.EstimateOffsetHz(block, rate, DopplerFilter.VhfHalfWindowHz);
+                Assert.True(Math.Abs(residual) < Math.Abs(offsetHz) * 0.45, $"residual {residual} Hz");
+            }
+        }
+    }
+
+    [Fact]
+    public void Channel_cutoff_widens_for_doppler()
+    {
+        Assert.Equal(8_000, Demodulator.ChannelCutoffHz(RadioMode.Nbfm));
+        Assert.Equal(8_000 + DopplerFilter.VhfHalfWindowHz, Demodulator.ChannelCutoffHz(RadioMode.Nbfm, DopplerFilter.VhfHalfWindowHz));
+        Assert.Equal(8_000 + DopplerFilter.UhfHalfWindowHz, Demodulator.ChannelCutoffHz(RadioMode.Packet, DopplerFilter.UhfHalfWindowHz));
+    }
 }

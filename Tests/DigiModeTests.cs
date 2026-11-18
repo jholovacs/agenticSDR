@@ -262,7 +262,8 @@ public class DigiModeTests
     public void Olivia_round_trip_recovers_keyboard_text()
     {
         var profile = new OliviaProfile(8, 250, "8/250");
-        float[] wave = OliviaDecoder.Modulate("CQ DE K7ABC", profile, OliviaDecoder.SampleRate);
+        float[] wave = OliviaDecoder.Modulate(
+            "CQ DE K7ABC", profile, OliviaDecoder.SampleRate, centerHz: OliviaDecoder.CenterHz);
         IReadOnlyList<OliviaMessage> messages = OliviaDecoder.Decode(wave, OliviaDecoder.SampleRate);
         Assert.NotEmpty(messages);
         Assert.Contains("CQ DE K7ABC", messages[0].Text, StringComparison.Ordinal);

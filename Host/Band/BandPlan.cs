@@ -20,7 +20,7 @@ public sealed record BandSegment(string Name, double StartHz, double EndHz, Radi
 /// <summary>
 /// One named range: an amateur band, a broadcast service, NOAA weather, CB, GMRS, or DMR.
 /// The meter names (2 m, 40 m) are the approximate wavelength, not the width of the range.
-/// CB, GMRS, and DMR are receive-only services. DMR spans are the pieces that are scanned, not the whole start-to-end gap.
+/// CB, GMRS, Marine, and DMR are receive-only services. DMR and Marine spans are the pieces that are scanned, not the whole start-to-end gap.
 /// </summary>
 public sealed record HamBand(
     string Id,
@@ -31,7 +31,7 @@ public sealed record HamBand(
     CallingChannel[] Calling);
 
 /// <summary>
-/// The United States (ITU region 2) amateur plan from 160 m through 23 cm, plus AM broadcast, FM broadcast, NOAA weather, CB, GMRS, and DMR.
+/// The United States (ITU region 2) amateur plan from 160 m through 23 cm, plus AM broadcast, FM broadcast, NOAA weather, Marine VHF, CB, GMRS, and DMR.
 /// Source labels and mode hints come from here. It does not assign station names.
 /// A band is offered on the page when the open radio's tuning range reaches it.
 /// </summary>
@@ -41,24 +41,32 @@ public static class Region2BandPlan
     [
         Band("160m", "160 m", 1_800_000, 2_000_000,
             [Seg("160 m CW", 1_800_000, 1_840_000, RadioMode.Cw), Seg("160 m LSB", 1_840_000, 2_000_000, RadioMode.Lsb)],
-            [Call("160 m FT8", 1_840_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("160 m FT8", 1_840_000, RadioMode.Ft8, 3_600),
+                Call("160 m WSPR", 1_836_600, RadioMode.Wspr, 2_000)
+            ]),
         Band("80m", "80 m", 3_500_000, 4_000_000,
             [Seg("80 m CW", 3_500_000, 3_600_000, RadioMode.Cw), Seg("80 m LSB", 3_600_000, 4_000_000, RadioMode.Lsb)],
             [
                 Call("80 m FT8", 3_573_000, RadioMode.Ft8, 3_600),
                 Call("80 m JS8", 3_578_000, RadioMode.Js8, 3_600),
-                // Olivia lists publish RF center; USB dial is 1.5 kHz below (same convention as fldigi).
+                Call("80 m WSPR", 3_568_600, RadioMode.Wspr, 2_000),
+                // Olivia: stored value is USB dial; tone stack center is dial+1500 Hz (fldigi / Olivia group).
                 Call("80 m Olivia", 3_581_500, RadioMode.Olivia, 1_500),
                 Call("80 m VarAC", 3_595_000, RadioMode.Varac, 2_500)
             ]),
         Band("60m", "60 m", 5_330_500, 5_406_500,
             [Seg("60 m USB channelized", 5_330_500, 5_406_500, RadioMode.Usb)],
-            [Call("60 m FT8", 5_357_000, RadioMode.Ft8, 3_600)]),
+            [
+                Call("60 m FT8", 5_357_000, RadioMode.Ft8, 3_600),
+                Call("60 m WSPR", 5_287_200, RadioMode.Wspr, 2_000)
+            ]),
         Band("40m", "40 m", 7_000_000, 7_300_000,
             [Seg("40 m CW", 7_000_000, 7_125_000, RadioMode.Cw), Seg("40 m LSB", 7_125_000, 7_300_000, RadioMode.Lsb)],
             [
                 Call("40 m FT8", 7_074_000, RadioMode.Ft8, 3_600),
                 Call("40 m JS8", 7_078_000, RadioMode.Js8, 3_600),
+                Call("40 m WSPR", 7_038_600, RadioMode.Wspr, 2_000),
                 Call("40 m Olivia", 7_071_500, RadioMode.Olivia, 1_500),
                 Call("40 m JTTY", 7_090_000, RadioMode.Jtty, 2_500),
                 Call("40 m VarAC", 7_105_000, RadioMode.Varac, 2_500)
@@ -68,6 +76,7 @@ public static class Region2BandPlan
             [
                 Call("30 m FT8", 10_136_000, RadioMode.Ft8, 3_600),
                 Call("30 m JS8", 10_130_000, RadioMode.Js8, 3_600),
+                Call("30 m WSPR", 10_138_700, RadioMode.Wspr, 2_000),
                 Call("30 m VarAC", 10_133_000, RadioMode.Varac, 2_500)
             ]),
         Band("20m", "20 m", 14_000_000, 14_350_000,
@@ -75,7 +84,9 @@ public static class Region2BandPlan
             [
                 Call("20 m FT8", 14_074_000, RadioMode.Ft8, 3_600),
                 Call("20 m JS8", 14_078_000, RadioMode.Js8, 3_600),
+                Call("20 m WSPR", 14_095_600, RadioMode.Wspr, 2_000),
                 Call("20 m Olivia", 14_071_500, RadioMode.Olivia, 1_500),
+                Call("20 m Olivia 16/1000", 14_106_000, RadioMode.Olivia, 1_500),
                 Call("20 m JTTY", 14_090_000, RadioMode.Jtty, 2_500),
                 Call("20 m VarAC", 14_105_000, RadioMode.Varac, 2_500),
                 Call("20 m USB net", 14_300_000, RadioMode.Usb, 5_000)
@@ -85,6 +96,7 @@ public static class Region2BandPlan
             [
                 Call("17 m FT8", 18_100_000, RadioMode.Ft8, 3_600),
                 Call("17 m JS8", 18_104_000, RadioMode.Js8, 3_600),
+                Call("17 m WSPR", 18_104_600, RadioMode.Wspr, 2_000),
                 Call("17 m VarAC", 18_107_000, RadioMode.Varac, 2_500)
             ]),
         Band("15m", "15 m", 21_000_000, 21_450_000,
@@ -92,6 +104,7 @@ public static class Region2BandPlan
             [
                 Call("15 m FT8", 21_074_000, RadioMode.Ft8, 3_600),
                 Call("15 m JS8", 21_078_000, RadioMode.Js8, 3_600),
+                Call("15 m WSPR", 21_094_600, RadioMode.Wspr, 2_000),
                 Call("15 m Olivia", 21_071_000, RadioMode.Olivia, 1_500),
                 Call("15 m VarAC", 21_105_000, RadioMode.Varac, 2_500)
             ]),
@@ -100,6 +113,7 @@ public static class Region2BandPlan
             [
                 Call("12 m FT8", 24_915_000, RadioMode.Ft8, 3_600),
                 Call("12 m JS8", 24_922_000, RadioMode.Js8, 3_600),
+                Call("12 m WSPR", 24_924_600, RadioMode.Wspr, 2_000),
                 Call("12 m VarAC", 24_927_000, RadioMode.Varac, 2_500)
             ]),
         Band("10m", "10 m", 28_000_000, 29_700_000,
@@ -111,6 +125,7 @@ public static class Region2BandPlan
             [
                 Call("10 m FT8", 28_074_000, RadioMode.Ft8, 3_600),
                 Call("10 m JS8", 28_078_000, RadioMode.Js8, 3_600),
+                Call("10 m WSPR", 28_124_600, RadioMode.Wspr, 2_000),
                 Call("10 m Olivia", 28_121_500, RadioMode.Olivia, 1_500),
                 Call("10 m JTTY", 28_090_000, RadioMode.Jtty, 2_500),
                 Call("10 m VarAC", 28_105_000, RadioMode.Varac, 2_500),
@@ -126,6 +141,7 @@ public static class Region2BandPlan
             [
                 Call("6 m FT8", 50_313_000, RadioMode.Ft8, 3_600),
                 Call("6 m FT8", 50_323_000, RadioMode.Ft8, 3_600),
+                Call("6 m WSPR", 50_293_000, RadioMode.Wspr, 2_000),
                 Call("6 m VarAC", 50_330_000, RadioMode.Varac, 2_500),
                 Call("6 m SSB calling", 50_125_000, RadioMode.Usb, 3_000),
                 Call("6 m FM calling", 52_525_000, RadioMode.Nbfm, 7_500)
@@ -146,10 +162,12 @@ public static class Region2BandPlan
             ],
             [
                 Call("2 m FT8", 144_174_000, RadioMode.Ft8, 3_600),
+                Call("2 m WSPR", 144_489_000, RadioMode.Wspr, 2_000),
                 Call("2 m SSB calling", 144_200_000, RadioMode.Usb, 3_000),
                 Call("2 m VarAC FM", 144_950_000, RadioMode.Nbfm, 7_500),
                 Call("2 m APRS packet", 144_390_000, RadioMode.Packet, 7_500),
-                Call("2 m ISS APRS", 145_825_000, RadioMode.Packet, 7_500),
+                Call("2 m ISS APRS", 145_825_000, RadioMode.Packet, DopplerFilter.VhfHalfWindowHz),
+                Call("2 m ISS voice downlink", 145_800_000, RadioMode.Nbfm, DopplerFilter.VhfHalfWindowHz),
                 Call("2 m national FM simplex calling", 146_520_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("1.25m", "1.25 m", 222_000_000, 225_000_000,
@@ -172,6 +190,8 @@ public static class Region2BandPlan
                 Call("70 cm weak-signal calling", 432_100_000, RadioMode.Usb, 3_000),
                 Call("70 cm VarAC FM", 439_600_000, RadioMode.Nbfm, 7_500),
                 Call("70 cm APRS packet", 445_925_000, RadioMode.Packet, 7_500),
+                Call("70 cm ISS repeater downlink", 437_800_000, RadioMode.Nbfm, DopplerFilter.UhfHalfWindowHz),
+                Call("70 cm ISS UHF APRS", 437_550_000, RadioMode.Packet, DopplerFilter.UhfHalfWindowHz),
                 Call("70 cm FM simplex calling", 446_000_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("33cm", "33 cm", 902_000_000, 928_000_000,
@@ -200,6 +220,13 @@ public static class Region2BandPlan
                 Call("NOAA WX7", 162_525_000, RadioMode.Nbfm, 8_000),
                 Call("NOAA WX1", 162_550_000, RadioMode.Nbfm, 8_000)
             ]),
+        // Marine VHF (ITU Appendix 18 / US). Receive-only here. Ends below NOAA WX.
+        Band("marine", "Marine", 156_000_000, 162_025_000,
+            [
+                Seg("Marine VHF ship", 156_000_000, 157_450_000, RadioMode.Nbfm),
+                Seg("Marine VHF coast", 161_600_000, 162_025_000, RadioMode.Nbfm)
+            ],
+            MarineVhfChannels()),
         Band("cb", "CB", 26_965_000, 27_405_000,
             [Seg("CB", 26_965_000, 27_405_000, RadioMode.Am)],
             CbChannels()),
@@ -218,10 +245,10 @@ public static class Region2BandPlan
             ])
     ];
 
-    /// <summary>The pieces of a band that are scanned and matched to an antenna. GMRS and DMR skip the gaps between their channel blocks.</summary>
+    /// <summary>The pieces of a band that are scanned and matched to an antenna. GMRS, DMR, and Marine skip the gaps between their channel blocks.</summary>
     public static IReadOnlyList<(double StartHz, double EndHz)> Coverage(HamBand band)
     {
-        if (band.Id is "gmrs" or "dmr")
+        if (band.Id is "gmrs" or "dmr" or "marine")
             return band.Segments.Select(segment => (segment.StartHz, segment.EndHz)).ToList();
         return [(band.StartHz, band.EndHz)];
     }
@@ -242,10 +269,10 @@ public static class Region2BandPlan
         return Bands.FirstOrDefault(b => b.Id.Equals(bandId.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>CB, GMRS, NOAA weather, and published FT8 dials for the Known channels panel.</summary>
+    /// <summary>CB, GMRS, NOAA weather, Marine, ISS, and published digimode dials for the Known channels panel.</summary>
     public static IReadOnlyList<KnownChannelGroup> KnownServiceChannels()
     {
-        string[] ids = ["cb", "gmrs", "noaa"];
+        string[] ids = ["cb", "gmrs", "noaa", "marine"];
         var groups = new List<KnownChannelGroup>();
         foreach (string id in ids)
         {
@@ -261,21 +288,92 @@ public static class Region2BandPlan
                     channel.Name,
                     ShortChannelLabel(id, channel.Name),
                     channel.FrequencyHz,
-                    channel.Mode.ToString().ToLowerInvariant()));
+                    CampSchedule.Canonical(channel.Mode)));
+            }
+
+            if (id == "marine")
+            {
+                foreach (CallingChannel channel in MarineHfChannels())
+                {
+                    channels.Add(new KnownChannel(
+                        channel.Name,
+                        ShortChannelLabel(id, channel.Name),
+                        channel.FrequencyHz,
+                        CampSchedule.Canonical(channel.Mode)));
+                }
             }
 
             if (channels.Count > 0)
                 groups.Add(new KnownChannelGroup(band.Id, band.Name, channels));
         }
 
+        AddIssGroup(groups);
         AddDigiGroup(groups, "ft8", "FT8", RadioMode.Ft8);
         AddDigiGroup(groups, "js8", "JS8", RadioMode.Js8);
         AddDigiGroup(groups, "olivia", "Olivia", RadioMode.Olivia);
         AddDigiGroup(groups, "jtty", "JTTY", RadioMode.Jtty);
+        AddDigiGroup(groups, "wspr", "WSPR", RadioMode.Wspr);
         AddDigiGroup(groups, "varac", "VarAC", RadioMode.Varac);
 
         return groups;
     }
+
+    /// <summary>ARISS / ISS downlinks for Known channels (receive). Doppler AFC applies while listening.</summary>
+    private static void AddIssGroup(List<KnownChannelGroup> groups)
+    {
+        var channels = new List<KnownChannel>();
+        foreach (CallingChannel channel in IssDownlinks())
+        {
+            string label = channel.Name
+                .Replace("2 m ISS ", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("70 cm ISS ", "", StringComparison.OrdinalIgnoreCase)
+                .Trim();
+            channels.Add(new KnownChannel(
+                channel.Name,
+                label,
+                channel.FrequencyHz,
+                CampSchedule.Canonical(channel.Mode)));
+        }
+
+        if (channels.Count > 0)
+            groups.Add(new KnownChannelGroup("iss", "ISS", channels));
+    }
+
+    /// <summary>Published ISS / ARISS downlink spots (voice, APRS, crossband repeater).</summary>
+    public static IReadOnlyList<CallingChannel> IssDownlinks() =>
+    [
+        Call("2 m ISS voice downlink", 145_800_000, RadioMode.Nbfm, DopplerFilter.VhfHalfWindowHz),
+        Call("2 m ISS APRS", 145_825_000, RadioMode.Packet, DopplerFilter.VhfHalfWindowHz),
+        Call("70 cm ISS repeater downlink", 437_800_000, RadioMode.Nbfm, DopplerFilter.UhfHalfWindowHz),
+        Call("70 cm ISS UHF APRS", 437_550_000, RadioMode.Packet, DopplerFilter.UhfHalfWindowHz)
+    ];
+
+    /// <summary>True when this frequency is a published ISS downlink (Doppler window applies).</summary>
+    public static bool TryIssDownlink(double frequencyHz, out CallingChannel channel)
+    {
+        channel = null!;
+        double best = double.MaxValue;
+        CallingChannel? found = null;
+        foreach (CallingChannel candidate in IssDownlinks())
+        {
+            double distance = Math.Abs(frequencyHz - candidate.FrequencyHz);
+            if (distance > candidate.ToleranceHz || distance >= best)
+                continue;
+            best = distance;
+            found = candidate;
+        }
+
+        if (found is null)
+            return false;
+        channel = found;
+        return true;
+    }
+
+    /// <summary>Doppler half-window for ISS downlinks; 0 when the tune is not an ISS channel.</summary>
+    public static double IssDopplerMaxHz(double frequencyHz) =>
+        TryIssDownlink(frequencyHz, out CallingChannel channel)
+            ? DopplerFilter.HalfWindowHz(channel.FrequencyHz)
+            : 0;
 
     private static void AddDigiGroup(List<KnownChannelGroup> groups, string id, string name, RadioMode mode)
     {
@@ -307,6 +405,8 @@ public static class Region2BandPlan
             return name["CB ".Length..];
         if (bandId == "gmrs" && name.StartsWith("GMRS ", StringComparison.OrdinalIgnoreCase))
             return name["GMRS ".Length..];
+        if (bandId == "marine" && name.StartsWith("Marine ", StringComparison.OrdinalIgnoreCase))
+            return name["Marine ".Length..];
         return name;
     }
 
@@ -320,7 +420,7 @@ public static class Region2BandPlan
             CallingChannel? calling = null;
             foreach (var channel in band.Calling)
             {
-                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr or RadioMode.Varac)
                 {
                     double delta = frequencyHz - channel.FrequencyHz;
                     if (delta >= -500 && delta <= channel.ToleranceHz)
@@ -388,7 +488,7 @@ public static class Region2BandPlan
                 if (mode != RadioMode.Unknown && channel.Mode != mode)
                     continue;
                 double distance;
-                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+                if (channel.Mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr or RadioMode.Varac)
                 {
                     double delta = frequencyHz - channel.FrequencyHz;
                     if (delta < -500 || delta > channel.ToleranceHz)
@@ -424,7 +524,7 @@ public static class Region2BandPlan
     {
         dialHz = 0;
         if (mode is not (RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
-            or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit))
+            or RadioMode.Wspr or RadioMode.Varac or RadioMode.Packet or RadioMode.Ribbit))
             return false;
 
         double best = double.MaxValue;
@@ -435,7 +535,7 @@ public static class Region2BandPlan
                 if (channel.Mode != mode)
                     continue;
                 double distance;
-                if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Varac)
+                if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr or RadioMode.Varac)
                 {
                     double delta = frequencyHz - channel.FrequencyHz;
                     if (delta < -500 || delta > channel.ToleranceHz)
@@ -467,7 +567,7 @@ public static class Region2BandPlan
         double best = double.MaxValue;
         foreach (RadioMode candidate in new[]
                  {
-                     RadioMode.Ft8, RadioMode.Js8, RadioMode.Olivia, RadioMode.Jtty,
+                     RadioMode.Ft8, RadioMode.Js8, RadioMode.Olivia, RadioMode.Jtty, RadioMode.Wspr,
                      RadioMode.Varac, RadioMode.Packet, RadioMode.Ribbit
                  })
         {
@@ -560,4 +660,50 @@ public static class Region2BandPlan
 
         return channels.ToArray();
     }
+
+    /// <summary>
+    /// Common US / ITU marine VHF listen channels (NBFM). Labels use the public channel number.
+    /// </summary>
+    private static CallingChannel[] MarineVhfChannels()
+    {
+        (string Name, double Mhz)[] list =
+        [
+            ("Marine 06 intership safety", 156.300),
+            ("Marine 09 recreational calling", 156.450),
+            ("Marine 12 port operations", 156.600),
+            ("Marine 13 bridge-to-bridge", 156.650),
+            ("Marine 14 port operations", 156.700),
+            ("Marine 16 distress calling", 156.800),
+            ("Marine 17 state control", 156.850),
+            ("Marine 21A USCG", 157.050),
+            ("Marine 22A USCG", 157.100),
+            ("Marine 23A USCG", 157.150),
+            ("Marine 68 non-commercial", 156.425),
+            ("Marine 69 non-commercial", 156.475),
+            ("Marine 71 non-commercial", 156.575),
+            ("Marine 72 ship-to-ship", 156.625),
+            ("Marine 73 port / non-commercial", 156.675),
+            ("Marine 74 port operations", 156.725),
+            ("Marine 77 ship-to-ship", 156.875),
+            ("Marine 78A non-commercial", 156.925),
+            ("Marine 79A commercial", 156.975),
+            ("Marine 80A commercial", 157.025)
+        ];
+        return list
+            .Select(item => Call(item.Name, item.Mhz * 1_000_000, RadioMode.Nbfm, 5_000))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Global HF maritime distress / safety calling (USB). Listed under Known channels with Marine VHF.
+    /// </summary>
+    private static CallingChannel[] MarineHfChannels() =>
+    [
+        Call("Marine 2182 kHz distress", 2_182_000, RadioMode.Usb, 1_500),
+        Call("Marine 4125 kHz distress", 4_125_000, RadioMode.Usb, 1_500),
+        Call("Marine 6215 kHz distress", 6_215_000, RadioMode.Usb, 1_500),
+        Call("Marine 8291 kHz distress", 8_291_000, RadioMode.Usb, 1_500),
+        Call("Marine 12290 kHz distress", 12_290_000, RadioMode.Usb, 1_500),
+        Call("Marine 16420 kHz distress", 16_420_000, RadioMode.Usb, 1_500)
+    ];
 }

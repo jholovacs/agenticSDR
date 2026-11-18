@@ -148,7 +148,7 @@ public static class AntennaPlan
         if (hf)
             return "HF polarization is mixed by the ionosphere.";
 
-        bool verticalService = band.Id is "fm-bc" or "noaa" or "cb" or "gmrs" or "dmr"
+        bool verticalService = band.Id is "fm-bc" or "noaa" or "marine" or "cb" or "gmrs" or "dmr"
             || band.Segments.All(segment => segment.PreferredMode is AgenticSdr.Dsp.RadioMode.Nbfm or AgenticSdr.Dsp.RadioMode.Wbfm);
         if (spec.Orientation == "vertical")
             return verticalService

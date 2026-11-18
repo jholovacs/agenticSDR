@@ -27,6 +27,7 @@ public static class DeskCatalog
         new("js8", "JS8", "", "mode", false, "Mode library ready — desk follows CW"),
         new("olivia", "Olivia", "", "mode", false, "Mode library ready — desk follows CW"),
         new("jtty", "JTTY", "", "mode", false, "Mode library ready — desk follows CW"),
+        new("wspr", "WSPR", "", "mode", false, "Mode library ready — desk follows CW"),
         new("packet", "Packet", "", "mode", false, "Mode library ready — desk follows CW"),
         new("ribbit", "Ribbit", "", "mode", false, "Mode library ready — desk follows CW")
     ];

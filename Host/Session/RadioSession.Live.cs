@@ -55,7 +55,7 @@ public sealed partial class RadioSession
                 (mode, tuneHz, _, dmrFramed) = await ResolveAutoModeAsync(device, frequencyHz, ct);
             }
 
-            if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac)
+            if (mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac)
             {
                 if (Region2BandPlan.TryDigiDial(tuneHz, mode, out double dial) || Region2BandPlan.TryDigiDial(frequencyHz, mode, out dial))
                     tuneHz = dial;
@@ -64,6 +64,8 @@ public sealed partial class RadioSession
                     await WaitForDigiSlot(ct, periodSeconds: 15, earlySeconds: 2.0);
                 else if (mode is RadioMode.Js8)
                     await WaitForDigiSlot(ct, periodSeconds: 30, earlySeconds: 2.0);
+                else if (mode is RadioMode.Wspr)
+                    await WaitForDigiSlot(ct, periodSeconds: 120, earlySeconds: 2.0);
             }
 
             SetStatus("listening", 0.45, "Checking published-channel frequency…");
@@ -89,7 +91,8 @@ public sealed partial class RadioSession
                 shiftHz,
                 device.SampleRateHz,
                 demodMode == RadioMode.Wbfm ? wbfmProgram : WbfmProgram.Main,
-                allowUsbSidebandFlip: device.DirectSampling);
+                allowUsbSidebandFlip: device.DirectSampling,
+                dopplerMaxHz: Region2BandPlan.IssDopplerMaxHz(tuneHz));
             if (response is not null)
             {
                 SetStatus("listening", 0.9, "Starting live audio…");
@@ -133,13 +136,25 @@ public sealed partial class RadioSession
             }
 
             SignalChain? chain = null;
+            SignalChain? sideOlivia = null;
             try
             {
                 chain = OpenPipeline(mode, pipeline);
-                await PumpLiveAsync(device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch, mode == RadioMode.Dmr && !dmrFramed, dmr, chain, ct);
+                // USB on an Olivia dial: decode on a second off-thread chain so voice Morse/speech stay intact.
+                if (mode == RadioMode.Usb
+                    && Region2BandPlan.TryPublishedStation(tuneHz, RadioMode.Olivia, out _, out _))
+                {
+                    sideOlivia = OpenPipeline(RadioMode.Olivia, null);
+                    AppendNote("Olivia dial on USB — decoding in the background. Mode Olivia uses a wider USB window.");
+                }
+
+                await PumpLiveAsync(
+                    device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch,
+                    mode == RadioMode.Dmr && !dmrFramed, dmr, chain, sideOlivia, ct);
             }
             finally
             {
+                sideOlivia?.Dispose();
                 chain?.Dispose();
                 ClearPipeline();
                 if (EasedGain(demodMode))
@@ -214,9 +229,32 @@ public sealed partial class RadioSession
             return;
         }
 
-        if (text.Kind is "ft8" or "js8" or "olivia" or "jtty" or "varac")
+        if (text.Kind is "ft8" or "js8" or "olivia" or "jtty" or "wspr" or "varac")
         {
-            AppendDigiLines(mode, text.Text, ref digiHeader);
+            if (text.Kind is "olivia" or "jtty" or "wspr")
+            {
+                string body = DigiMessageBody(text.Text);
+                if (string.IsNullOrWhiteSpace(body))
+                    return;
+                if (body.Equals(_lastLiveDigiBody, StringComparison.Ordinal))
+                    return;
+                if (_lastLiveDigiBody.Length > 0
+                    && body.Length < _lastLiveDigiBody.Length
+                    && _lastLiveDigiBody.Contains(body, StringComparison.Ordinal))
+                    return;
+                _lastLiveDigiBody = body;
+            }
+
+            RadioMode digiMode = text.Kind switch
+            {
+                "olivia" => RadioMode.Olivia,
+                "jtty" => RadioMode.Jtty,
+                "wspr" => RadioMode.Wspr,
+                "js8" => RadioMode.Js8,
+                "varac" => RadioMode.Varac,
+                _ => mode
+            };
+            AppendDigiLines(digiMode, text.Text, ref digiHeader);
             return;
         }
 
@@ -236,6 +274,7 @@ public sealed partial class RadioSession
         bool recheckDmr,
         DmrFilter dmr,
         SignalChain? chain,
+        SignalChain? sideOlivia,
         CancellationToken cancellationToken)
     {
         int stride = device.Encoding == SampleEncoding.Cu8 ? 2 : 8;
@@ -251,28 +290,65 @@ public sealed partial class RadioSession
         bool dmrChecked = !recheckDmr;
         int dmrNeed = (int)(device.SampleRateHz * 0.12);
         var digiPeriod = new List<float>();
+        var sideOliviaPeriod = new List<float>();
         bool voice = SpeechDecoder.IsVoice(mode);
-        bool digi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty;
+        bool digi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
+            or RadioMode.Wspr or RadioMode.Varac;
+        bool slidingDigi = mode is RadioMode.Olivia or RadioMode.Jtty;
         bool sideband = mode is RadioMode.Usb or RadioMode.Lsb;
         bool digiHeader = false;
         int rate = demod.PlaybackRate;
-        var packetReader = mode == RadioMode.Packet ? new PacketReader(rate) : null;
-        var ribbitReader = mode is RadioMode.Ribbit or RadioMode.Nbfm or RadioMode.Packet
-            ? new RibbitReader(rate)
-            : null;
-        using XaraMonitor? xara = mode == RadioMode.Varac ? new XaraMonitor() : null;
-        if (mode == RadioMode.Varac && xara is { Available: false })
-            AppendNote(xara.MissingHint ?? "VarAC decode needs xara-monitor or zara-monitor beside the app.");
         int remember = voice ? 6 * rate : 8 * rate;
         var nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
-        // Live FT8 chops on 15 s; JS8 on 30 s (covers Normal/Fast/Turbo/Slow) even when the clip pads longer.
-        int digiSlot = DigiPeriodSeconds(mode) * rate;
+        // Live FT8 chops on 15 s; JS8 on 30 s; Olivia/JTTY slide every DigiPeriodSeconds on a longer buffer.
+        int digiStep = DigiPeriodSeconds(mode) * rate;
+        int digiKeep = DigiListenSeconds(mode) * rate;
+        int digiSinceSubmit = 0;
+        int sideOliviaStep = DigiPeriodSeconds(RadioMode.Olivia) * rate;
+        int sideOliviaKeep = DigiListenSeconds(RadioMode.Olivia) * rate;
+        int sideOliviaSince = 0;
         var nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         float level = 0.05f;
         var activity = new ActivityHold();
         bool stereoNoted = false;
         bool sca67Noted = false;
         bool sca92Noted = false;
+
+        // Packet / Ribbit / VarAC stay off the audio pump (dedicated decode thread).
+        PacketReader? packetState = mode == RadioMode.Packet ? new PacketReader(rate) : null;
+        RibbitReader? ribbitState = mode is RadioMode.Ribbit or RadioMode.Nbfm or RadioMode.Packet
+            ? new RibbitReader(rate)
+            : null;
+        XaraMonitor? xaraState = mode == RadioMode.Varac ? new XaraMonitor() : null;
+        if (mode == RadioMode.Varac && xaraState is { Available: false })
+            AppendNote(xaraState.MissingHint ?? "VarAC decode needs xara-monitor or zara-monitor beside the app.");
+
+        LiveDecodeWorker? packetWorker = packetState is null
+            ? null
+            : new LiveDecodeWorker("sdr-packet", (block, ct, emit) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (string packet in packetState.Push(block, rate))
+                    emit("packet", packet);
+            });
+        LiveDecodeWorker? ribbitWorker = ribbitState is null
+            ? null
+            : new LiveDecodeWorker("sdr-ribbit", (block, ct, emit) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (string line in ribbitState.Push(block, rate))
+                    emit("ribbit", line);
+            });
+        LiveDecodeWorker? varacWorker = mode == RadioMode.Varac && xaraState is { Available: true }
+            ? new LiveDecodeWorker("sdr-varac", (block, ct, emit) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                xaraState.Push(block, rate);
+                IReadOnlyList<XaraMessage> heard = xaraState.Drain();
+                if (heard.Count > 0)
+                    emit("varac", XaraMonitor.Format(heard));
+            })
+            : null;
 
         await Task.Run(() =>
         {
@@ -288,6 +364,8 @@ public sealed partial class RadioSession
                 AlignDigiSlot(cancellationToken, periodSeconds: 15);
             else if (mode is RadioMode.Js8)
                 AlignDigiSlot(cancellationToken, periodSeconds: 30);
+            else if (mode is RadioMode.Wspr)
+                AlignDigiSlot(cancellationToken, periodSeconds: 120);
         }, cancellationToken);
 
         // Read the next block while this one is turned into audio. Samples that arrive
@@ -427,6 +505,26 @@ public sealed partial class RadioSession
             await WritePcmAsync(output, fanout, fresh, level, audible, cancellationToken);
             level = NextLevel(level, fresh);
 
+            // Enqueue decode work only — never run Olivia/packet/VarAC on this pump thread.
+            packetWorker?.TryEnqueue(fresh);
+            if (ribbitWorker is not null && mode is RadioMode.Ribbit or RadioMode.Nbfm or RadioMode.Packet)
+                ribbitWorker.TryEnqueue(fresh);
+            varacWorker?.TryEnqueue(fresh);
+
+            packetWorker?.Drain((kind, text) =>
+            {
+                if (kind == "packet")
+                    AppendPacket(text);
+            });
+            ribbitWorker?.Drain((kind, text) =>
+            {
+                if (mode is RadioMode.Nbfm or RadioMode.Packet)
+                    AppendNote(text + " — switch mode to Ribbit to keep decoding.");
+                else
+                    AppendRibbit(text);
+            });
+            varacWorker?.Drain((_, text) => AppendDigiLines(RadioMode.Varac, text, ref digiHeader));
+
             if (mode == RadioMode.Wbfm)
             {
                 string[] rdsLines = demod.TakeRds().ToArray();
@@ -493,58 +591,45 @@ public sealed partial class RadioSession
                     nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 }
             }
-            else if (mode == RadioMode.Varac && xara is not null)
+
+            if (sideOlivia is not null)
             {
-                if (!xara.Available)
+                sideOliviaPeriod.AddRange(fresh);
+                sideOliviaSince += fresh.Length;
+                if (sideOliviaPeriod.Count > sideOliviaKeep)
+                    sideOliviaPeriod.RemoveRange(0, sideOliviaPeriod.Count - sideOliviaKeep);
+                if (sideOliviaPeriod.Count >= Math.Min(sideOliviaKeep, 6 * rate) && sideOliviaSince >= sideOliviaStep)
                 {
-                    if (!digiHeader)
-                    {
-                        digiHeader = true;
-                        AppendNote(xara.MissingHint ?? "VarAC decode needs Host/native/xaramonitor.dll.");
-                    }
+                    sideOliviaSince = 0;
+                    sideOlivia.TrySubmit(SignalFrame.FromAudio(sideOliviaPeriod.ToArray(), rate));
                 }
-                else
-                {
-                    xara.Push(fresh, rate);
-                    IReadOnlyList<XaraMessage> heard = xara.Drain();
-                    if (heard.Count > 0)
-                        AppendDigiLines(mode, XaraMonitor.Format(heard), ref digiHeader);
-                }
-            }
-            else if (digi && chain is not null)
-            {
-                digiPeriod.AddRange(fresh);
-                if (digiPeriod.Count >= digiSlot)
-                {
-                    while (digiPeriod.Count >= 2 * digiSlot)
-                        digiPeriod.RemoveRange(0, digiSlot);
-                    float[] block = digiPeriod.GetRange(0, digiSlot).ToArray();
-                    digiPeriod.RemoveRange(0, digiSlot);
-                    chain.TrySubmit(SignalFrame.FromAudio(block, rate));
-                }
-            }
-            else if (mode == RadioMode.Packet && packetReader is not null)
-            {
-                foreach (string packet in packetReader.Push(fresh, rate))
-                {
-                    framed = true;
-                    AppendPacket(packet);
-                }
-            }
-            else if (mode == RadioMode.Ribbit && ribbitReader is not null)
-            {
-                foreach (string line in ribbitReader.Push(fresh, rate))
-                {
-                    framed = true;
-                    AppendRibbit(line);
-                }
+
+                PublishPipelineTexts(sideOlivia, RadioMode.Olivia, ref digiHeader);
             }
 
-            // Opportunistic Ribbit ID while listening FM / packet.
-            if (ribbitReader is not null && mode is RadioMode.Nbfm or RadioMode.Packet)
+            if (digi && chain is not null && mode != RadioMode.Varac)
             {
-                foreach (string line in ribbitReader.Push(fresh, rate))
-                    AppendNote(line + " — switch mode to Ribbit to keep decoding.");
+                digiPeriod.AddRange(fresh);
+                digiSinceSubmit += fresh.Length;
+                if (slidingDigi)
+                {
+                    if (digiPeriod.Count > digiKeep)
+                        digiPeriod.RemoveRange(0, digiPeriod.Count - digiKeep);
+                    if (digiPeriod.Count >= Math.Min(digiKeep, 6 * rate) && digiSinceSubmit >= digiStep)
+                    {
+                        digiSinceSubmit = 0;
+                        // Off-thread SignalChain worker runs Olivia/JTTY; DropOldest if still busy.
+                        chain.TrySubmit(SignalFrame.FromAudio(digiPeriod.ToArray(), rate));
+                    }
+                }
+                else if (digiPeriod.Count >= digiStep)
+                {
+                    while (digiPeriod.Count >= 2 * digiStep)
+                        digiPeriod.RemoveRange(0, digiStep);
+                    float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
+                    digiPeriod.RemoveRange(0, digiStep);
+                    chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                }
             }
         }
         }
@@ -552,6 +637,15 @@ public sealed partial class RadioSession
         {
             if (chain is not null)
                 PublishPipelineTexts(chain, mode, ref digiHeader);
+            if (sideOlivia is not null)
+                PublishPipelineTexts(sideOlivia, RadioMode.Olivia, ref digiHeader);
+            packetWorker?.Drain((kind, text) => { if (kind == "packet") AppendPacket(text); });
+            ribbitWorker?.Drain((_, text) => AppendRibbit(text));
+            varacWorker?.Drain((_, text) => AppendDigiLines(RadioMode.Varac, text, ref digiHeader));
+            packetWorker?.Dispose();
+            ribbitWorker?.Dispose();
+            varacWorker?.Dispose();
+            xaraState?.Dispose();
 
             if (pending is { IsCompleted: false })
             {
@@ -653,6 +747,8 @@ public sealed partial class RadioSession
             $"Listening for JS8 on {tuneHz / 1e6:0.000000} MHz — waiting on 30 s UTC slots (leave it running a minute or two).",
         RadioMode.Ft8 =>
             $"Listening for FT8 on {tuneHz / 1e6:0.000000} MHz — waiting on 15 s UTC slots.",
+        RadioMode.Wspr =>
+            $"Listening for WSPR on {tuneHz / 1e6:0.000000} MHz — waiting on 120 s UTC slots.",
         RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac =>
             $"Listening for {mode} on {tuneHz / 1e6:0.000000} MHz.",
         _ => $"Playing {tuneHz / 1e6:0.000000} MHz ({mode}) as it arrives."
@@ -735,6 +831,7 @@ public sealed partial class RadioSession
             }
 
             _morseWindow = "";
+            _lastLiveDigiBody = "";
             _transcriptHz = frequencyHz;
         }
     }

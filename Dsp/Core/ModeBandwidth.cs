@@ -15,6 +15,7 @@ public static class ModeBandwidth
         RadioMode.Ft8 or RadioMode.Js8 => new Pass(200, 3_200, 2_700, 1_500),
         RadioMode.Olivia => new Pass(150, 1_200, 250, 250),
         RadioMode.Jtty => new Pass(100, 2_700, 500, 250),
+        RadioMode.Wspr => new Pass(4, 200, 6, 100),
         RadioMode.Varac => new Pass(400, 3_000, 2_300, 1_000),
         RadioMode.Am => new Pass(4_000, 12_000, 10_000, 10_000),
         RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>

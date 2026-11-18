@@ -198,6 +198,7 @@ public static class CampSchedule
         RadioMode.Js8 => "js8",
         RadioMode.Olivia => "olivia",
         RadioMode.Jtty => "jtty",
+        RadioMode.Wspr => "wspr",
         RadioMode.Varac => "varac",
         RadioMode.Dmr => "dmr",
         RadioMode.M17 => "m17",

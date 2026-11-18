@@ -150,14 +150,17 @@ public static class DialFrequency
     /// How far to hunt around a published RF when snapping a known channel (NOAA, CB, digi dial, …).
     /// Wider on broadcast FM; a few kilohertz on NBFM/AM; digi USB uses the audio residual window.
     /// </summary>
-    public static double PublishedSearchHz(RadioMode mode) => mode switch
+    public static double PublishedSearchHz(RadioMode mode, double publishedHz = 0) => mode switch
     {
         RadioMode.Wbfm => 75_000,
         RadioMode.Am => 5_000,
+        // ISS LEO needs a wider hunt than terrestrial NBFM/packet (Doppler ± a few kHz / ±10 kHz).
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit
+            when publishedHz > 0 => Math.Max(5_000, DopplerFilter.HalfWindowHz(publishedHz)),
         RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit => 5_000,
         RadioMode.Cw => DefaultSearchHz,
         RadioMode.Usb or RadioMode.Lsb => 1_000,
-        RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac => DefaultSearchHz,
+        RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac => DefaultSearchHz,
         _ => 5_000
     };
 
@@ -168,6 +171,7 @@ public static class DialFrequency
     {
         // Olivia cursors are often 1000 or 1500 Hz above dial; aim at the middle of that range.
         RadioMode.Olivia => publishedHz + OliviaDecoder.CenterHz,
+        RadioMode.Wspr => publishedHz + WsprDecoder.CenterHz,
         RadioMode.Varac => publishedHz + 1_500,
         RadioMode.Jtty => publishedHz + 1_500,
         RadioMode.Ft8 or RadioMode.Js8 => publishedHz + 1_500,
@@ -186,12 +190,13 @@ public static class DialFrequency
         RadioMode mode,
         double minSnrDb = 3)
     {
-        double searchHz = PublishedSearchHz(mode);
+        double searchHz = PublishedSearchHz(mode, publishedHz);
         double expectedRf = ExpectedRfHz(publishedHz, mode);
         double halfWidth = mode switch
         {
             // Cover both +1000 and +1500 Hz cursors without sliding into the FT8 dial above.
             RadioMode.Olivia => 500 + searchHz,
+            RadioMode.Wspr => 200 + searchHz,
             RadioMode.Jtty => JttyDecoder.SpanHz + searchHz,
             RadioMode.Varac => 1_150 + searchHz,
             RadioMode.Ft8 or RadioMode.Js8 => 1_400 + searchHz,

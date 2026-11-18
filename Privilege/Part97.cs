@@ -189,8 +189,16 @@ public static class Part97
             >= 530_000 and <= 1_700_000 => "AM broadcast",
             >= 26_960_000 and <= 27_410_000 => "CB",
             >= 88_000_000 and <= 108_000_000 => "FM broadcast",
+            >= 156_000_000 and <= 162_025_000 => "Marine VHF",
             >= 162_400_000 and <= 162_550_000 => "NOAA weather radio",
             >= 462_000_000 and <= 467_725_000 => "GMRS",
+            // HF maritime distress / safety calling (USB).
+            >= 2_181_000 and <= 2_183_000 => "Marine HF",
+            >= 4_124_000 and <= 4_126_000 => "Marine HF",
+            >= 6_214_000 and <= 6_216_000 => "Marine HF",
+            >= 8_290_000 and <= 8_292_000 => "Marine HF",
+            >= 12_289_000 and <= 12_291_000 => "Marine HF",
+            >= 16_419_000 and <= 16_421_000 => "Marine HF",
             _ => null
         };
         if (name == null)

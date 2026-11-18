@@ -26,6 +26,7 @@ public enum AmateurMode
     Js8,
     Olivia,
     Jtty,
+    Wspr,
     Varac,
     Packet,
     Ribbit
@@ -149,6 +150,10 @@ public static class AmateurWords
             case "jtty":
                 mode = AmateurMode.Jtty;
                 return true;
+            case "wspr":
+            case "whisper":
+                mode = AmateurMode.Wspr;
+                return true;
             case "varac":
             case "vara":
                 mode = AmateurMode.Varac;
@@ -186,6 +191,7 @@ public static class AmateurWords
         AmateurMode.Js8 => "JS8",
         AmateurMode.Olivia => "Olivia",
         AmateurMode.Jtty => "JTTY",
+        AmateurMode.Wspr => "WSPR",
         AmateurMode.Varac => "VarAC",
         AmateurMode.Packet => "packet",
         AmateurMode.Ribbit => "Ribbit",

@@ -437,6 +437,31 @@ table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; font-size: 0.78rem; letter-spacing: 0.04em; }
 td.num, .readout { font-family: "Cascadia Mono", Consolas, monospace; }
+
+button.freq-copy {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: inherit;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+button.freq-copy:hover,
+button.freq-copy:focus-visible {
+  color: var(--accent, #7dd3c0);
+  text-decoration-color: currentColor;
+}
+
+button.freq-copy.copied {
+  color: var(--accent, #7dd3c0);
+  text-decoration: none;
+}
 .readout { margin: 12px 0; color: var(--amber); font-size: 1.6rem; }
 
 audio { width: 100%; margin: 8px 0 16px; }

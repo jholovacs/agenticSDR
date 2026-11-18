@@ -440,7 +440,7 @@ public sealed record OpenBody(int? Index);
 public sealed record SimulateTransmitBody(bool Enabled);
 /// <summary>Body of POST /api/antenna. Unit is m or ft. Orientation is vertical or horizontal. Azimuth is degrees true for a horizontal wire.</summary>
 public sealed record AntennaBody(double Length, string? Unit, string? Orientation, double? AzimuthDegrees);
-/// <summary>Body of POST /api/scan. BandId is a value such as 2m, 40m, fm-bc, am-bc, noaa, cb, gmrs, or dmr.</summary>
+/// <summary>Body of POST /api/scan. BandId is a value such as 2m, 40m, fm-bc, am-bc, noaa, marine, cb, gmrs, or dmr.</summary>
 public sealed record ScanBody(string BandId);
 /// <summary>Body of POST /api/inspect. FrequencyHz is the frequency to measure, in hertz.</summary>
 public sealed record InspectBody(double FrequencyHz);

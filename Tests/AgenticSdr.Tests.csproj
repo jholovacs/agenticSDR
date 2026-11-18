@@ -27,6 +27,7 @@
     <ProjectReference Include="..\Shared\AgenticSdr.Shared.csproj" />
     <ProjectReference Include="..\Modes\Cw\AgenticSdr.Cw.csproj" />
     <ProjectReference Include="..\Modes\Ft8\AgenticSdr.Ft8.csproj" />
+    <ProjectReference Include="..\Modes\Wspr\AgenticSdr.Wspr.csproj" />
   </ItemGroup>
 
 </Project>

@@ -48,6 +48,16 @@ public static class DigiActivity
                 JttyDecoder.SpanHz * 1.5,
                 minHotBins: 2,
                 aboveNoiseDb: 3.0),
+            // WSPR occupies ~6 Hz near dial+1500 (1400–1600 Hz audio window).
+            RadioMode.Wspr => ScoreNarrow(
+                powerDb,
+                centerHz,
+                sampleRate,
+                dialHz + 1_400 - DialFrequency.DefaultSearchHz,
+                dialHz + 1_600 + DialFrequency.DefaultSearchHz,
+                40,
+                minHotBins: 1,
+                aboveNoiseDb: 2.0),
             // Packet / Ribbit occupy an NBFM channel around the published dial.
             RadioMode.Packet or RadioMode.Ribbit => ScoreWindow(
                 powerDb,

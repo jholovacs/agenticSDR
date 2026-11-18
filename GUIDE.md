@@ -1,6 +1,6 @@
 # A beginner’s guide to this receiver
 
-This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet/APRS, Ribbit, M17, RDS, and speech are also written out as text. DMR prints signaling metadata, not proprietary voice.
+This program listens. It does not transmit. You plug in a USB software-defined radio, tell it what antenna you have, pick a range of frequencies, and it looks for strong signals. When you choose one, it plays the audio. Morse, FT8, JS8, WSPR, Olivia, JTTY, VarAC, Packet/APRS, Ribbit, M17, RDS, and speech are also written out as text. DMR prints signaling metadata, not proprietary voice.
 
 You and an AI share one radio. The web page at http://127.0.0.1:5088, an instruct model you configure, and the tools in Cursor or Antigravity talk to the same session. Only one of them can tune or listen at a time, because a USB radio has one input.
 
@@ -14,7 +14,7 @@ Unfamiliar words are defined under **Words** below. On the page, hover a control
 4. Enter the antenna, or press **Guess from signals**. Length can be meters or feet. **Vertical** means the wire stands up. **Horizontal** means the wire runs sideways, and **axis toward ° true** is the compass direction one end points. 0° is true north, 90° is east, 180° is south, 270° is west. A guess listens at several spots and takes the strongest part of the dial as the antenna’s natural frequency. The receiver’s own noise at the bottom of the dial, and a broadcast band full of stations, are left out of that choice. A vertical is a quarter of that wave. A horizontal wire would be twice as long. Strength does not show which way the wire points, so a close guess is called vertical and you can correct it.
 5. Press **Use this antenna**. Bands the antenna can hear move to the top and are marked **best**. The closest match is selected for you.
 6. Confirm the radio hears something with a **known channel** before you learn to scan (next section).
-7. In Explore: press **Scan band**. The table fills with strong signals. Press **Listen** on a row, or type a frequency and mode yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop**. Morse text updates about once a second. FT8 and JS8 gather one 15-second turn, then print messages while the next turn plays. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode succeeds.
+7. In Explore: press **Scan band**. The table fills with strong signals. Press **Listen** on a row, or type a frequency and mode yourself. Audio starts as soon as samples are demodulated and keeps playing until you press **Stop**. Morse text updates about once a second. FT8 and JS8 gather one 15-second turn, then print messages while the next turn plays. WSPR gathers one 120-second even-minute slot. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode succeeds.
 
 ### Explore vs Camp
 
@@ -36,7 +36,7 @@ A new SDR often arrives with a short whip. That whip is a poor match for many am
 - **NOAA weather** — seven US weather-radio channels (WX1–WX7). These are almost always on the air. Click any one. The page tunes narrow FM and plays the audio. If you hear a clear voice reading the weather, the radio, antenna, speakers, and this program are working.
 - **CB** — forty Citizens Band channels near 27 MHz. Channel **9** is the emergency channel; **19** is the highway channel. Mode is AM. You may hear truckers or nothing at all; silence on CB is normal, and is not a failure of the radio.
 - **GMRS** — twenty-two General Mobile Radio Service channels near 462 MHz. Mode is narrow FM. Walkie-talkies and neighborhood repeaters use these. Again, a quiet channel is fine.
-- **FT8 / JS8 / Olivia / JTTY / VarAC** — published digimode dials (for example **10 m · 28.074** for FT8, **20 m · 14.105** for VarAC). These are usually too weak to look like a loud peak on a scan. Click a dial to decode. FT8 and JS8 wait for the next 15-second slot. VarAC text is decoded by the bundled MIT **xaramonitor** library (from xara). A quiet dial prints nothing; that is a result, not a failure.
+- **FT8 / JS8 / WSPR / Olivia / JTTY / VarAC** — published digimode dials (for example **10 m · 28.074** for FT8, **20 m · 14.0956** for WSPR, **20 m · 14.105** for VarAC). These are usually too weak to look like a loud peak on a scan. Click a dial to decode. FT8 and JS8 wait for the next 15-second slot; WSPR waits for the next even UTC minute. VarAC text is decoded by the bundled MIT **xaramonitor** library (from xara). A quiet dial prints nothing; that is a result, not a failure.
 
 Click a channel once. The frequency and mode fill in, and listening starts. Press **Stop** when you are done. **NOAA check** is a one-button shortcut to WX1 (162.550 MHz) if you only want that quick test.
 
@@ -62,11 +62,11 @@ One pass looks like this:
 2. **Read.** It fills a buffer with samples. On the NESDR those samples are unsigned 8-bit I/Q. Other radios, opened through SoapySDR or LimeSuiteNG, arrive as complex floats and are converted to the same shape.
 3. **Spectrum.** A Fourier transform shows how much energy sits at each frequency near the center. Peaks that stand well above the noise are kept.
 4. **Guess.** Bandwidth, shape, and the band plan suggest a mode: voice, Morse, broadcast FM, digimode dials, and so on.
-5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately (in Explore, or in Camp when the squelch opens). CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 and JS8 are read as text at the end of each 15-second turn. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode lands. Voice clips can also be transcribed with a small English speech model.
+5. **Listen.** Demodulation keeps only the chosen signal and turns it into audio at about 48 kHz while the radio is still receiving. The page plays that audio immediately (in Explore, or in Camp when the squelch opens). CW is read as Morse from the audio heard so far. USB and LSB audio is checked for Morse too, because a keyed signal is often copied on sideband. FT8 and JS8 are read as text at the end of each 15-second turn; WSPR at the end of each 120-second even-minute slot. Olivia, JTTY, VarAC, Packet, Ribbit, and M17 print when a decode lands. Voice clips can also be transcribed with a small English speech model.
 
 A scan watches the band for at least 15 seconds. Where the band is wider than one snapshot, the radio hops, and each stop lasts at least a few seconds. A conversation is kept when the energy arrives as a burst, a pause, and another burst, or as one transmission that starts and stops. A station that stays on, such as weather radio, is kept when it stands clearly above the noise. Each mode is measured at its own width: Morse a few hundred hertz, sideband voice about 2.7 kHz, AM about 10 kHz, narrow FM about 12.5 kHz, and broadcast FM about 200 kHz. A phone segment is also watched for Morse, because a keyed signal can share that channel with voice. Hops overlap so a signal hiding in the hole at the center of one hop is visible in a neighbor.
 
-Digimodes are different. FT8 and JS8 are many quiet tones just above a published dial; Olivia and JTTY are narrower MFSK/GFSK windows; VarAC/VARA fills about 500–2300 Hz of USB above its calling dial. After the usual hop search, the scan also probes each digimode dial on that band for that pattern. When the pattern is present, the dial appears in the table labeled **(activity)** with a modest confidence (about 30–50%). That means the watering hole looks occupied — not that text will decode. Listen to attempt a decode. You can also open **Known channels** and tune a dial directly.
+Digimodes are different. FT8 and JS8 are many quiet tones just above a published dial; WSPR is a few hertz of 4-FSK near 1500 Hz audio on a 120-second cycle; Olivia and JTTY are narrower MFSK/GFSK windows; VarAC/VARA fills about 500–2300 Hz of USB above its calling dial. After the usual hop search, the scan also probes each digimode dial on that band for that pattern. When the pattern is present, the dial appears in the table labeled **(activity)** with a modest confidence (about 30–50%). That means the watering hole looks occupied — not that text will decode. Listen to attempt a decode. You can also open **Known channels** and tune a dial directly.
 
 ## The antenna, in plain language
 
@@ -93,7 +93,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 | Explore vs Camp, schedule, squelch | `CampBook`, `CampWatch`, `CampSchedule` |
 | Finding peaks | `PeakPicker` and `SpectrumAnalyzer` |
 | Guessing the mode | `ModeClassifier` |
-| Audio and text | `Demodulator`, `WbfmMux` / `RdsDecoder`, `MorseDecoder`, `Ft8Decoder`, `Js8Decoder`, `OliviaDecoder`, `JttyDecoder`, `XaraMonitor`, `M17Reader`, `PacketDecoder`, `RibbitDecoder`, `SpeechDecoder` |
+| Audio and text | `Demodulator`, `WbfmMux` / `RdsDecoder`, `MorseDecoder`, `Ft8Decoder`, `Js8Decoder`, `WsprDecoder`, `OliviaDecoder`, `JttyDecoder`, `XaraMonitor`, `M17Reader`, `PacketDecoder`, `RibbitDecoder`, `SpeechDecoder` |
 | The page and the AI tools | `WebApi`, `SdrTools`, `InstructAgent` |
 
 `Radio` talks to hardware. `Dsp` is the math and does not know which dongle you own. `Host` is the page, the session, and the AI tools. `Tests` checks the math and, when the NESDR is plugged in, that the radio is not silent.
@@ -146,9 +146,13 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 **FM broadcast.** Ordinary FM radio, 88–108 MHz. Each station is about 200 kHz wide, much wider than amateur FM. The mode is WBFM. When a 19 kHz stereo pilot is present, audio is demodulated as stereo. RDS (station identity such as a US callsign, and sometimes radio text) prints in Decoded text. Some stations also carry SCA secondary audio on 67 or 92 kHz; choose that under **Secondary channel** while listening.
 
-**Known channels.** The expandable list under **Scan and listen** with fixed CB, GMRS, NOAA weather, and published digimode dials. Click a channel to tune and listen without scanning. The same frequencies live in `Region2BandPlan` and are served by `/api/channels`.
+**Known channels.** The expandable list under **Scan and listen** with fixed CB, GMRS, NOAA weather, Marine VHF/HF, ISS downlinks, and published digimode dials. Click a channel to tune and listen without scanning. The same frequencies live in `Region2BandPlan` and are served by `/api/channels`.
 
 **NOAA weather.** Seven US weather-radio channels from 162.400 to 162.550 MHz. They use narrow FM. The channels are named WX1 through WX7. They appear under **Known channels** and as the **noaa** band for scanning. **NOAA check** tunes WX1.
+
+**Marine.** Marine VHF (NBFM) channels such as **16** distress/calling (156.800 MHz), recreational and port channels, and USCG liaison (22A). The **marine** band can also be scanned. HF maritime distress/safety calling (USB) is listed in the same Known-channels group (2182, 4125, 6215, 8291, 12290, 16420 kHz). Receive only.
+
+**ISS.** ARISS downlinks under **Known channels**: 2 m voice (145.800 MHz NBFM), 2 m APRS (145.825 MHz packet), 70 cm crossband repeater downlink (437.800 MHz NBFM), and 70 cm UHF APRS (437.550 MHz packet). While listening, a baseband Doppler AFC (±5 kHz on 2 m, ±12 kHz on 70 cm) recenters the LEO shift so FM voice and AFSK stay in the demodulator passband. Receive only; the published dial is the listing, not a prediction of when the station is overhead.
 
 **CB.** Citizens Band. Forty channels from 26.965 to 27.405 MHz. This program receives them as AM. Channel 9 is the emergency channel and channel 19 is the highway channel. All forty are under **Known channels**. This program only receives. The band is listed when the open radio can tune near 27 MHz.
 
@@ -194,7 +198,7 @@ Start at the type named in parentheses if you want to see the implementation. Ea
 
 ### Modes
 
-**Auto.** Measure the signal and guess. On a known digimode dial, auto selects that mode (FT8, JS8, Olivia, JTTY, VarAC, and similar) and, for FT8/JS8, waits for the next 15-second slot.
+**Auto.** Measure the signal and guess. On a known digimode dial, auto selects that mode (FT8, JS8, WSPR, Olivia, JTTY, VarAC, and similar) and, for FT8/JS8, waits for the next 15-second slot (WSPR: next even UTC minute).
 
 **AM.** Amplitude modulation. The loudness of the voice changes the strength of the wave. Used by AM broadcast and CB.
 
@@ -212,13 +216,15 @@ Each decoded FT8 line shows strength and tone pitch beside the compact message, 
 
 **JS8.** JS8Call keyboard and directed messages on dials a few kilohertz above FT8. The receiver reads Normal speed (submode A) only: the same USB tone window and 15-second turns as FT8, but JS8's own sync tones and error-correcting code. Heartbeats, CQ calls, directed commands, and Huffman free text print as words with a plain-language line below. Free text packed with JS8's large word dictionary prints common words and shows the rest as `[#number]`.
 
-**Olivia.** MFSK keyboard chat. This build listens for the common **8/500** profile (eight tones in 500 Hz) around published HF watering holes. Text is printed when the Walsh blocks look confident.
+**Olivia.** MFSK keyboard chat. Calling frequencies use **8/250** (eight tones in 250 Hz) with the tone stack centered **1500 Hz** above the USB dial (for example dial 14.0715 → center 14.0730). QSOs often move to 8/500, 16/500, or 16/1000 / 32/1000; those profiles are also tried. Prefer mode **Olivia** (not plain USB) so the decoder gets a wide USB window and slides a few-second decode over a longer buffer — weak copy can sit below the noise and still print. Text appears when the Walsh blocks look confident.
+
+**WSPR.** Weak-signal propagation beacons on a **120-second** UTC cycle. USB dials (for example **20 m · 14.0956**) carry ~6 Hz of 4-FSK near 1500 Hz audio. Mode **WSPR** waits for the even-minute slot, then prints `CALL GRID dBm` when a Type-1 beacon decodes. Scan marks dial occupancy only — listen to decode.
 
 **JTTY.** Keyboard-style 31.25 baud 4-tone GFSK about 127 Hz wide. The decoder locks symbol timing and prints 7-bit ASCII when the tones are clear. Weak or unsynced audio stays quiet instead of inventing letters.
 
 **VarAC.** Keyboard chat and messaging that rides on the VARA HF modem. This program tunes published VarAC USB dials (for example 14.105 MHz), looks for occupancy on scan, and decodes with the bundled MIT **xaramonitor** library (xara’s passive HF monitor, vendored under `native/xaramonitor`). Rebuild that DLL with Rust if you change it. An external `xara-monitor` binary is only a fallback. VARA is ARQ: a packet either decodes completely or not at all. Occupancy without a full packet prints a short status line, not empty silence.
 
-**Packet (AX.25).** 1200 baud AFSK packet and APRS-style frames. Decoded addresses and payloads print in the text pane when the tones are clean. Amateur APRS watering holes (144.390 MHz, ISS 145.825 MHz, 70 cm 445.925 MHz in much of North America) are in the band plan. Auto and scan treat those dials as Packet even when the peak looks like ordinary NBFM.
+**Packet (AX.25).** 1200 baud AFSK packet and APRS-style frames. Decoded addresses and payloads print in the text pane when the tones are clean. Amateur APRS watering holes (144.390 MHz, ISS 145.825 MHz, 70 cm 445.925 MHz in much of North America) are in the band plan; ISS packet also appears under **Known channels → ISS** with Doppler AFC. Auto and scan treat those dials as Packet even when the peak looks like ordinary NBFM.
 
 **Ribbit (ORI / Rattlegram).** OFDM text messaging over FM or SSB audio (~256 carriers at 6.25 Hz around 1500 Hz). The receiver identifies the OFDM comb and prints occupancy when you listen in Ribbit mode; while on NBFM or Packet it can note a Ribbit-looking signal. Full polar-coded message text still needs the native Ribbit/Rattlegram modem — identification and the decode pipeline are wired today.
 
@@ -238,4 +244,4 @@ Each decoded FT8 line shows strength and tone pitch beside the compact message, 
 
 ## What this program will not do
 
-It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec (signaling metadata is allowed). It does not ship EA5HVK’s proprietary VARA binary; VarAC decode uses the MIT xara monitor built into `xaramonitor.dll`. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen for Morse, FT8, JS8, Olivia, JTTY, VarAC, Packet, Ribbit OFDM notes, M17 notes, RDS, speech, and DMR signaling. Speech uses a small English model downloaded once into `models/`.
+It will not transmit, follow trunked radio systems, or decrypt anything. The API key goes only to the endpoint you saved. It does not decode the proprietary DMR voice codec (signaling metadata is allowed). It does not ship EA5HVK’s proprietary VARA binary; VarAC decode uses the MIT xara monitor built into `xaramonitor.dll`. A scan label is a guess from the spectrum and the band plan, except a DMR hit, which requires the framing word. The text pane fills while you listen for Morse, FT8, JS8, WSPR, Olivia, JTTY, VarAC, Packet, Ribbit OFDM notes, M17 notes, RDS, speech, and DMR signaling. Speech uses a small English model downloaded once into `models/`.

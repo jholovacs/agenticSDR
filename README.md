@@ -13,7 +13,7 @@ The bring-up radio is a Nooelec NESDR SMArt v5 (RTL2832U). It tunes about 100 kH
 | **Explore** | Scan a band, click a hit, listen live, record MP3, download an XML transcript |
 | **Camp** | Quiet schedule / squelch watch; audio opens when the channel is active |
 | **Voice modes** | NBFM, WBFM (stereo + RDS + SCA 67/92), AM, USB, LSB, CW (+ Morse text) |
-| **Digimodes** | FT8, JS8, Olivia 8/500, JTTY, VarAC (xaramonitor), Packet/APRS AX.25 |
+| **Digimodes** | FT8, JS8, WSPR (Type-1), Olivia 8/250 (+8/500, 16/500, 16/1000, 32/1000), JTTY, VarAC (xaramonitor), Packet/APRS AX.25 |
 | **Digital voice** | M17 Codec2 when `m17voice` is present; DMR framing + signaling (no proprietary voice) |
 | **AI** | On-page instruct model + MCP tools/resources at `/mcp` |
 | **Known channels** | NOAA WX, CB, GMRS, and published digimode dials without scanning |
@@ -98,6 +98,7 @@ The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM bro
 | CW | Tone + Morse decode |
 | FT8 / JS8 | 15 s slots; optional callsign / grid plain reading |
 | Olivia / JTTY | Keyboard digimodes on published dials |
+| WSPR | 120 s Type-1 beacons on published USB dials |
 | VarAC | Bundled MIT xaramonitor (not EA5HVK VARA) |
 | Packet | 1200 baud AX.25 / APRS |
 | M17 | Open Codec2 via bundled `m17voice` |
@@ -163,7 +164,7 @@ Each digimode is its own project under `Modes/`. Shared Part 97 / operator / cli
 3. the open SDR reports `CanTransmit` and implements `IRadioTransmitter`, and
 4. an authorized operator clicks **Transmit** (`OperatorClick` — agents cannot forge this).
 
-`dotnet run --project Modes/Cw` serves the CW desk at http://127.0.0.1:5091 (≤18 WPM listen; experimental transmit). FT8, JS8, Olivia, JTTY, and Packet ship as libraries with the same gate; desks for those modes follow the CW pattern.
+`dotnet run --project Modes/Cw` serves the CW desk at http://127.0.0.1:5091 (≤18 WPM listen; experimental transmit). FT8, JS8, WSPR, Olivia, JTTY, and Packet ship as gated libraries with the same click/Part 97 policy; desks for those modes follow the CW pattern.
 
 Each running app shows an **Apps** bar (Receiver · CW · …) that links the loopback desks. Start the processes you need (`make run`, `make cw`); only one should hold the USB radio at a time. `GET /api/apps` returns the same catalog.
 
@@ -175,7 +176,7 @@ dotnet run --project Host
 dotnet run --project Modes/Cw
 ```
 
-`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8, Olivia/JTTY, RDS helpers, packet, M17 plumbing, camp/schedule, callsign lookup, the band plan, Part 97 privileges, and click-gated CW transmit. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
+`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8/WSPR, Olivia/JTTY, RDS helpers, packet, M17 plumbing, camp/schedule, callsign lookup, the band plan, Part 97 privileges, and click-gated CW transmit. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
 
 Packaging scripts: `packaging/build-msi.sh`, `packaging/build-deb.sh`, `packaging/build-mac.sh`. CI workflow: `.github/workflows/packages.yml`.
 
