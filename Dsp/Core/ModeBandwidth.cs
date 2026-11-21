@@ -18,7 +18,7 @@ public static class ModeBandwidth
         RadioMode.Wspr => new Pass(4, 200, 6, 100),
         RadioMode.Varac => new Pass(400, 3_000, 2_300, 1_000),
         RadioMode.Am => new Pass(4_000, 12_000, 10_000, 10_000),
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Dstar or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
             new Pass(2_000, 16_000, 12_500, 12_500),
         RadioMode.Wbfm => new Pass(50_000, 250_000, 200_000, 200_000),
         RadioMode.Raw => new Pass(4_000, 40_000, 20_000, 12_500),
@@ -53,4 +53,26 @@ public static class ModeBandwidth
             return Fits(RadioMode.Cw, bandwidthHz) || Fits(RadioMode.Usb, bandwidthHz) || Fits(RadioMode.Nbfm, bandwidthHz);
         return bandwidthHz >= pass.Value.MinHz && bandwidthHz <= pass.Value.MaxHz;
     }
+
+    /// <summary>
+    /// Envelope fit with a fractional margin (default 10%) so a slightly mis-measured peak still matches.
+    /// </summary>
+    public static bool FitsWithMargin(RadioMode mode, double bandwidthHz, double margin = 0.10)
+    {
+        Pass? pass = For(mode);
+        if (pass is null)
+            return FitsWithMargin(RadioMode.Cw, bandwidthHz, margin)
+                || FitsWithMargin(RadioMode.Usb, bandwidthHz, margin)
+                || FitsWithMargin(RadioMode.Nbfm, bandwidthHz, margin);
+        double lo = pass.Value.MinHz * (1.0 - margin);
+        double hi = pass.Value.MaxHz * (1.0 + margin);
+        return bandwidthHz >= lo && bandwidthHz <= hi;
+    }
+
+    public static double NominalWidthHz(RadioMode mode) =>
+        For(mode)?.WidthHz ?? mode switch
+        {
+            RadioMode.Unknown => 0,
+            _ => 2_700
+        };
 }

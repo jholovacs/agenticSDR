@@ -46,6 +46,12 @@ public interface IRadioDevice : IDisposable
     /// <summary>Set the tuner gain in dB. Null lets the radio choose its own gain. The open-time gain is still the one in <see cref="Capabilities"/>.</summary>
     void SetGain(double? gainDb);
 
+    /// <summary>
+    /// Apply a crystal correction in parts per million. Positive means the oscillator runs high.
+    /// RTL-SDR and SoapySDR push this into the driver; LimeSDR applies it on the next <see cref="Tune"/>.
+    /// </summary>
+    void SetFrequencyCorrection(int ppm);
+
     /// <summary>Block until the buffer is filled, and return how many bytes were written.</summary>
     int Read(byte[] buffer);
 }

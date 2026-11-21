@@ -18,6 +18,7 @@ public sealed class ProcessorCatalog(ISpeechTranscriber? speech = null)
         new("wspr", "WSPR", "decoder"),
         new("varac", "VarAC", "decoder"),
         new("packet", "Packet", "decoder"),
+        new(AprsExplainProcessor.ProcessorId, "Plain English", "filter"),
         new("ribbit", "Ribbit", "decoder"),
         new(RdsProcessor.ProcessorId, "RDS", "decoder")
     ];
@@ -39,6 +40,7 @@ public sealed class ProcessorCatalog(ISpeechTranscriber? speech = null)
             "wspr" => new WsprProcessor(),
             "varac" => new VaracProcessor(),
             "packet" => new PacketProcessor(),
+            AprsExplainProcessor.ProcessorId => new AprsExplainProcessor(),
             "ribbit" => new RibbitProcessor(),
             RdsProcessor.ProcessorId => new RdsProcessor(),
             _ => throw new ArgumentException($"Unknown processor '{id}'.")

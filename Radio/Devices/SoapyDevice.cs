@@ -34,7 +34,7 @@ public sealed class SoapyDevice : IRadioDevice
         SampleRateHz = sampleRate;
     }
 
-    public RadioCapabilities Capabilities { get; }
+    public RadioCapabilities Capabilities { get; private set; }
 
     public bool DirectSampling { get; private set; }
 
@@ -160,6 +160,17 @@ public sealed class SoapyDevice : IRadioDevice
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ApplyGain(_device, gainDb);
+    }
+
+    public void SetFrequencyCorrection(int ppm)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        int correction = SoapyNative.SoapySDRDevice_setFrequencyCorrection(_device, SoapyNative.Rx, 0, ppm);
+        if (correction < 0 && correction != SoapyNative.NotSupported)
+            Check(correction, "setFrequencyCorrection");
+        Capabilities = Capabilities with { Ppm = ppm };
+        if (CenterFrequencyHz > 0)
+            Tune(CenterFrequencyHz);
     }
 
     public void Tune(double frequencyHz)

@@ -149,11 +149,12 @@ public static class ModeClassifier
             "varac" or "vara" or "xara" or "zara" => RadioMode.Varac,
             "wbfm" or "wfm" or "fmwb" => RadioMode.Wbfm,
             "dmr" => RadioMode.Dmr,
+            "dstar" or "d-star" => RadioMode.Dstar,
             "m17" => RadioMode.M17,
             "packet" or "ax25" or "aprs" or "afsk" or "pkt" => RadioMode.Packet,
             "ribbit" or "rattlegram" or "ori" => RadioMode.Ribbit,
             "raw" => RadioMode.Raw,
-            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, wspr, varac, wbfm, dmr, m17, packet, ribbit, or raw.")
+            _ => throw new ArgumentException($"Unknown mode '{mode}'. Use auto, nbfm, am, usb, lsb, cw, ft8, js8, olivia, jtty, wspr, varac, wbfm, dmr, dstar, m17, packet, ribbit, or raw.")
         };
     }
 }

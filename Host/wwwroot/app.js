@@ -3,7 +3,18 @@ DeskPanels.mountAppNav(document.getElementById("app-nav"), { current: "receiver"
 DeskPanels.mountRadio(document.getElementById("radio-host"), {
   apiBase: "",
   ownEvents: false,
-  open: true
+  open: true,
+  calibrate: true,
+  onError: (message) => showError(message),
+  onCalibrated: (body) => {
+    if (body?.message) showError("");
+    const ppmInput = document.querySelector("#radio-ppm");
+    if (ppmInput && Number.isFinite(Number(body?.ppm)))
+      ppmInput.value = String(Math.round(Number(body.ppm)));
+    radioSignature = "";
+    loadRadios().catch(() => {});
+    refreshStatus();
+  }
 });
 
 const promptPanel = AgentPanels.mountPrompt(document.getElementById("prompt-host"), {
@@ -66,6 +77,12 @@ const busyTitle = document.querySelector("#busy-title");
 const busyDetail = document.querySelector("#busy-detail");
 const busyBar = document.querySelector("#busy-bar");
 const busyPercent = document.querySelector("#busy-percent");
+const busyProgress = document.querySelector("#busy-progress");
+const analyzeResult = document.querySelector("#analyze-result");
+const analyzeSummary = document.querySelector("#analyze-summary");
+let lastScanReport = null;
+let analyzeResultOpen = false;
+let pendingAnalyzeReport = null;
 const scanNote = document.querySelector("#scan-note");
 const readout = document.querySelector("#readout");
 const source = document.querySelector("#source");
@@ -178,7 +195,8 @@ function setBusy(value) {
     if (button.closest("dialog")) return;
     if (button.id === "stop" || button.id === "radio-stop" || button.id === "live-stop" || button.id === "camp-stop") return;
     if (button.id === "record" || button.id === "record-transcript"
-      || button.classList.contains("row-listen") || button.classList.contains("freq-copy")) return;
+      || button.classList.contains("row-listen") || button.classList.contains("row-analyze")
+      || button.classList.contains("freq-copy")) return;
     // Prompts stay usable while live audio plays (get_transcript, questions about what you hear).
     if (button.id === "llm-send") return;
     if (live && (button.id === "listen" || button.id === "camp-go" || button.id === "noaa" || button.classList.contains("channel-tune"))) return;
@@ -194,6 +212,7 @@ function busyHeading(phase) {
     case "scanning": return "Scanning";
     case "listening": return "Listening";
     case "inspecting": return "Inspecting";
+    case "analyzing": return "Analyzing";
     case "camping": return "Camping";
     default: return phase && phase !== "idle" ? phase.charAt(0).toUpperCase() + phase.slice(1) : "Working";
   }
@@ -207,11 +226,13 @@ function busyBlurb(phase) {
       if (liveStarting) {
         return "Nothing is wrong — live audio starts after the radio is ready.\n"
           + "This step can include waiting for the radio lock, classifying the signal, "
-          + "looking up a repeater name, waiting for a digimode UTC slot, or tuning.";
+          + "looking up a repeater name, or tuning.";
       }
-      return "The radio is tuned and capturing audio. Digimodes may wait for the next slot before decoding.";
+      return "The radio is tuned and capturing audio. Digimode text still follows UTC slots while the tones play.";
     case "inspecting":
       return "Measuring that frequency for mode, bandwidth, and strength.";
+    case "analyzing":
+      return "Re-capturing the signal and ranking known modulations that fit the measured envelope (±10%). Digital modes try a short decode for confirmation.";
     default:
       return "The radio is busy. Wait for this step to finish, or stop it.";
   }
@@ -223,6 +244,10 @@ function otherDialogOpen() {
 
 function paintBusyModal(phase, message, progress) {
   if (!busyPanel) return;
+  if (analyzeResultOpen) {
+    if (!busyPanel.open) busyPanel.showModal();
+    return;
+  }
   // Live explore/camp streaming keeps phase "listening" for the whole tune —
   // show the modal for finite work, and also while live audio is still starting.
   const liveStream = liveAbort !== null && !liveStarting;
@@ -233,6 +258,8 @@ function paintBusyModal(phase, message, progress) {
     return;
   }
 
+  if (busyProgress) busyProgress.hidden = false;
+  if (analyzeResult) analyzeResult.hidden = true;
   busyTitle.textContent = liveStarting ? "Starting listen" : busyHeading(phase);
   const detail = (message || "").trim();
   const blurb = busyBlurb(liveStarting ? "listening" : phase);
@@ -263,6 +290,12 @@ function applyRadioControls() {
   document.querySelector("#radio-start").disabled = busy || selectedIsOpen || !hasRadio;
   document.querySelector("#radio-stop").disabled = !deviceOpen;
   document.querySelector("#radio-details").disabled = busy || !hasRadio;
+  const calibrate = document.querySelector("#radio-calibrate");
+  if (calibrate)
+    calibrate.disabled = busy || !deviceOpen;
+  const ppmInput = document.querySelector("#radio-ppm");
+  if (ppmInput)
+    ppmInput.disabled = !hasRadio || busy;
   document.querySelector("#antenna-guess").disabled = busy || !deviceOpen;
   const live = liveAbort !== null;
   document.querySelector("#scan").disabled = busy || !deviceOpen;
@@ -277,7 +310,7 @@ function applyRadioControls() {
 
 async function loadRadios() {
   const devices = await api("/api/devices");
-  const signature = devices.map((device) => `${device.index}:${device.name}:${device.serial || ""}`).join("|");
+  const signature = devices.map((device) => `${device.index}:${device.name}:${device.serial || ""}:${device.ppm ?? ""}`).join("|");
   if (signature !== radioSignature) {
     const previous = radioSelect.value;
     radioSelect.innerHTML = "";
@@ -306,6 +339,12 @@ async function loadRadios() {
     }
     radioSignature = signature;
   }
+  const ppmInput = document.querySelector("#radio-ppm");
+  if (ppmInput) {
+    const selected = devices.find((device) => String(device.index) === radioSelect.value);
+    if (selected && Number.isFinite(Number(selected.ppm)))
+      ppmInput.value = String(Math.round(Number(selected.ppm)));
+  }
   applyRadioControls();
   paintFoldSummaries();
 }
@@ -322,6 +361,32 @@ async function startRadio() {
     });
     radioSignature = "";
     await loadRadios();
+  } catch (ex) {
+    showError(ex.message);
+  } finally {
+    operatingRadio = false;
+    setBusy(false);
+    refreshStatus();
+  }
+}
+
+async function calibrateRadio() {
+  showError("");
+  operatingRadio = true;
+  setBusy(true);
+  try {
+    const body = await api("/api/radio/calibrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    const ppmInput = document.querySelector("#radio-ppm");
+    if (ppmInput && Number.isFinite(Number(body?.ppm)))
+      ppmInput.value = String(Math.round(Number(body.ppm)));
+    radioSignature = "";
+    await loadRadios();
+    if (body?.message)
+      document.querySelector("#status-line").textContent = body.message;
   } catch (ex) {
     showError(ex.message);
   } finally {
@@ -554,9 +619,23 @@ async function loadDefaultPipeline(modeName) {
   renderPipelineEditor();
 }
 
+/** Reload the mode-default pipeline unless the user has edited it. */
+function syncPipelineToMode(modeName) {
+  pipelineDirty = false;
+  return loadDefaultPipeline(modeName || document.querySelector("#listen-mode")?.value || "nbfm");
+}
+
 function paintStatusPipeline(pipeline) {
   statusPipeline = Array.isArray(pipeline) ? pipeline : [];
-  if (!pipelineDirty && statusPipeline.length > 0) {
+  if (pipelineDirty) return;
+  // While live, always mirror the session pipeline — including empty defaults (DMR / D-STAR / Raw).
+  // Otherwise an empty report left the previous mode's stages on screen.
+  if (liveAbort !== null) {
+    pipelineIds = statusPipeline.map((stage) => stage.id);
+    renderPipelineEditor();
+    return;
+  }
+  if (statusPipeline.length > 0) {
     pipelineIds = statusPipeline.map((stage) => stage.id);
     renderPipelineEditor();
   }
@@ -688,6 +767,7 @@ async function tuneKnownChannel(frequencyHz, heard, bandId) {
     hear.value = heard;
   syncDmrFields();
   paintFoldSummaries();
+  await syncPipelineToMode(heard).catch(() => {});
   await listen(heard);
 }
 
@@ -798,6 +878,7 @@ async function guessAntenna() {
 }
 
 function renderHits(report) {
+  if (report) lastScanReport = report;
   hits.innerHTML = "";
   const rows = report?.hits || [];
   empty.hidden = rows.length > 0;
@@ -805,6 +886,7 @@ function renderHits(report) {
   for (const hit of rows) {
     const freq = mhzText(hit.frequencyHz);
     const row = document.createElement("tr");
+    row.dataset.frequencyHz = String(hit.frequencyHz);
     row.innerHTML = `
       <td class="num"><button type="button" class="freq-copy" title="Copy ${freq} MHz">${freq}</button></td>
       <td>${hit.mode}</td>
@@ -812,11 +894,17 @@ function renderHits(report) {
       <td class="num">${(hit.bandwidthHz / 1000).toFixed(1)}</td>
       <td class="num">${hit.snrDb.toFixed(0)}</td>
       <td>${hit.source}</td>
-      <td><button type="button" class="ghost row-listen">Listen</button></td>`;
+      <td class="row-actions">
+        <button type="button" class="ghost row-analyze">Analyze</button>
+        <button type="button" class="ghost row-listen">Listen</button>
+      </td>`;
     const copyBtn = row.querySelector(".freq-copy");
     copyBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       copyText(freq, copyBtn).catch(() => showError("Could not copy the frequency."));
+    });
+    row.querySelector(".row-analyze").addEventListener("click", () => {
+      analyzeHit(hit).catch((ex) => showError(ex.message));
     });
     row.querySelector(".row-listen").addEventListener("click", () => {
       document.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
@@ -827,12 +915,82 @@ function renderHits(report) {
       fillHearModes();
       document.querySelector("#listen-mode").value = suggestedMode;
       syncDmrFields();
-      listen().catch((ex) => showError(ex.message));
+      syncPipelineToMode(suggestedMode)
+        .catch(() => {})
+        .finally(() => listen().catch((ex) => showError(ex.message)));
     });
     hits.append(row);
   }
   syncSignalButtons();
   paintFoldSummaries();
+}
+
+function patchHitFromAnalyze(report) {
+  if (!lastScanReport?.hits?.length) return;
+  const prior = (report.priorMode || "").toLowerCase();
+  const idx = lastScanReport.hits.findIndex((hit) => {
+    if (Math.abs(hit.frequencyHz - report.frequencyHz) > 50) return false;
+    if (!prior) return true;
+    return String(hit.mode).toLowerCase() === prior;
+  });
+  const at = idx >= 0 ? idx : lastScanReport.hits.findIndex((hit) => Math.abs(hit.frequencyHz - report.frequencyHz) <= 50);
+  if (at < 0) return;
+  const old = lastScanReport.hits[at];
+  const source = /analyzed/i.test(old.source || "") ? old.source : `${old.source || "signal"} · analyzed`;
+  lastScanReport.hits[at] = {
+    ...old,
+    frequencyHz: report.recommendedTuneHz,
+    mode: report.recommendedMode,
+    confidence: report.confidence,
+    bandwidthHz: report.recommendedBandwidthHz,
+    snrDb: report.snrDb ?? old.snrDb,
+    source
+  };
+  renderHits(lastScanReport);
+}
+
+function showAnalyzeResult(report) {
+  pendingAnalyzeReport = report;
+  analyzeResultOpen = true;
+  if (report.changed)
+    patchHitFromAnalyze(report);
+  if (busyProgress) busyProgress.hidden = true;
+  if (analyzeResult) analyzeResult.hidden = false;
+  const tune = mhzText(report.recommendedTuneHz);
+  const conf = Math.round((report.confidence || 0) * 100);
+  busyTitle.textContent = report.changed ? "Analyze recommendation" : "Analyze confirmed";
+  busyDetail.textContent = "";
+  analyzeSummary.textContent =
+    `${report.recommendedMode} at ${tune} MHz (${conf}%)\n`
+    + `Channel ~${((report.recommendedBandwidthHz || 0) / 1000).toFixed(1)} kHz\n\n`
+    + (report.explanation || "");
+  analyzeSummary.style.whiteSpace = "pre-wrap";
+  if (busyPanel && !busyPanel.open) busyPanel.showModal();
+}
+
+function closeAnalyzeResult() {
+  analyzeResultOpen = false;
+  pendingAnalyzeReport = null;
+  if (analyzeResult) analyzeResult.hidden = true;
+  if (busyProgress) busyProgress.hidden = false;
+  if (busyPanel?.open) busyPanel.close();
+}
+
+async function analyzeHit(hit) {
+  showError("");
+  setBusy(true);
+  try {
+    const report = await api("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frequencyHz: hit.frequencyHz, mode: hit.mode })
+    });
+    showAnalyzeResult(report);
+  } catch (ex) {
+    showError(ex.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function scan() {
@@ -874,6 +1032,9 @@ function syncSignalButtons() {
   document.querySelectorAll(".row-listen").forEach((button) => {
     button.disabled = !live && busy;
   });
+  document.querySelectorAll(".row-analyze").forEach((button) => {
+    button.disabled = busy || live;
+  });
   document.querySelector("#record").disabled = !live && !recording;
   updateTranscriptButton();
 }
@@ -904,6 +1065,7 @@ function modeToken(value) {
     wspr: "WSPR",
     varac: "VarAC",
     dmr: "DMR",
+    dstar: "D-STAR",
     m17: "M17",
     packet: "PKT",
     ribbit: "Ribbit"
@@ -1130,6 +1292,7 @@ function channelWidthHz(mode) {
     case "am": return 10_000;
     case "nbfm":
     case "dmr":
+    case "dstar":
     case "m17":
     case "packet":
     case "ribbit": return 12_500;
@@ -1328,6 +1491,8 @@ async function listen(explicitMode) {
         fillHearModes();
         document.querySelector("#listen-mode").value = reported;
       }
+      if (!pipelineDirty)
+        syncPipelineToMode(reported).catch(() => {});
     }
     syncModeExtraFields();
     const program = (response.headers.get("X-Wbfm-Program") || nextWbfm || "main").toLowerCase();
@@ -1637,6 +1802,9 @@ document.querySelector("#antenna-apply").addEventListener("click", () => {
 });
 document.querySelector("#antenna-guess").addEventListener("click", guessAntenna);
 document.querySelector("#radio-start").addEventListener("click", startRadio);
+document.querySelector("#radio-calibrate")?.addEventListener("click", () => {
+  calibrateRadio().catch((ex) => showError(ex.message));
+});
 document.querySelector("#radio-stop").addEventListener("click", () => {
   stopRadio().catch((ex) => showError(ex.message));
 });
@@ -1658,7 +1826,18 @@ document.querySelector("#scan").addEventListener("click", scan);
 document.querySelector("#listen").addEventListener("click", () => {
   listen().catch((ex) => showError(ex.message));
 });
-document.querySelector("#mode").addEventListener("change", syncDmrFields);
+document.querySelector("#mode").addEventListener("change", () => {
+  const value = mode.value;
+  syncDmrFields();
+  const hear = document.querySelector("#listen-mode");
+  if (value && value !== "auto" && [...hear.options].some((option) => option.value === value)) {
+    hear.value = value;
+    suggestedMode = value;
+  }
+  paintChannelWidth(hear.value || value);
+  paintFoldSummaries();
+  syncPipelineToMode(value === "auto" ? hear.value : value).catch(() => {});
+});
 document.querySelector("#listen-mode").addEventListener("change", () => {
   const hear = document.querySelector("#listen-mode").value;
   if ([...mode.options].some((option) => option.value === hear)) mode.value = hear;
@@ -1667,14 +1846,16 @@ document.querySelector("#listen-mode").addEventListener("change", () => {
   if (listeningHz != null && hear && hear !== "auto")
     readout.textContent = formatReadout(listeningHz, hear);
   paintFoldSummaries();
-  pipelineDirty = false;
-  loadDefaultPipeline(hear).catch(() => {});
-  if (operatingMode === "camp") {
-    if (scheduleView?.now || scheduleView?.active)
-      startCamp().catch((ex) => showError(ex.message));
-    return;
-  }
-  if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
+  syncPipelineToMode(hear)
+    .catch(() => {})
+    .finally(() => {
+      if (operatingMode === "camp") {
+        if (scheduleView?.now || scheduleView?.active)
+          startCamp().catch((ex) => showError(ex.message));
+        return;
+      }
+      if (liveAbort) listen(hear).catch((ex) => showError(ex.message));
+    });
 });
 document.querySelector("#pipeline-add-btn")?.addEventListener("click", () => {
   const id = document.querySelector("#pipeline-add")?.value;
@@ -1684,9 +1865,8 @@ document.querySelector("#pipeline-add-btn")?.addEventListener("click", () => {
   renderPipelineEditor();
 });
 document.querySelector("#pipeline-reset")?.addEventListener("click", () => {
-  pipelineDirty = false;
   const hear = document.querySelector("#listen-mode")?.value || mode.value || "auto";
-  loadDefaultPipeline(hear).catch(() => {});
+  syncPipelineToMode(hear).catch(() => {});
 });
 for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
   document.querySelector(id).addEventListener("change", () => {
@@ -1742,14 +1922,42 @@ document.querySelector("#leave-no").addEventListener("click", () => {
 document.querySelector("#busy-stop")?.addEventListener("click", () => {
   stopWork().catch((ex) => showError(ex.message));
 });
+document.querySelector("#analyze-apply")?.addEventListener("click", () => {
+  if (pendingAnalyzeReport) {
+    const report = pendingAnalyzeReport;
+    patchHitFromAnalyze(report);
+    syncTuneFrequency(mhzText(report.recommendedTuneHz));
+    const nextMode = String(report.recommendedMode || "").toLowerCase();
+    if (nextMode) {
+      mode.value = nextMode;
+      suggestedMode = nextMode;
+      fillHearModes();
+      document.querySelector("#listen-mode").value = suggestedMode;
+      syncDmrFields();
+      syncPipelineToMode(nextMode).catch(() => {});
+    }
+  }
+  closeAnalyzeResult();
+});
+document.querySelector("#analyze-dismiss")?.addEventListener("click", () => {
+  closeAnalyzeResult();
+});
 busyPanel?.addEventListener("cancel", (event) => {
   event.preventDefault();
+  if (analyzeResultOpen) {
+    closeAnalyzeResult();
+    return;
+  }
   stopWork().catch((ex) => showError(ex.message));
 });
 async function stopWork() {
   listenToken++;
   campPlayKey = "";
   const file = recording ? await endRecording() : null;
+  analyzeResultOpen = false;
+  pendingAnalyzeReport = null;
+  if (analyzeResult) analyzeResult.hidden = true;
+  if (busyProgress) busyProgress.hidden = false;
   if (busyPanel?.open) busyPanel.close();
   closePrompt();
   stopLivePlayback();
@@ -1833,8 +2041,10 @@ const tips = {
   receive: "This program only receives. It does not transmit.",
   "device-name": "The radio that is open.",
   status: "What the radio is doing right now. While a scan or listen runs, a panel explains the step and shows progress.",
-  radio: "Open or close the USB radio this page tunes.",
+  radio: "Open or close the USB radio this page tunes. Each radio keeps its own ppm crystal correction.",
   device: `The connected ${wiki("Software-defined_radio", "software-defined radio")}. It captures a slice of spectrum, and this program decides what the signal is.`,
+  ppm: `Crystal correction in ${wiki("Parts-per_notation", "parts per million")} for the selected radio. Positive means the oscillator runs high. Saved per serial and used on every tune. Use Calibrate to measure it from NOAA weather carriers.`,
+  calibrate: `Measures published ${wiki("NOAA_Weather_Radio", "NOAA weather")} carriers, compares them to the radio’s reported frequency, and saves the resulting ppm for this stick. Needs the radio open and an antenna that can hear a local WX channel.`,
   start: "Opens the selected radio.",
   "stop-radio": "Releases the radio. A scan that is running stops too.",
   details: "Shows the tuning range, sample rate, and versions.",
@@ -1860,7 +2070,7 @@ const tips = {
   scan: `Hops across the band and lists peaks that stand out from the noise. A steady whistle with no voice or data is skipped as a ${wiki("Spurious_emission", "local spur")}.`,
   stop: "Stops a scan, a listen, or a model request.",
   freq: `The frequency to tune, in megahertz. 146.520 is the 2 m FM calling spot. See ${wiki("Radio_frequency", "radio frequency")}.`,
-  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("WSPR", "WSPR")} (120 s Type-1 beacons), Olivia (use mode Olivia on a calling dial, not plain USB), ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
+  mode: `How the voice or data was put on the wave. Auto guesses. ${wiki("Amplitude_modulation", "AM")}, ${wiki("Frequency_modulation", "narrow and wide FM")}, ${wiki("Single-sideband_modulation", "USB and LSB")}, ${wiki("Continuous_wave", "CW")} Morse, ${wiki("FT8", "FT8")}, ${wiki("WSPR", "WSPR")} (120 s Type-1 beacons), Olivia (use mode Olivia on a calling dial, not plain USB), ${wiki("Digital_mobile_radio", "DMR")}, ${wiki("D-STAR", "D-STAR")} (callsigns only; AMBE not decoded), ${wiki("M17_(amateur_radio)", "M17")}, ${wiki("Packet_radio", "packet radio (AX.25 / APRS)")}, and Ribbit (Rattlegram OFDM).`,
   hear: "The mode to play this signal as. The suggested mode is first. Changing it while a recording is running stops that recording and asks whether to download it.",
   "channel-width": "How wide the demodulator listens for this mode after the radio samples arrive (CW narrow, broadcast FM wide).",
   "dmr-color": "The DMR color code, 0 through 15. Any accepts every color code on the channel.",
@@ -1874,7 +2084,7 @@ const tips = {
   freq: "Frequency to listen to or camp on.",
   noaa: `Listens to one ${wiki("NOAA_Weather_Radio", "NOAA weather radio")} channel so you can tell the radio is working.`,
   "known-channels": `Fixed ${wiki("Citizens_band_radio", "CB")}, ${wiki("General_Mobile_Radio_Service", "GMRS")}, ${wiki("NOAA_Weather_Radio", "NOAA weather")}, Marine VHF/HF, ${wiki("International_Space_Station", "ISS")} downlinks, and ${wiki("FT8", "FT8")} / ${wiki("WSPR", "WSPR")} dial frequencies. Start with NOAA to check a new SDR. Open ISS for voice or APRS during a pass — Doppler AFC keeps the downlink centered. Open Marine for channel 16, FT8 for a dial such as 10 m · 28.074, or WSPR for 20 m · 14.0956 when you want that mode without scanning.`,
-  signals: "Peaks from the last scan.",
+  signals: "Peaks from the last scan. Analyze re-scores a row with envelope-fitting codecs; Listen plays the current mode and frequency.",
   "col-mhz": `Frequency in megahertz. Click a value to copy it. See ${wiki("Radio_frequency", "radio frequency")}.`,
   "col-mode": "The kind of signal the scan guessed.",
   "col-conf": "How sure that mode guess is. Listening is the check.",
@@ -1884,7 +2094,7 @@ const tips = {
   selected: "The frequency you are hearing or camping on, with live audio and decoded text.",
   record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",
   transcript: `Downloads ${wiki("Morse_code", "Morse")}, ${wiki("FT8", "FT8")}, ${wiki("Radio_Data_System", "RDS")}, and ${wiki("Speech_recognition", "speech")} text as XML, with the time and which decoder wrote each line.`,
-  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")} / JS8 / ${wiki("WSPR", "WSPR")} / Olivia / JTTY / VarAC (xara/zara monitor), ${wiki("Speech_recognition", "speech")}, DMR talkgroup / radio ID / alias text, and broadcast-FM ${wiki("Radio_Data_System", "RDS")} name and radio text.`,
+  decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")} / JS8 / ${wiki("WSPR", "WSPR")} / Olivia / JTTY / VarAC (xara/zara monitor), ${wiki("Speech_recognition", "speech")}, DMR talkgroup / radio ID / alias text, D-STAR callsigns / slow-data text, and broadcast-FM ${wiki("Radio_Data_System", "RDS")} name and radio text.`,
   "operating-mode": "Explore scans and listens with the audio on. Camp is the camping workspace: camping starts when you press Camp, or when a schedule window is due.",
   volume: "How loud this page plays the radio. Camping stays silent until there is activity, then uses this level.",
   squelch: "How strong a station must be before Camp opens the speaker. Low is open; high stays quiet until a clear signal. The mark on the SNR meter is this threshold.",

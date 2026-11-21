@@ -70,8 +70,12 @@ public sealed class PacketReader
     private bool _inFrame;
     private readonly List<byte> _frameBytes = new(256);
     private readonly List<string> _recentDecoded = new();
+    private readonly List<byte[]> _recentRaw = new();
 
     public IReadOnlyList<string> LastDecoded => _recentDecoded;
+
+    /// <summary>Verified AX.25 frames (including FCS bytes) from the most recent <see cref="Push"/> call and earlier in this reader.</summary>
+    public IReadOnlyList<byte[]> LastRawFrames => _recentRaw;
 
     public PacketReader(int initialSampleRate = 48_000)
     {
@@ -263,9 +267,16 @@ public sealed class PacketReader
                 _onesCount = 0;
                 if (_inFrame && _frameBytes.Count >= MinFrameBytes)
                 {
-                    Ax25Frame? frame = PacketDecoder.ParseFrame(_frameBytes.ToArray());
-                    if (frame is not null && !string.IsNullOrWhiteSpace(frame.Text))
-                        decodedLines.Add(frame.Text);
+                    byte[] raw = _frameBytes.ToArray();
+                    Ax25Frame? frame = PacketDecoder.ParseFrame(raw);
+                    if (frame is not null)
+                    {
+                        _recentRaw.Add(raw);
+                        while (_recentRaw.Count > 100)
+                            _recentRaw.RemoveAt(0);
+                        if (!string.IsNullOrWhiteSpace(frame.Text))
+                            decodedLines.Add(frame.Text);
+                    }
                 }
 
                 _frameBytes.Clear();
@@ -320,7 +331,26 @@ public static class PacketDecoder
             allLines.AddRange(lines);
         }
 
-        return string.Join('\n', allLines);
+        return AprsExplain.FormatDecoded(string.Join('\n', allLines));
+    }
+
+    /// <summary>
+    /// Returns FCS-verified raw AX.25 frames (address through FCS) recovered from Bell 202 audio.
+    /// </summary>
+    public static IReadOnlyList<byte[]> DecodeRawFrames(ReadOnlySpan<float> audio, int sampleRate)
+    {
+        if (audio.Length == 0 || sampleRate < 4_000)
+            return [];
+
+        var reader = new PacketReader(sampleRate);
+        const int chunkSize = 4096;
+        for (int offset = 0; offset < audio.Length; offset += chunkSize)
+        {
+            int len = Math.Min(chunkSize, audio.Length - offset);
+            _ = reader.Push(audio.Slice(offset, len), sampleRate);
+        }
+
+        return reader.LastRawFrames.ToArray();
     }
 
     /// <summary>
@@ -535,8 +565,24 @@ public static class PacketDecoder
         return data;
     }
 
+    /// <summary>Default TX audio / FM baseband rate: integer multiple of 1200 baud (40 samples/bit).</summary>
+    public const int TxAudioRate = 48_000;
+
+    /// <summary>Opening HDLC flags before the stuffed frame (~267 ms at 1200 baud) for TNC squelch / DPLL lock.</summary>
+    public const int TxPreambleFlags = 40;
+
+    /// <summary>Closing HDLC flags after the FCS so the carrier stays up through the receiver IF.</summary>
+    public const int TxPostambleFlags = 5;
+
+    /// <summary>+4.0 dB Space (2200 Hz) vs Mark (1200 Hz) to offset VHF FM de-emphasis.</summary>
+    public const double SpacePreEmphasisDb = 4.0;
+
+    /// <summary>Peak FM deviation for 1200-baud packet on VHF (±3.2 kHz).</summary>
+    public const double FmDeviationHz = 3_200.0;
+
     /// <summary>
-    /// Synthesizes Bell 202 AFSK audio (1200 baud, 1200 Hz mark, 2200 Hz space) for a given UI frame.
+    /// Synthesizes Bell 202 AFSK audio (1200 baud, continuous-phase 1200/2200 Hz, Space pre-emphasis)
+    /// for a UI frame with KPC-3-friendly preamble/postamble.
     /// </summary>
     public static float[] SynthesizeUiAudio(
         string sourceCall,
@@ -544,25 +590,214 @@ public static class PacketDecoder
         string destCall,
         int destSsid,
         string payload,
-        int sampleRate = 48_000,
-        int preambleFlags = 20,
+        int sampleRate = TxAudioRate,
+        int preambleFlags = TxPreambleFlags,
+        int postambleFlags = TxPostambleFlags,
         params (string Call, int Ssid, bool Repeated)[] digis)
     {
         byte[] frameBytes = BuildUiFrame(sourceCall, sourceSsid, destCall, destSsid, payload, digis);
+        return SynthesizeAfsk(frameBytes, sampleRate, preambleFlags, postambleFlags);
+    }
 
-        // Convert to bit stream with HDLC bit-stuffing and flags
-        var bits = new List<int>();
+    /// <summary>
+    /// Builds the HDLC bit stream: unstuffed preamble/postamble flags, LSB-first payload+FCS with bit-stuffing, then NRZI tones.
+    /// </summary>
+    public static float[] SynthesizeAfsk(
+        ReadOnlySpan<byte> frameBytes,
+        int sampleRate = TxAudioRate,
+        int preambleFlags = TxPreambleFlags,
+        int postambleFlags = TxPostambleFlags)
+    {
+        if (sampleRate <= 0 || sampleRate % PacketReader.BaudRate != 0)
+            throw new ArgumentException($"AFSK sample rate must be a positive multiple of {PacketReader.BaudRate} baud.", nameof(sampleRate));
+        if (preambleFlags < 1)
+            throw new ArgumentOutOfRangeException(nameof(preambleFlags));
+        if (postambleFlags < 1)
+            throw new ArgumentOutOfRangeException(nameof(postambleFlags));
 
-        // Preamble flags (0x7E = 01111110 LSB first: 0, 1, 1, 1, 1, 1, 1, 0)
+        List<int> bits = BuildHdlcBitStream(frameBytes, preambleFlags, postambleFlags);
+
+        // NRZI: 0 toggles Mark↔Space; 1 holds. Start on Mark.
+        var mark = new bool[bits.Count];
+        bool toneIsMark = true;
+        for (int i = 0; i < bits.Count; i++)
+        {
+            if (bits[i] == 0)
+                toneIsMark = !toneIsMark;
+            mark[i] = toneIsMark;
+        }
+
+        double spaceGain = Math.Pow(10.0, SpacePreEmphasisDb / 20.0);
+        double markGain = 1.0;
+        double peak = Math.Max(markGain, spaceGain);
+        double markAmp = markGain / peak;
+        double spaceAmp = spaceGain / peak;
+
+        int samplesPerBit = sampleRate / PacketReader.BaudRate;
+        var audio = new float[mark.Length * samplesPerBit];
+        double phase = 0;
+        int sampleIdx = 0;
+        for (int t = 0; t < mark.Length; t++)
+        {
+            double freq = mark[t] ? PacketReader.MarkFrequencyHz : PacketReader.SpaceFrequencyHz;
+            double amp = mark[t] ? markAmp : spaceAmp;
+            double dPhi = 2 * Math.PI * freq / sampleRate;
+            for (int s = 0; s < samplesPerBit; s++)
+            {
+                audio[sampleIdx++] = (float)(Math.Sin(phase) * amp);
+                phase += dPhi;
+                if (phase >= Math.PI)
+                    phase -= 2 * Math.PI;
+                else if (phase < -Math.PI)
+                    phase += 2 * Math.PI;
+            }
+        }
+
+        return audio;
+    }
+
+    /// <summary>
+    /// FM-modulates normalized AFSK audio onto complex baseband with continuous phase and peak deviation <see cref="FmDeviationHz"/>.
+    /// </summary>
+    public static System.Numerics.Complex[] ModulateFmIq(ReadOnlySpan<float> audio, int sampleRate, double deviationHz = FmDeviationHz)
+    {
+        if (sampleRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sampleRate));
+        if (deviationHz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(deviationHz));
+
+        var iq = new System.Numerics.Complex[audio.Length];
+        double phase = 0;
+        double step = 2 * Math.PI * (deviationHz / sampleRate);
+        for (int n = 0; n < audio.Length; n++)
+        {
+            phase += step * audio[n];
+            if (phase > Math.PI)
+                phase -= 2 * Math.PI;
+            else if (phase < -Math.PI)
+                phase += 2 * Math.PI;
+            iq[n] = System.Numerics.Complex.FromPolarCoordinates(1.0, phase);
+        }
+
+        return iq;
+    }
+
+    /// <summary>
+    /// Recovers the FM modulating waveform from complex baseband (for TX→RX round-trip tests).
+    /// </summary>
+    public static float[] DemodulateFmAudio(ReadOnlySpan<System.Numerics.Complex> iq, int sampleRate, double deviationHz = FmDeviationHz)
+    {
+        if (iq.Length == 0)
+            return [];
+        if (sampleRate <= 0 || deviationHz <= 0)
+            throw new ArgumentOutOfRangeException(sampleRate <= 0 ? nameof(sampleRate) : nameof(deviationHz));
+
+        var audio = new float[iq.Length];
+        double scale = sampleRate / (2 * Math.PI * deviationHz);
+        double prev = Math.Atan2(iq[0].Imaginary, iq[0].Real);
+        audio[0] = 0;
+        for (int n = 1; n < iq.Length; n++)
+        {
+            double phase = Math.Atan2(iq[n].Imaginary, iq[n].Real);
+            double delta = phase - prev;
+            prev = phase;
+            if (delta > Math.PI)
+                delta -= 2 * Math.PI;
+            else if (delta < -Math.PI)
+                delta += 2 * Math.PI;
+            audio[n] = (float)(delta * scale);
+        }
+
+        return audio;
+    }
+
+    /// <summary>
+    /// Upsamples complex baseband to an integer multiple of <paramref name="fromRate"/> with a low-pass anti-imaging FIR
+    /// (zero-insert + filter), not zero-order hold or linear interpolation.
+    /// </summary>
+    public static System.Numerics.Complex[] UpsampleIq(
+        ReadOnlySpan<System.Numerics.Complex> input,
+        int fromRate,
+        int toRate)
+    {
+        if (fromRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(fromRate));
+        if (toRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(toRate));
+        if (toRate == fromRate)
+            return input.ToArray();
+        if (toRate % fromRate != 0)
+            throw new ArgumentException($"TX upsample requires an integer rate ratio ({fromRate} → {toRate}).", nameof(toRate));
+
+        int factor = toRate / fromRate;
+        int stuffedLen = input.Length * factor;
+        var stuffedI = new float[stuffedLen];
+        var stuffedQ = new float[stuffedLen];
+        for (int i = 0; i < input.Length; i++)
+        {
+            int at = i * factor;
+            // ×factor restores unity passband gain after zero-insertion through a DC-normalized LPF.
+            stuffedI[at] = (float)(input[i].Real * factor);
+            stuffedQ[at] = (float)(input[i].Imaginary * factor);
+        }
+
+        double cutoff = Math.Min(fromRate * 0.45, 12_000);
+        float[] taps = Filters.Lowpass(255, cutoff, toRate);
+        var firI = new RealFir(taps, 1);
+        var firQ = new RealFir(taps, 1);
+        var output = new System.Numerics.Complex[stuffedLen];
+        for (int i = 0; i < stuffedLen; i++)
+            output[i] = new System.Numerics.Complex(firI.Filter(stuffedI[i]), firQ.Filter(stuffedQ[i]));
+        return output;
+    }
+
+    /// <summary>Interleaves complex samples as I,Q,I,Q… for radio WriteTransmit.</summary>
+    public static float[] InterleaveIq(ReadOnlySpan<System.Numerics.Complex> iq)
+    {
+        var interleaved = new float[iq.Length * 2];
+        for (int i = 0; i < iq.Length; i++)
+        {
+            interleaved[i * 2] = (float)iq[i].Real;
+            interleaved[i * 2 + 1] = (float)iq[i].Imaginary;
+        }
+
+        return interleaved;
+    }
+
+    /// <summary>
+    /// Full TX chain: AX.25 UI → AFSK → FM I/Q at <paramref name="audioRate"/>, optionally FIR-upsampled to <paramref name="dacRate"/>.
+    /// </summary>
+    public static float[] SynthesizeUiIq(
+        string sourceCall,
+        int sourceSsid,
+        string destCall,
+        int destSsid,
+        string payload,
+        int audioRate = TxAudioRate,
+        int? dacRate = null,
+        params (string Call, int Ssid, bool Repeated)[] digis)
+    {
+        float[] audio = SynthesizeUiAudio(sourceCall, sourceSsid, destCall, destSsid, payload, audioRate, TxPreambleFlags, TxPostambleFlags, digis);
+        System.Numerics.Complex[] iq = ModulateFmIq(audio, audioRate);
+        int target = dacRate ?? audioRate;
+        if (target != audioRate)
+            iq = UpsampleIq(iq, audioRate, target);
+        return InterleaveIq(iq);
+    }
+
+    static List<int> BuildHdlcBitStream(ReadOnlySpan<byte> frameBytes, int preambleFlags, int postambleFlags)
+    {
+        var bits = new List<int>((preambleFlags + postambleFlags) * 8 + frameBytes.Length * 10);
+
         void WriteFlag()
         {
+            // 0x7E LSB-first: 0,1,1,1,1,1,1,0 — never bit-stuffed
             bits.Add(0); bits.Add(1); bits.Add(1); bits.Add(1); bits.Add(1); bits.Add(1); bits.Add(1); bits.Add(0);
         }
 
         for (int i = 0; i < preambleFlags; i++)
             WriteFlag();
 
-        // Stuffed frame bits
         int ones = 0;
         foreach (byte b in frameBytes)
         {
@@ -575,7 +810,7 @@ public static class PacketDecoder
                     ones++;
                     if (ones == 5)
                     {
-                        bits.Add(0); // Insert stuffed 0
+                        bits.Add(0);
                         ones = 0;
                     }
                 }
@@ -586,42 +821,9 @@ public static class PacketDecoder
             }
         }
 
-        // Postamble flags
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < postambleFlags; i++)
             WriteFlag();
 
-        // NRZI encoding: 0 = tone transition, 1 = tone hold
-        var tones = new List<bool>();
-        bool currentTone = true; // start with Mark
-        foreach (int bit in bits)
-        {
-            if (bit == 0)
-                currentTone = !currentTone;
-            tones.Add(currentTone);
-        }
-
-        // Synthesize AFSK audio
-        double samplesPerSymbol = (double)sampleRate / PacketReader.BaudRate;
-        int totalSamples = (int)Math.Ceiling(tones.Count * samplesPerSymbol);
-        var audio = new float[totalSamples];
-
-        double phase = 0;
-        int sampleIdx = 0;
-        for (int t = 0; t < tones.Count; t++)
-        {
-            double freq = tones[t] ? PacketReader.MarkFrequencyHz : PacketReader.SpaceFrequencyHz;
-            double dPhi = 2 * Math.PI * freq / sampleRate;
-            int count = (int)Math.Round((t + 1) * samplesPerSymbol) - (int)Math.Round(t * samplesPerSymbol);
-
-            for (int s = 0; s < count && sampleIdx < totalSamples; s++)
-            {
-                audio[sampleIdx++] = (float)Math.Sin(phase) * 0.75f;
-                phase += dPhi;
-                if (phase > 2 * Math.PI)
-                    phase -= 2 * Math.PI;
-            }
-        }
-
-        return audio;
+        return bits;
     }
 }

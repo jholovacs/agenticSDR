@@ -29,6 +29,9 @@ public static class SharedPaths
 
     public static string RadioJson() => Path.Combine(UserConfigDirectory(), "radio.json");
 
+    /// <summary>Per-radio crystal corrections (ppm) shared by Host and every mode desk.</summary>
+    public static string RadioCorrectionsJson() => Path.Combine(UserConfigDirectory(), "radio-corrections.json");
+
     /// <summary>OpenAI-compatible endpoint settings (shared by Host and every mode desk).</summary>
     public static string LlmJson() => Path.Combine(UserConfigDirectory(), "llm.json");
 

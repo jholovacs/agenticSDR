@@ -59,13 +59,7 @@ public sealed partial class RadioSession
             {
                 if (Region2BandPlan.TryDigiDial(tuneHz, mode, out double dial) || Region2BandPlan.TryDigiDial(frequencyHz, mode, out dial))
                     tuneHz = dial;
-                // Leave time to open the stream so live digi audio starts on the UTC boundary.
-                if (mode is RadioMode.Ft8)
-                    await WaitForDigiSlot(ct, periodSeconds: 15, earlySeconds: 2.0);
-                else if (mode is RadioMode.Js8)
-                    await WaitForDigiSlot(ct, periodSeconds: 30, earlySeconds: 2.0);
-                else if (mode is RadioMode.Wspr)
-                    await WaitForDigiSlot(ct, periodSeconds: 120, earlySeconds: 2.0);
+                // Live digi plays audio immediately; decode buffers arm on the next UTC slot inside the pump.
             }
 
             SetStatus("listening", 0.45, "Checking published-channel frequency…");
@@ -82,6 +76,8 @@ public sealed partial class RadioSession
 
             if (mode == RadioMode.Dmr)
                 source = "DMR";
+            else if (mode == RadioMode.Dstar)
+                source = "D-STAR";
             RadioMode demodMode = mode;
             SetStatus("listening", 0.75, $"Tuning {tuneHz / 1e6:0.000000} MHz ({mode})…");
             (double loHz, double shiftHz) = PlaceTuner(device, demodMode, tuneHz);
@@ -127,6 +123,8 @@ public sealed partial class RadioSession
                 : LiveMessage(mode, tuneHz));
             if (dmrFramed)
                 AppendNote("DMR framing found.");
+            if (mode == RadioMode.Dstar)
+                AppendNote("Listening for D-STAR radio headers (AMBE voice is not decoded).");
             // USB/LSB on a digi watering hole will play tones but never decode text.
             if (mode is RadioMode.Usb or RadioMode.Lsb
                 && Region2BandPlan.TryAnyDigiDial(tuneHz, out RadioMode dialMode, out _))
@@ -150,7 +148,7 @@ public sealed partial class RadioSession
 
                 await PumpLiveAsync(
                     device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch,
-                    mode == RadioMode.Dmr && !dmrFramed, dmr, chain, sideOlivia, ct);
+                    (mode == RadioMode.Dmr && !dmrFramed) || mode == RadioMode.Dstar, dmr, chain, sideOlivia, ct);
             }
             finally
             {
@@ -284,6 +282,7 @@ public sealed partial class RadioSession
         var recent = new List<float>();
         var dmrProbe = new List<Complex>();
         var dmrReader = new DmrReader();
+        var dstarReader = new DstarReader();
         using var m17Reader = mode == RadioMode.M17 ? new M17Reader() : null;
         if (mode == RadioMode.M17 && m17Reader is { Available: false })
             AppendNote("M17 voice needs Host/native/m17voice.dll beside the app.");
@@ -295,15 +294,21 @@ public sealed partial class RadioSession
         bool digi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty
             or RadioMode.Wspr or RadioMode.Varac;
         bool slidingDigi = mode is RadioMode.Olivia or RadioMode.Jtty;
+        bool slottedDigi = mode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr;
         bool sideband = mode is RadioMode.Usb or RadioMode.Lsb;
         bool digiHeader = false;
         int rate = demod.PlaybackRate;
         int remember = voice ? 6 * rate : 8 * rate;
         var nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         // Live FT8 chops on 15 s; JS8 on 30 s; Olivia/JTTY slide every DigiPeriodSeconds on a longer buffer.
-        int digiStep = DigiPeriodSeconds(mode) * rate;
+        int digiPeriodSec = DigiPeriodSeconds(mode);
+        int digiStep = digiPeriodSec * rate;
         int digiKeep = DigiListenSeconds(mode) * rate;
         int digiSinceSubmit = 0;
+        // Slotted digi: play audio now; arm decode collection at the next UTC boundary (do not block the pump).
+        bool digiDecodeArmed = !slottedDigi;
+        int digiSlotIndex = -1;
+        bool digiAlignNoted = false;
         int sideOliviaStep = DigiPeriodSeconds(RadioMode.Olivia) * rate;
         int sideOliviaKeep = DigiListenSeconds(RadioMode.Olivia) * rate;
         int sideOliviaSince = 0;
@@ -359,13 +364,7 @@ public sealed partial class RadioSession
             FocusTuner(device, mode);
             var junk = new byte[Aligned(device, 32 * 1024)];
             device.Read(junk);
-            // Align after junk so the first Costas symbols are not clipped by tuner settle.
-            if (mode is RadioMode.Ft8)
-                AlignDigiSlot(cancellationToken, periodSeconds: 15);
-            else if (mode is RadioMode.Js8)
-                AlignDigiSlot(cancellationToken, periodSeconds: 30);
-            else if (mode is RadioMode.Wspr)
-                AlignDigiSlot(cancellationToken, periodSeconds: 120);
+            // Slotted digi no longer blocks here — audio starts immediately; decode arms on the next UTC slot.
         }, cancellationToken);
 
         // Read the next block while this one is turned into audio. Samples that arrive
@@ -414,9 +413,18 @@ public sealed partial class RadioSession
                 if (dmrProbe.Count >= dmrNeed)
                 {
                     dmrChecked = true;
-                    AppendNote(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, dmrOffsetHz)
-                        ? "DMR framing found."
-                        : "No DMR framing. Playing narrow FM.");
+                    if (mode == RadioMode.Dmr)
+                    {
+                        AppendNote(DmrSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, dmrOffsetHz)
+                            ? "DMR framing found."
+                            : "No DMR framing. Playing narrow FM.");
+                    }
+                    else if (mode == RadioMode.Dstar)
+                    {
+                        AppendNote(DstarSync.Present(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(dmrProbe), device.SampleRateHz, dmrOffsetHz)
+                            ? "D-STAR framing found."
+                            : "No D-STAR framing yet. Playing narrow FM.");
+                    }
                     dmrProbe.Clear();
                 }
             }
@@ -426,6 +434,14 @@ public sealed partial class RadioSession
             if (mode == RadioMode.Dmr)
             {
                 foreach (string line in dmrReader.Push(iq, device.SampleRateHz, dmrOffsetHz, dmr))
+                {
+                    framed = true;
+                    AppendNote(line);
+                }
+            }
+            else if (mode == RadioMode.Dstar)
+            {
+                foreach (string line in dstarReader.Push(iq, device.SampleRateHz, dmrOffsetHz))
                 {
                     framed = true;
                     AppendNote(line);
@@ -609,26 +625,71 @@ public sealed partial class RadioSession
 
             if (digi && chain is not null && mode != RadioMode.Varac)
             {
-                digiPeriod.AddRange(fresh);
-                digiSinceSubmit += fresh.Length;
-                if (slidingDigi)
+                if (slottedDigi)
                 {
-                    if (digiPeriod.Count > digiKeep)
-                        digiPeriod.RemoveRange(0, digiPeriod.Count - digiKeep);
-                    if (digiPeriod.Count >= Math.Min(digiKeep, 6 * rate) && digiSinceSubmit >= digiStep)
+                    // Arm on the early pad before a UTC boundary so Costas is not clipped; keep playing audio meanwhile.
+                    double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % digiPeriodSec;
+                    double earlyAt = digiPeriodSec - 0.45;
+                    int slot = (int)Math.Floor(DateTime.UtcNow.TimeOfDay.TotalSeconds / digiPeriodSec);
+                    if (into >= earlyAt)
+                        slot++;
+                    if (!digiDecodeArmed && (into >= earlyAt || into < 0.20))
                     {
+                        digiDecodeArmed = true;
+                        digiPeriod.Clear();
                         digiSinceSubmit = 0;
-                        // Off-thread SignalChain worker runs Olivia/JTTY; DropOldest if still busy.
-                        chain.TrySubmit(SignalFrame.FromAudio(digiPeriod.ToArray(), rate));
+                        digiSlotIndex = slot;
+                        if (!digiAlignNoted)
+                        {
+                            digiAlignNoted = true;
+                            AppendNote($"Decode aligned to the next {digiPeriodSec}s UTC slot — audio kept playing.");
+                        }
+                    }
+
+                    if (digiDecodeArmed)
+                    {
+                        if (slot != digiSlotIndex)
+                        {
+                            digiPeriod.Clear();
+                            digiSinceSubmit = 0;
+                            digiSlotIndex = slot;
+                        }
+
+                        digiPeriod.AddRange(fresh);
+                        digiSinceSubmit += fresh.Length;
+                        if (digiPeriod.Count >= digiStep)
+                        {
+                            while (digiPeriod.Count >= 2 * digiStep)
+                                digiPeriod.RemoveRange(0, digiStep);
+                            float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
+                            digiPeriod.RemoveRange(0, digiStep);
+                            chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                        }
                     }
                 }
-                else if (digiPeriod.Count >= digiStep)
+                else
                 {
-                    while (digiPeriod.Count >= 2 * digiStep)
+                    digiPeriod.AddRange(fresh);
+                    digiSinceSubmit += fresh.Length;
+                    if (slidingDigi)
+                    {
+                        if (digiPeriod.Count > digiKeep)
+                            digiPeriod.RemoveRange(0, digiPeriod.Count - digiKeep);
+                        if (digiPeriod.Count >= Math.Min(digiKeep, 6 * rate) && digiSinceSubmit >= digiStep)
+                        {
+                            digiSinceSubmit = 0;
+                            // Off-thread SignalChain worker runs Olivia/JTTY; DropOldest if still busy.
+                            chain.TrySubmit(SignalFrame.FromAudio(digiPeriod.ToArray(), rate));
+                        }
+                    }
+                    else if (digiPeriod.Count >= digiStep)
+                    {
+                        while (digiPeriod.Count >= 2 * digiStep)
+                            digiPeriod.RemoveRange(0, digiStep);
+                        float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
                         digiPeriod.RemoveRange(0, digiStep);
-                    float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
-                    digiPeriod.RemoveRange(0, digiStep);
-                    chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                        chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                    }
                 }
             }
         }
@@ -741,14 +802,17 @@ public sealed partial class RadioSession
     private static bool HearsDmr(Measurement measured) =>
         DmrSync.Present(measured.Samples, measured.SampleRate, measured.Peak.FrequencyHz - measured.CenterHz);
 
+    private static bool HearsDstar(Measurement measured) =>
+        DstarSync.Present(measured.Samples, measured.SampleRate, measured.Peak.FrequencyHz - measured.CenterHz);
+
     private static string LiveMessage(RadioMode mode, double tuneHz) => mode switch
     {
         RadioMode.Js8 =>
-            $"Listening for JS8 on {tuneHz / 1e6:0.000000} MHz — waiting on 30 s UTC slots (leave it running a minute or two).",
+            $"Playing JS8 audio on {tuneHz / 1e6:0.000000} MHz — decode follows 30 s UTC slots.",
         RadioMode.Ft8 =>
-            $"Listening for FT8 on {tuneHz / 1e6:0.000000} MHz — waiting on 15 s UTC slots.",
+            $"Playing FT8 audio on {tuneHz / 1e6:0.000000} MHz — decode follows 15 s UTC slots.",
         RadioMode.Wspr =>
-            $"Listening for WSPR on {tuneHz / 1e6:0.000000} MHz — waiting on 120 s UTC slots.",
+            $"Playing WSPR audio on {tuneHz / 1e6:0.000000} MHz — decode follows 120 s UTC slots.",
         RadioMode.Olivia or RadioMode.Jtty or RadioMode.Varac =>
             $"Listening for {mode} on {tuneHz / 1e6:0.000000} MHz.",
         _ => $"Playing {tuneHz / 1e6:0.000000} MHz ({mode}) as it arrives."
@@ -771,7 +835,7 @@ public sealed partial class RadioSession
     private const double WideFmListenGainDb = 12;
 
     private static bool EasedGain(RadioMode mode) =>
-        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17
+        mode is RadioMode.Wbfm or RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Dstar or RadioMode.M17
             or RadioMode.Packet or RadioMode.Ribbit or RadioMode.Raw;
 
     private static void EaseWideFmGain(IRadioDevice device, RadioMode mode)

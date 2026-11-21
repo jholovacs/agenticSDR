@@ -62,7 +62,7 @@ public static class CwApi
         {
             try
             {
-                return Results.Ok(radio.ListDevices());
+                return Results.Ok(radio.ListDevicesView());
             }
             catch (RadioException ex)
             {
@@ -71,6 +71,30 @@ public static class CwApi
         });
 
         app.MapGet("/api/radio/preference", (CwRadioHolder radio) => Results.Ok(radio.Preference()));
+
+        app.MapGet("/api/radio/ppm", (int index, CwRadioHolder radio) =>
+        {
+            try
+            {
+                return Results.Ok(radio.PpmView(index));
+            }
+            catch (Exception ex) when (ex is RadioException or ArgumentOutOfRangeException)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        app.MapPut("/api/radio/ppm", (PpmBody body, CwRadioHolder radio) =>
+        {
+            try
+            {
+                return Results.Ok(radio.SetPpm(body.Index, body.Ppm));
+            }
+            catch (Exception ex) when (ex is RadioException or ArgumentOutOfRangeException or ArgumentException)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
 
         app.MapGet("/api/radio/simulate-transmit", (CwRadioHolder radio) =>
             Results.Ok(new { enabled = radio.SimulateTransmit, simulateTransmit = radio.SimulateTransmit }));
@@ -350,6 +374,7 @@ public static class CwApi
     public sealed record OperatorBody(string? CallSign, string? License, string? Grid);
     public sealed record AntennaBody(double Length, string? Unit, string? Orientation, double? AzimuthDegrees);
     public sealed record OpenBody(int Index);
+    public sealed record PpmBody(int Index, int Ppm);
     public sealed record SimulateTransmitBody(bool Enabled);
     public sealed record CwAgentBody(string? Message, IReadOnlyList<CwAgentHistoryTurn>? History);
     public sealed record CwTranslateBody(string? Text, string? Direction);

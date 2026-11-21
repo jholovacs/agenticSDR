@@ -40,7 +40,7 @@ public sealed class Demodulator
     /// </summary>
     public static double ChannelCutoffHz(RadioMode mode, double dopplerMaxHz = 0) => mode switch
     {
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Dstar or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit =>
             8_000 + Math.Max(0, dopplerMaxHz),
         RadioMode.Am => 5_000,
         RadioMode.Usb or RadioMode.Lsb => 4_000,

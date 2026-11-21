@@ -157,6 +157,7 @@ public class CwModeTests
         public int ReadAlignment => 8;
         public void Tune(double frequencyHz) { }
         public void SetGain(double? gainDb) { }
+        public void SetFrequencyCorrection(int ppm) { }
         public int Read(byte[] buffer) => 0;
         public void Dispose() { }
 
@@ -179,6 +180,7 @@ public class CwModeTests
         public int ReadAlignment => 8;
         public void Tune(double frequencyHz) { }
         public void SetGain(double? gainDb) { }
+        public void SetFrequencyCorrection(int ppm) { }
         public int Read(byte[] buffer) => 0;
         public void Dispose() { }
     }

@@ -33,6 +33,8 @@ public sealed class SimulatedTransmitRadio : IRadioDevice, IRadioTransmitter
 
     public void SetGain(double? gainDb) => Inner.SetGain(gainDb);
 
+    public void SetFrequencyCorrection(int ppm) => Inner.SetFrequencyCorrection(ppm);
+
     public int Read(byte[] buffer) => Inner.Read(buffer);
 
     public void WriteTransmit(ReadOnlySpan<float> interleavedIq)

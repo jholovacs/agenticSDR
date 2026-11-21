@@ -882,13 +882,17 @@
           <span class="fold-aside sp-radio-aside"${id("radio-summary")}></span>
         </summary>
         <div class="fold-body">
-          <p class="quiet">Start opens the selected USB radio. Stop releases it. The preferred radio is remembered for every Agentic SDR app on this machine.</p>
+          <p class="quiet">Start opens the selected USB radio. Stop releases it. Preferred radio and per-radio ppm corrections are remembered for every Agentic SDR app on this machine.</p>
           <div class="controls">
             <label data-tip="device">Radio
               <select class="sp-radio-device"${id("radio")}></select>
             </label>
+            <label data-tip="ppm">PPM
+              <input type="number" class="sp-radio-ppm" min="-500" max="500" step="1" value="0"${id("radio-ppm")} title="Crystal correction in parts per million for the selected radio">
+            </label>
             <button type="button" class="sp-radio-start"${id("radio-start")}>Start radio</button>
             <button type="button" class="ghost sp-radio-stop"${id("radio-stop")}>Stop radio</button>
+            <button type="button" class="ghost sp-radio-calibrate"${id("radio-calibrate")}${options.calibrate === false ? " hidden" : ""}>Calibrate</button>
             <button type="button" class="ghost sp-radio-details"${id("radio-details")}>Radio details</button>
           </div>
           <label class="check sp-radio-simulate">
@@ -908,8 +912,10 @@
     `;
 
     const deviceSelect = q(root, ".sp-radio-device");
+    const ppmInput = q(root, ".sp-radio-ppm");
     const startBtn = q(root, ".sp-radio-start");
     const stopBtn = q(root, ".sp-radio-stop");
+    const calibrateBtn = q(root, ".sp-radio-calibrate");
     const detailsBtn = q(root, ".sp-radio-details");
     const simulateBox = q(root, ".sp-radio-simulate-tx");
     const aside = q(root, ".sp-radio-aside");
@@ -918,9 +924,12 @@
     const detailsTitle = q(root, ".sp-radio-details-title");
     const detailsList = q(root, ".sp-radio-details-list");
     const detailsClose = q(root, ".sp-radio-details-close");
+    const allowCalibrate = options.calibrate !== false;
 
     let devices = [];
     let status = { deviceOpen: false, canTransmit: false, simulateTransmit: false };
+    let ppmBusy = false;
+    let calibrateBusy = false;
 
     function paint() {
       const openNow = !!(status.deviceOpen || status.open);
@@ -944,9 +953,16 @@
       }
       if (simulateBox)
         simulateBox.checked = simulated;
-      startBtn.disabled = openNow || deviceSelect.options.length === 0 || deviceSelect.options[0]?.disabled;
+      const hasDevice = deviceSelect.options.length > 0 && !deviceSelect.options[0]?.disabled;
+      startBtn.disabled = openNow || !hasDevice;
       stopBtn.disabled = !openNow;
-      detailsBtn.disabled = deviceSelect.options.length === 0 || deviceSelect.options[0]?.disabled;
+      detailsBtn.disabled = !hasDevice;
+      if (calibrateBtn) {
+        calibrateBtn.hidden = !allowCalibrate;
+        calibrateBtn.disabled = !allowCalibrate || !openNow || calibrateBusy || ppmBusy;
+      }
+      if (ppmInput)
+        ppmInput.disabled = !hasDevice || ppmBusy || calibrateBusy;
       if (typeof options.onChange === "function") {
         options.onChange({
           ...status,
@@ -982,7 +998,76 @@
           value !== "" && [...deviceSelect.options].some((option) => option.value === value));
         if (keep) deviceSelect.value = keep;
       }
+      await loadPpm();
       paint();
+    }
+
+    async function loadPpm() {
+      if (!ppmInput) return;
+      const index = deviceSelect.value;
+      if (index === "" || deviceSelect.options[0]?.disabled) {
+        ppmInput.value = "0";
+        return;
+      }
+      const fromList = devices.find((d) => String(d.index ?? 0) === String(index));
+      if (fromList && Number.isFinite(Number(fromList.ppm))) {
+        ppmInput.value = String(Math.round(Number(fromList.ppm)));
+        return;
+      }
+      const body = await client.get(`/api/radio/ppm?index=${encodeURIComponent(index)}`, { quiet: true });
+      if (body && Number.isFinite(Number(body.ppm)))
+        ppmInput.value = String(Math.round(Number(body.ppm)));
+    }
+
+    async function savePpm() {
+      if (!ppmInput || ppmInput.disabled) return null;
+      const index = Number(deviceSelect.value);
+      if (!Number.isFinite(index)) return null;
+      const ppm = Math.round(Number(ppmInput.value));
+      if (!Number.isFinite(ppm)) {
+        if (typeof options.onError === "function")
+          options.onError("PPM must be a number.");
+        await loadPpm();
+        return null;
+      }
+      ppmBusy = true;
+      paint();
+      try {
+        const body = await client.put("/api/radio/ppm", { index, ppm });
+        if (!body) {
+          await loadPpm();
+          return null;
+        }
+        ppmInput.value = String(Math.round(Number(body.ppm)));
+        const listed = devices.find((d) => Number(d.index) === index);
+        if (listed) listed.ppm = body.ppm;
+        return body;
+      } finally {
+        ppmBusy = false;
+        paint();
+      }
+    }
+
+    async function calibrateRadio() {
+      if (!allowCalibrate || !calibrateBtn || calibrateBtn.disabled) return null;
+      calibrateBusy = true;
+      paint();
+      try {
+        const body = await client.post("/api/radio/calibrate", {});
+        if (!body) return null;
+        if (ppmInput && Number.isFinite(Number(body.ppm)))
+          ppmInput.value = String(Math.round(Number(body.ppm)));
+        const listed = devices.find((d) => Number(d.index) === Number(body.index ?? deviceSelect.value));
+        if (listed && Number.isFinite(Number(body.ppm)))
+          listed.ppm = body.ppm;
+        if (typeof options.onCalibrated === "function")
+          options.onCalibrated(body);
+        await loadDevices();
+        return body;
+      } finally {
+        calibrateBusy = false;
+        paint();
+      }
     }
 
     async function refreshStatus() {
@@ -1110,7 +1195,7 @@
       detailsClose.addEventListener("click", () => dialog.close());
       deviceSelect.addEventListener("change", () => {
         if (dialog.open) dialog.close();
-        paint();
+        loadPpm().then(paint);
       });
       deviceSelect.addEventListener("focus", () => loadDevices());
       if (simulateBox) {
@@ -1122,14 +1207,38 @@
           });
         });
       }
+      if (calibrateBtn && allowCalibrate) {
+        calibrateBtn.addEventListener("click", () => {
+          calibrateRadio().catch((err) => {
+            if (typeof options.onError === "function")
+              options.onError(err.message || String(err));
+          });
+        });
+      }
+    } else {
+      deviceSelect.addEventListener("change", () => {
+        loadPpm().catch(() => {});
+      });
+    }
+
+    if (ppmInput) {
+      ppmInput.addEventListener("change", () => {
+        savePpm().catch((err) => {
+          if (typeof options.onError === "function")
+            options.onError(err.message || String(err));
+        });
+      });
     }
 
     refreshStatus().then(loadDevices).then(loadSimulate);
 
     return {
       root,
-      elements: { deviceSelect, startBtn, stopBtn, detailsBtn, simulateBox, aside, note, dialog },
+      elements: { deviceSelect, ppmInput, startBtn, stopBtn, calibrateBtn, detailsBtn, simulateBox, aside, note, dialog },
       loadDevices,
+      loadPpm,
+      savePpm,
+      calibrateRadio,
       refreshStatus,
       loadSimulate,
       setSimulateTransmit,

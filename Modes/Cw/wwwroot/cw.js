@@ -496,6 +496,7 @@
   DeskPanels.mountRadio($("radio-host"), {
     apiBase: "",
     onError: showError,
+    calibrate: false,
     beforeClose: async () => {
       const choice = await askSignOff({
         title: "Sign off before stopping the radio?",

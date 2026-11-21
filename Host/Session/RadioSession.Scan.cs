@@ -102,6 +102,7 @@ public sealed partial class RadioSession
                 BandHint hint = Region2BandPlan.HintAt(refined.FrequencyHz);
                 bool knownChannel = !string.IsNullOrWhiteSpace(hint.CallingName);
                 bool framed = false;
+                string? frameKind = null;
                 if (!ranked[i].Intermittent || band.Id == "dmr")
                 {
                     SetStatus("scanning", 0.85 + 0.15 * i / Math.Max(1, ranked.Count), $"Measuring {refined.FrequencyHz / 1e6:0.000} MHz");
@@ -120,7 +121,14 @@ public sealed partial class RadioSession
                             continue;
                         }
 
-                        framed = DmrSync.Present(measured.Samples, measured.SampleRate, measured.Peak.FrequencyHz - measured.CenterHz);
+                        double offsetHz = measured.Peak.FrequencyHz - measured.CenterHz;
+                        bool dmrFramed = DmrSync.Present(measured.Samples, measured.SampleRate, offsetHz);
+                        bool dstarFramed = DstarSync.Present(measured.Samples, measured.SampleRate, offsetHz);
+                        framed = dmrFramed || dstarFramed;
+                        if (dmrFramed)
+                            frameKind = "dmr";
+                        else if (dstarFramed)
+                            frameKind = "dstar";
                         if (!ranked[i].Intermittent)
                             refined = measured.Peak;
                     }
@@ -136,10 +144,17 @@ public sealed partial class RadioSession
                     classification = new Classification(hint.PreferredMode, Math.Max(classification.Confidence, 0.7), classification.BandwidthHz, refined.SnrDb);
                 if (ranked[i].Mode == RadioMode.Cw && ModeBandwidth.Fits(RadioMode.Cw, refined.BandwidthHz))
                     classification = new Classification(RadioMode.Cw, Math.Max(classification.Confidence, 0.75), refined.BandwidthHz, refined.SnrDb);
-                if (framed)
+                if (frameKind == "dmr")
                     classification = new Classification(RadioMode.Dmr, 0.9, classification.BandwidthHz, refined.SnrDb);
+                else if (frameKind == "dstar")
+                    classification = new Classification(RadioMode.Dstar, 0.9, classification.BandwidthHz, refined.SnrDb);
                 double carrier = ModeClassifier.CarrierFrequency(refined, classification.Mode);
-                string source = framed ? "DMR" : await DescribeSourceAsync(carrier, classification.Mode, ct);
+                string source = frameKind switch
+                {
+                    "dmr" => "DMR",
+                    "dstar" => "D-STAR",
+                    _ => await DescribeSourceAsync(carrier, classification.Mode, ct)
+                };
                 hits.Add(new ScanHit(
                     carrier,
                     classification.Mode.ToString(),
@@ -177,6 +192,155 @@ public sealed partial class RadioSession
 
     public Task<InspectReport> InspectAsync(double frequencyHz, CancellationToken cancellationToken) =>
         BorrowRadioAsync(ct => InspectWhileHoldingAsync(frequencyHz, ct), cancellationToken);
+
+    /// <summary>
+    /// Re-capture IQ at a Signals hit, score envelope-fitting codecs, and recommend mode/tune/bandwidth.
+    /// </summary>
+    public Task<AnalyzeReport> AnalyzeAsync(double frequencyHz, string? priorMode, CancellationToken cancellationToken) =>
+        BorrowRadioAsync(ct => AnalyzeWhileHoldingAsync(frequencyHz, priorMode, ct), cancellationToken);
+
+    private async Task<AnalyzeReport> AnalyzeWhileHoldingAsync(
+        double frequencyHz,
+        string? priorModeName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using CancellationTokenSource linked = Begin(cancellationToken);
+            CancellationToken ct = linked.Token;
+            IRadioDevice device = RequireDevice();
+            SetStatus("analyzing", 0.05, $"Capturing {frequencyHz / 1e6:0.000000} MHz…");
+
+            Measurement? measured = await MeasureAsync(device, frequencyHz, ct, thresholdDb: 6);
+            if (measured is null)
+            {
+                SetStatus("idle", 1, "No strong signal to analyze.");
+                return EmptyAnalyze(frequencyHz, priorModeName, "No strong peak at that frequency.");
+            }
+
+            SetStatus("analyzing", 0.15, "Gathering a longer IQ buffer…");
+            Capture capture = await CaptureAsync(device, measured.CenterHz, 2_500, ct);
+            SpectralPeak peak = measured.Peak;
+            // Prefer a peak refined on the longer capture when available.
+            double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, 8192);
+            bool wide = peak.BandwidthHz >= 30_000;
+            List<SpectralPeak> peaks = PeakPicker.Find(
+                db,
+                capture.CenterHz,
+                capture.SampleRate,
+                thresholdDb: 6,
+                maxBandwidthHz: wide ? 300_000 : 20_000,
+                collapseImages: capture.RealValued,
+                contourDropDb: wide ? 30 : 18,
+                minBandwidthHz: wide ? 40_000 : 0);
+            SpectralPeak? nearest = peaks
+                .OrderBy(p => Math.Abs(p.FrequencyHz - frequencyHz))
+                .FirstOrDefault(p => Math.Abs(p.FrequencyHz - frequencyHz) < 150_000);
+            if (nearest is not null)
+                peak = nearest;
+
+            RadioMode priorMode = RadioMode.Unknown;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(priorModeName))
+                    priorMode = ModeClassifier.Parse(priorModeName);
+            }
+            catch
+            {
+                priorMode = RadioMode.Unknown;
+            }
+
+            BandHint hint = Region2BandPlan.HintAt(peak.FrequencyHz);
+            RadioMode? hintMode = hint.PreferredMode == RadioMode.Unknown ? null : hint.PreferredMode;
+            RadioMode? priorOpt = priorMode == RadioMode.Unknown ? null : priorMode;
+
+            IReadOnlyList<IModeAnalyzer> analyzers = ModeAnalyzerCatalog.Candidates(
+                peak.BandwidthHz, priorOpt, hintMode, margin: 0.10);
+            if (analyzers.Count == 0)
+                analyzers = ModeAnalyzerCatalog.Analyzers.Take(6).ToList();
+
+            var scored = new List<ModeAnalysis>(analyzers.Count);
+            for (int i = 0; i < analyzers.Count; i++)
+            {
+                IModeAnalyzer analyzer = analyzers[i];
+                double progress = 0.20 + 0.70 * (i + 1) / Math.Max(1, analyzers.Count);
+                SetStatus("analyzing", progress, $"Testing {analyzer.Mode}…");
+
+                double? dial = null;
+                if (Region2BandPlan.TryDigiDial(peak.FrequencyHz, analyzer.Mode, out double digiDial)
+                    || Region2BandPlan.TryDigiDial(frequencyHz, analyzer.Mode, out digiDial))
+                    dial = digiDial;
+
+                var ctx = new ModeAnalysisContext(
+                    peak.FrequencyHz,
+                    peak,
+                    capture.Samples,
+                    capture.CenterHz,
+                    capture.SampleRate,
+                    hintMode,
+                    dial);
+                scored.Add(analyzer.Analyze(in ctx));
+                ct.ThrowIfCancellationRequested();
+            }
+
+            scored.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
+            ModeAnalysis best = scored[0];
+            var candidates = scored
+                .Take(5)
+                .Select(s => new AnalyzeCandidate(
+                    s.Mode.ToString(),
+                    Math.Round(s.Confidence, 3),
+                    Math.Round(s.TuneHz, 1),
+                    Math.Round(s.BandwidthHz, 0),
+                    s.Reason,
+                    s.DecodeConfirmed))
+                .ToList();
+
+            string runners = string.Join("; ",
+                candidates.Skip(1).Take(2).Select(c => $"{c.Mode} {Math.Round(c.Confidence * 100)}%"));
+            string explanation = runners.Length > 0
+                ? $"{best.Reason} Best of {scored.Count} envelope-fitting modes. Also considered: {runners}."
+                : $"{best.Reason} Best of {scored.Count} envelope-fitting modes.";
+
+            bool changed = priorMode == RadioMode.Unknown
+                || !string.Equals(best.Mode.ToString(), priorMode.ToString(), StringComparison.OrdinalIgnoreCase)
+                || Math.Abs(best.TuneHz - frequencyHz) > 25;
+
+            SetStatus("idle", 1,
+                changed
+                    ? $"Analyze recommends {best.Mode} at {best.TuneHz / 1e6:0.000000} MHz."
+                    : $"Analyze confirms {best.Mode}.");
+            return new AnalyzeReport(
+                frequencyHz,
+                priorMode == RadioMode.Unknown ? priorModeName : priorMode.ToString(),
+                best.Mode.ToString(),
+                Math.Round(best.TuneHz, 1),
+                Math.Round(best.BandwidthHz, 0),
+                Math.Round(best.Confidence, 3),
+                Math.Round(peak.SnrDb, 1),
+                explanation,
+                changed,
+                candidates);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("idle", 0, "Analyze stopped.");
+            throw;
+        }
+    }
+
+    private static AnalyzeReport EmptyAnalyze(double frequencyHz, string? priorMode, string explanation) =>
+        new(
+            frequencyHz,
+            priorMode,
+            priorMode ?? RadioMode.Unknown.ToString(),
+            frequencyHz,
+            0,
+            0,
+            0,
+            explanation,
+            false,
+            []);
 
     private async Task<InspectReport> InspectWhileHoldingAsync(double frequencyHz, CancellationToken cancellationToken)
     {
@@ -300,6 +464,8 @@ public sealed partial class RadioSession
             }
             string? decoded = mode == RadioMode.Dmr
                 ? DmrSync.VoiceNote
+                : mode == RadioMode.Dstar
+                ? DstarSync.VoiceNote
                 : string.IsNullOrWhiteSpace(result.Text) ? null : result.Text;
             bool sidebandMorse = false;
             if (mode is RadioMode.Usb or RadioMode.Lsb)
@@ -346,7 +512,7 @@ public sealed partial class RadioSession
                     AppendPacket(decoded);
                 else if (mode == RadioMode.Ribbit)
                     AppendRibbit(decoded);
-                else if (mode == RadioMode.Dmr)
+                else if (mode is RadioMode.Dmr or RadioMode.Dstar)
                     AppendNote(decoded);
                 else if (mode == RadioMode.Wbfm)
                     AppendWbfmDecoded(decoded);

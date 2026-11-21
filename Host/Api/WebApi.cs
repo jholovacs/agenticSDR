@@ -150,11 +150,11 @@ public static class WebApi
                 session.LeaveCamp(reader);
             }
         });
-        app.MapGet("/api/devices", () =>
+        app.MapGet("/api/devices", (RadioSession session) =>
         {
             try
             {
-                return Results.Ok(RadioSession.ListDevices());
+                return Results.Ok(session.ListDevicesView());
             }
             catch (RadioException ex)
             {
@@ -172,6 +172,30 @@ public static class WebApi
                 return Results.BadRequest(new { error = ex.Message });
             }
         });
+        app.MapGet("/api/radio/ppm", (int index, RadioSession session) =>
+        {
+            try
+            {
+                return Results.Ok(session.PpmView(index));
+            }
+            catch (Exception ex) when (ex is RadioException or ArgumentOutOfRangeException)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPut("/api/radio/ppm", (PpmBody body, RadioSession session) =>
+        {
+            try
+            {
+                return Results.Ok(session.SetPpm(body.Index, body.Ppm));
+            }
+            catch (Exception ex) when (ex is RadioException or ArgumentOutOfRangeException or ArgumentException)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+        app.MapPost("/api/radio/calibrate", async (RadioSession session, CancellationToken ct) =>
+            await Run(() => session.CalibrateAsync(ct)));
         app.MapGet("/api/radio/simulate-transmit", (RadioPreferenceStore prefs) =>
         {
             bool enabled = prefs.SimulateTransmit();
@@ -235,6 +259,8 @@ public static class WebApi
             await Run(() => session.ScanAsync(body.BandId, ct)));
         app.MapPost("/api/inspect", async (InspectBody body, RadioSession session, CancellationToken ct) =>
             await Run(() => session.InspectAsync(body.FrequencyHz, ct)));
+        app.MapPost("/api/analyze", async (AnalyzeBody body, RadioSession session, CancellationToken ct) =>
+            await Run(() => session.AnalyzeAsync(body.FrequencyHz, body.Mode, ct)));
         app.MapPost("/api/listen", async (ListenBody body, RadioSession session, CancellationToken ct) =>
             await Run(() => session.ListenAsync(body.FrequencyHz, body.Mode, body.Seconds ?? 8, ct, body.WbfmProgram)));
         app.MapGet("/api/clips", (ClipStore clips, int? limit) =>
@@ -436,6 +462,8 @@ public static class WebApi
 
 /// <summary>Body of POST /api/open. Index is the position from the device list.</summary>
 public sealed record OpenBody(int? Index);
+/// <summary>Body of PUT /api/radio/ppm. Index is the device list position; Ppm is crystal correction (−500…500).</summary>
+public sealed record PpmBody(int Index, int Ppm);
 /// <summary>Body of POST /api/radio/simulate-transmit. Enables the shared test TX facade.</summary>
 public sealed record SimulateTransmitBody(bool Enabled);
 /// <summary>Body of POST /api/antenna. Unit is m or ft. Orientation is vertical or horizontal. Azimuth is degrees true for a horizontal wire.</summary>
@@ -444,6 +472,8 @@ public sealed record AntennaBody(double Length, string? Unit, string? Orientatio
 public sealed record ScanBody(string BandId);
 /// <summary>Body of POST /api/inspect. FrequencyHz is the frequency to measure, in hertz.</summary>
 public sealed record InspectBody(double FrequencyHz);
+/// <summary>Body of POST /api/analyze. Mode is the prior Signals guess (optional).</summary>
+public sealed record AnalyzeBody(double FrequencyHz, string? Mode);
 /// <summary>Body of POST /api/listen. Mode is auto, nbfm, wbfm, am, usb, lsb, cw, or ft8. Seconds is capped at 20, and FT8 always uses 15.</summary>
 public sealed record ListenBody(double FrequencyHz, string? Mode, double? Seconds, string? WbfmProgram = null, string[]? Pipeline = null);
 /// <summary>Body of POST /api/agent. Message is the question. History is earlier user and assistant sentences, not tool results.</summary>

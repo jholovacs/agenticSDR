@@ -13,14 +13,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var chat = new CwChat();
 var ids = new CwIdTracker();
 var preference = new RadioPreferenceStore(SharedPaths.RadioJson());
+var corrections = new RadioCorrectionStore(SharedPaths.RadioCorrectionsJson());
 CwRadioHolder? holder = null;
 var listener = new CwListener(chat, () => holder?.Radio);
-holder = new CwRadioHolder(preference, listener);
+holder = new CwRadioHolder(preference, corrections, listener);
 
 builder.Services.AddSingleton(new OperatorSession(SharedPaths.OperatorJson()));
 builder.Services.AddSingleton(new AntennaStore(SharedPaths.AntennaJson()));
 builder.Services.AddSingleton(new UiPrefsStore(SharedPaths.UiPrefsJson()));
 builder.Services.AddSingleton(preference);
+builder.Services.AddSingleton(corrections);
 builder.Services.AddSingleton(chat);
 builder.Services.AddSingleton(ids);
 builder.Services.AddSingleton(listener);

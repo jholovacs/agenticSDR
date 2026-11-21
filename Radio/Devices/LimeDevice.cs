@@ -18,8 +18,9 @@ public sealed class LimeDevice : IRadioDevice
     private double _filterHz;
     private int _port = -1;
     private double _calibratedHz;
+    private int _ppm;
 
-    private LimeDevice(IntPtr device, RadioCapabilities capabilities, List<LimePlan.Port> ports, LmsStream stream, double filterHz, nuint channel, string? forcedPortName)
+    private LimeDevice(IntPtr device, RadioCapabilities capabilities, List<LimePlan.Port> ports, LmsStream stream, double filterHz, nuint channel, string? forcedPortName, int ppm)
     {
         _device = device;
         _ports = ports;
@@ -28,11 +29,12 @@ public sealed class LimeDevice : IRadioDevice
         _filterHz = filterHz;
         _channel = channel;
         _forcedPortName = forcedPortName;
-        Capabilities = capabilities;
+        _ppm = ppm;
+        Capabilities = capabilities with { Ppm = ppm };
         SampleRateHz = capabilities.SampleRateHz;
     }
 
-    public RadioCapabilities Capabilities { get; }
+    public RadioCapabilities Capabilities { get; private set; }
 
     public bool DirectSampling => false;
 
@@ -145,7 +147,6 @@ public sealed class LimeDevice : IRadioDevice
 
     private static LimeDevice OpenOnLimeThread(string args, double preferredRate, double? gainDb, int ppm)
     {
-        _ = ppm;
         LimeNative.Touch();
 
         nuint channel = 0;
@@ -230,8 +231,8 @@ public sealed class LimeDevice : IRadioDevice
             Check(LimeNative.LMS_StartStream(ref stream), "start receive stream");
 
             string name = SdrCatalog.DisplayName("lime", Describe(args).Name);
-            var capabilities = new RadioCapabilities(name, Describe(args).Serial, frequency.Minimum, frequency.Maximum, rate, gainDb, 0, false);
-            var radio = new LimeDevice(device, capabilities, ports, stream, filter, channel, selectedPort)
+            var capabilities = new RadioCapabilities(name, Describe(args).Serial, frequency.Minimum, frequency.Maximum, rate, gainDb, ppm, false);
+            var radio = new LimeDevice(device, capabilities, ports, stream, filter, channel, selectedPort, ppm)
             {
                 CenterFrequencyHz = parked,
                 _port = port,
@@ -252,6 +253,19 @@ public sealed class LimeDevice : IRadioDevice
         LimeCall.Run(() =>
         {
             ApplyGain(_device, _channel, gainDb);
+            return 0;
+        });
+    }
+
+    public void SetFrequencyCorrection(int ppm)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        LimeCall.Run(() =>
+        {
+            _ppm = ppm;
+            Capabilities = Capabilities with { Ppm = ppm };
+            if (CenterFrequencyHz > 0)
+                TuneOnLimeThread(CenterFrequencyHz);
             return 0;
         });
     }
@@ -285,7 +299,8 @@ public sealed class LimeDevice : IRadioDevice
             Check(LimeNative.LMS_SetAntenna(_device, false, _channel, (nuint)_port), "set receive antenna");
         }
 
-        Check(LimeNative.LMS_SetLOFrequency(_device, false, _channel, frequencyHz), "set frequency");
+        double loHz = CorrectLo(frequencyHz, _ppm);
+        Check(LimeNative.LMS_SetLOFrequency(_device, false, _channel, loHz), "set frequency");
         if (double.IsNaN(_calibratedHz) || Math.Abs(frequencyHz - _calibratedHz) > 5_000_000)
         {
             LimeNative.LMS_Calibrate(_device, false, _channel, _filterHz, 0);
@@ -293,6 +308,14 @@ public sealed class LimeDevice : IRadioDevice
         }
 
         CenterFrequencyHz = frequencyHz;
+    }
+
+    /// <summary>Positive ppm means the oscillator runs high, so the LO is programmed slightly lower.</summary>
+    public static double CorrectLo(double dialHz, int ppm)
+    {
+        if (ppm == 0)
+            return dialHz;
+        return dialHz / (1.0 + ppm * 1e-6);
     }
 
     public int Read(byte[] buffer)

@@ -74,6 +74,10 @@ public class BandPlanTests
         Assert.Equal(RadioMode.Nbfm, Region2BandPlan.HintAt(437_800_000).PreferredMode);
         Assert.True(DialFrequency.PublishedSearchHz(RadioMode.Nbfm, 145_800_000) >= DopplerFilter.VhfHalfWindowHz);
         Assert.True(DialFrequency.PublishedSearchHz(RadioMode.Nbfm, 437_800_000) >= DopplerFilter.UhfHalfWindowHz);
+        // Terrestrial APRS must not peak-hunt (quiet channel snaps off-dial and kills AFSK).
+        Assert.Equal(0, DialFrequency.PublishedSearchHz(RadioMode.Packet, 144_390_000));
+        Assert.True(DialFrequency.PublishedSearchHz(RadioMode.Packet, 145_825_000, DopplerFilter.VhfHalfWindowHz)
+            >= DopplerFilter.VhfHalfWindowHz);
     }
 
     [Fact]

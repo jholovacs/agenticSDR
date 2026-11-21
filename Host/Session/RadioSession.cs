@@ -83,6 +83,31 @@ public sealed record InspectReport(
     string Source,
     bool DirectSampling);
 
+/// <summary>One ranked mode candidate from Signal Analyze.</summary>
+public sealed record AnalyzeCandidate(
+    string Mode,
+    double Confidence,
+    double TuneHz,
+    double BandwidthHz,
+    string Reason,
+    bool DecodeConfirmed);
+
+/// <summary>
+/// Result of carefully re-scoring a Signals hit: recommended tune/mode/bandwidth and why.
+/// Changed is true when the recommendation differs from the prior scan guess.
+/// </summary>
+public sealed record AnalyzeReport(
+    double FrequencyHz,
+    string? PriorMode,
+    string RecommendedMode,
+    double RecommendedTuneHz,
+    double RecommendedBandwidthHz,
+    double Confidence,
+    double SnrDb,
+    string Explanation,
+    bool Changed,
+    IReadOnlyList<AnalyzeCandidate> Candidates);
+
 /// <summary>
 /// A finished listen. AudioUrl is the WAV the page plays. Morse and Text hold decoded CW or FT8 when there is any.
 /// Source is the band-plan label for the tuned frequency.
@@ -112,6 +137,7 @@ public sealed partial class RadioSession(
     ProcessorCatalog processors,
     AntennaStore antennas,
     RadioPreferenceStore radioPreference,
+    RadioCorrectionStore radioCorrections,
     ILogger<RadioSession> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);

@@ -76,6 +76,11 @@
   gap: 8px;
 }
 
+.sp-panel .sp-radio-ppm {
+  width: 6.5rem;
+  min-width: 5rem;
+}
+
 .sp-panel input,
 .sp-panel select,
 .sp-panel textarea,

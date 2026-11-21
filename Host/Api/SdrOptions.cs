@@ -2,8 +2,8 @@ namespace AgenticSdr.Host;
 
 /// <summary>
 /// Settings from Host/appsettings.json under "Sdr".
-/// Sample rate, gain, and clock correction (Ppm) apply when a radio is opened.
-/// Ppm is the coarse crystal fix (Hz ≈ ppm × RF / 1e6). Digimodes also search residual audio offset via DialFrequency.
+/// Sample rate, gain, and the default clock correction (Ppm) apply when a radio is opened.
+/// Per-radio ppm from radio-corrections.json overrides this default. Digimodes also search residual audio offset via DialFrequency.
 /// Latitude, longitude, or a Maidenhead grid let a nearby repeater name replace the band-plan label. The region selects which amateur plan is fair to mention; only region 2 is loaded.
 /// CallsignLookup asks free HamDB / HamQTH DXCC references in the background while digimodes decode.
 /// </summary>

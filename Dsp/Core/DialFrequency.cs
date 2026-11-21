@@ -5,7 +5,7 @@ namespace AgenticSdr.Dsp;
 /// After USB demod, an LO error of Δf appears as every audio tone shifted by −Δf.
 /// Modes that search a wide waterfall (FT8/JS8/JTTY) already tolerate that; modes that
 /// assume a fixed audio center (Olivia, VarAC) need an estimate and a retune of the stack.
-/// Coarse LO correction still belongs in <c>Sdr:Ppm</c>; this handles the residual.
+/// Coarse LO correction still belongs in per-radio ppm (or <c>Sdr:Ppm</c> fallback); this handles the residual.
 /// </summary>
 public static class DialFrequency
 {
@@ -149,15 +149,17 @@ public static class DialFrequency
     /// <summary>
     /// How far to hunt around a published RF when snapping a known channel (NOAA, CB, digi dial, …).
     /// Wider on broadcast FM; a few kilohertz on NBFM/AM; digi USB uses the audio residual window.
+    /// Packet/Ribbit: pass <paramref name="dopplerMaxHz"/> for ISS; terrestrial APRS uses 0 (no snap).
     /// </summary>
-    public static double PublishedSearchHz(RadioMode mode, double publishedHz = 0) => mode switch
+    public static double PublishedSearchHz(RadioMode mode, double publishedHz = 0, double dopplerMaxHz = 0) => mode switch
     {
         RadioMode.Wbfm => 75_000,
         RadioMode.Am => 5_000,
-        // ISS LEO needs a wider hunt than terrestrial NBFM/packet (Doppler ± a few kHz / ±10 kHz).
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit
-            when publishedHz > 0 => Math.Max(5_000, DopplerFilter.HalfWindowHz(publishedHz)),
-        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.M17 or RadioMode.Packet or RadioMode.Ribbit => 5_000,
+        // ISS LEO needs a wider hunt than terrestrial NBFM (Doppler ± a few kHz / ±10 kHz).
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Dstar or RadioMode.M17
+            when publishedHz > 0 => Math.Max(5_000, Math.Max(dopplerMaxHz, DopplerFilter.HalfWindowHz(publishedHz))),
+        RadioMode.Nbfm or RadioMode.Dmr or RadioMode.Dstar or RadioMode.M17 => 5_000,
+        RadioMode.Packet or RadioMode.Ribbit => dopplerMaxHz > 0 ? Math.Max(5_000, dopplerMaxHz) : 0,
         RadioMode.Cw => DefaultSearchHz,
         RadioMode.Usb or RadioMode.Lsb => 1_000,
         RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Olivia or RadioMode.Jtty or RadioMode.Wspr or RadioMode.Varac => DefaultSearchHz,
@@ -188,9 +190,12 @@ public static class DialFrequency
         double sampleRate,
         double publishedHz,
         RadioMode mode,
-        double minSnrDb = 3)
+        double minSnrDb = 3,
+        double dopplerMaxHz = 0)
     {
-        double searchHz = PublishedSearchHz(mode, publishedHz);
+        double searchHz = PublishedSearchHz(mode, publishedHz, dopplerMaxHz);
+        if (searchHz <= 0)
+            return publishedHz;
         double expectedRf = ExpectedRfHz(publishedHz, mode);
         double halfWidth = mode switch
         {

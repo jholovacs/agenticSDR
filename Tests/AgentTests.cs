@@ -152,6 +152,7 @@ public class AgentTests
             new AgenticSdr.Processors.ProcessorCatalog(),
             new AntennaStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-antenna-" + Guid.NewGuid().ToString("N") + ".json")),
             new RadioPreferenceStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-radio-" + Guid.NewGuid().ToString("N") + ".json")),
+            new RadioCorrectionStore(Path.Combine(Path.GetTempPath(), "agentic-sdr-ppm-" + Guid.NewGuid().ToString("N") + ".json")),
             NullLogger<RadioSession>.Instance);
         var camp = new CampBook(path + ".schedule");
         var clips = new ClipStore();

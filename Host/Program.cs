@@ -59,6 +59,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton(_ => new AntennaStore(SharedPaths.AntennaJson()));
 builder.Services.AddSingleton(new RadioPreferenceStore(SharedPaths.RadioJson()));
+builder.Services.AddSingleton(new RadioCorrectionStore(SharedPaths.RadioCorrectionsJson()));
 builder.Services.AddSingleton(new UiPrefsStore(SharedPaths.UiPrefsJson()));
 builder.Services.AddSingleton(sp =>
 {

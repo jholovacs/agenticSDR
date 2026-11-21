@@ -19,7 +19,7 @@ public sealed class RtlSdrDevice : IRadioDevice
         SampleRateHz = capabilities.SampleRateHz;
     }
 
-    public RadioCapabilities Capabilities { get; }
+    public RadioCapabilities Capabilities { get; private set; }
     public bool DirectSampling { get; private set; }
     public double CenterFrequencyHz { get; private set; }
     public double SampleRateHz { get; }
@@ -138,6 +138,15 @@ public sealed class RtlSdrDevice : IRadioDevice
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ApplyGain(_handle, gainDb);
+    }
+
+    public void SetFrequencyCorrection(int ppm)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _ = RtlSdrNative.rtlsdr_set_freq_correction(_handle, ppm);
+        Capabilities = Capabilities with { Ppm = ppm };
+        if (CenterFrequencyHz > 0)
+            Tune(CenterFrequencyHz);
     }
 
     /// <summary>

@@ -15,8 +15,10 @@
     ["js8", "JS8"],
     ["olivia", "Olivia"],
     ["jtty", "JTTY"],
+    ["wspr", "WSPR"],
     ["varac", "VarAC"],
     ["dmr", "DMR"],
+    ["dstar", "D-STAR"],
     ["m17", "M17"],
     ["packet", "Packet (AX.25)"],
     ["ribbit", "Ribbit"]

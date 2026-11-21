@@ -240,6 +240,8 @@ public static class Region2BandPlan
             [
                 Seg("VHF DMR", 145_200_000, 145_500_000, RadioMode.Dmr),
                 Seg("UHF DMR", 440_000_000, 450_000_000, RadioMode.Dmr),
+                Seg("VHF D-STAR", 144_000_000, 148_000_000, RadioMode.Dstar),
+                Seg("UHF D-STAR", 420_000_000, 450_000_000, RadioMode.Dstar),
                 Seg("VHF M17", 144_000_000, 148_000_000, RadioMode.M17),
                 Seg("UHF M17", 420_000_000, 450_000_000, RadioMode.M17)
             ])
@@ -267,6 +269,21 @@ public static class Region2BandPlan
         if (string.IsNullOrWhiteSpace(bandId))
             return null;
         return Bands.FirstOrDefault(b => b.Id.Equals(bandId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Fixed carriers used to calibrate crystal ppm. NOAA weather is preferred: continuous, published to the hertz,
+    /// and usually strong outdoors. Digimodes, ISS (Doppler), and quiet FM voice channels are excluded.
+    /// </summary>
+    public static IReadOnlyList<CallingChannel> CalibrationReferences()
+    {
+        HamBand? noaa = Find("noaa");
+        if (noaa is null)
+            return [];
+        return noaa.Calling
+            .Where(c => c.Mode == RadioMode.Nbfm)
+            .OrderBy(c => c.FrequencyHz)
+            .ToArray();
     }
 
     /// <summary>CB, GMRS, NOAA weather, Marine, ISS, and published digimode dials for the Known channels panel.</summary>

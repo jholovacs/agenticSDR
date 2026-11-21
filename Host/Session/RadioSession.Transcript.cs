@@ -206,7 +206,7 @@ public sealed partial class RadioSession
         _ => DigiListenSeconds(mode)
     };
 
-    private void AppendPacket(string text) => AppendSpan("packet", text, "Packet");
+    private void AppendPacket(string text) => AppendSpan("packet", AprsExplain.Format(text), "Packet");
 
     private void AppendRibbit(string text) => AppendSpan("ribbit", text, "Ribbit");
 
@@ -270,6 +270,13 @@ public sealed partial class RadioSession
             return tuneHz;
 
         RadioMode useMode = mode == RadioMode.Unknown ? publishedMode : mode;
+        double issDoppler = Region2BandPlan.IssDopplerMaxHz(publishedHz);
+        // Terrestrial APRS/packet is bursty. Snapping to the loudest nearby bin while the channel is
+        // quiet parks several kHz off 144.390 and kills Bell 202 decode. Stay on the published dial;
+        // per-radio ppm covers crystal error. ISS packet still hunts Doppler.
+        if ((useMode is RadioMode.Packet or RadioMode.Ribbit) && issDoppler <= 0)
+            return publishedHz;
+
         double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
         double expectedRf = DialFrequency.ExpectedRfHz(publishedHz, useMode);
         double captureHz = Math.Clamp(
@@ -280,7 +287,7 @@ public sealed partial class RadioSession
         int fft = capture.Samples.Length >= 65_536 ? 16_384 : 8_192;
         double[] db = SpectrumAnalyzer.AveragePowerDb(capture.Samples, fft);
         double snapped = DialFrequency.SnapPublishedTuneHz(
-            db, capture.CenterHz, capture.SampleRate, publishedHz, useMode);
+            db, capture.CenterHz, capture.SampleRate, publishedHz, useMode, dopplerMaxHz: issDoppler);
         if (Math.Abs(snapped - publishedHz) >= 1)
         {
             SetStatus(
@@ -396,6 +403,8 @@ public sealed partial class RadioSession
         bool dmrFramed = HearsDmr(measured);
         if (dmrFramed)
             return (RadioMode.Dmr, tuneHz, 0.9, true);
+        if (HearsDstar(measured))
+            return (RadioMode.Dstar, tuneHz, 0.9, false);
 
         // Digi tones often look like USB/CW to the classifier. On a published digi dial,
         // prefer the dial mode unless the peak is clearly wide voice (AM / NBFM / WBFM).
@@ -671,6 +680,9 @@ public sealed partial class RadioSession
         RadioMode.Packet => $"Packet clip ready. {decoded!.Count(ch => ch == '\n') + 1} frame(s).",
         RadioMode.Ribbit when string.IsNullOrWhiteSpace(decoded) => "Ribbit clip ready. No OFDM comb detected.",
         RadioMode.Ribbit => $"Ribbit clip ready. {decoded}",
+        RadioMode.Dstar when string.IsNullOrWhiteSpace(decoded) => "D-STAR clip ready. No radio header decoded.",
+        RadioMode.Dstar => "D-STAR clip ready. Framing / callsign notes recorded.",
+        RadioMode.Dmr => "DMR clip ready. Framing / signaling notes recorded.",
         _ when SpeechDecoder.IsVoice(mode) && !string.IsNullOrWhiteSpace(decoded) => $"Audio clip ready. {decoded}",
         _ => "Audio clip ready."
     };

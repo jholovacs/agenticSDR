@@ -201,6 +201,7 @@ public static class CampSchedule
         RadioMode.Wspr => "wspr",
         RadioMode.Varac => "varac",
         RadioMode.Dmr => "dmr",
+        RadioMode.Dstar => "dstar",
         RadioMode.M17 => "m17",
         RadioMode.Packet => "packet",
         RadioMode.Ribbit => "ribbit",

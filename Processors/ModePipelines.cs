@@ -17,11 +17,12 @@ public static class ModePipelines
         RadioMode.Jtty => ["jtty"],
         RadioMode.Wspr => ["wspr"],
         RadioMode.Varac => ["varac"],
-        RadioMode.Packet => ["packet"],
+        RadioMode.Packet => ["packet", "aprs-explain"],
         RadioMode.Ribbit => ["ribbit"],
         _ => []
     };
 
     public static bool IsKnownId(string id) =>
-        id is "morse" or "speech" or "ft8" or "js8" or "olivia" or "jtty" or "wspr" or "varac" or "packet" or "ribbit" or "rds";
+        id is "morse" or "speech" or "ft8" or "js8" or "olivia" or "jtty" or "wspr" or "varac"
+            or "packet" or "aprs-explain" or "ribbit" or "rds";
 }

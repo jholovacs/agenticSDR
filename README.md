@@ -14,7 +14,7 @@ The bring-up radio is a Nooelec NESDR SMArt v5 (RTL2832U). It tunes about 100 kH
 | **Camp** | Quiet schedule / squelch watch; audio opens when the channel is active |
 | **Voice modes** | NBFM, WBFM (stereo + RDS + SCA 67/92), AM, USB, LSB, CW (+ Morse text) |
 | **Digimodes** | FT8, JS8, WSPR (Type-1), Olivia 8/250 (+8/500, 16/500, 16/1000, 32/1000), JTTY, VarAC (xaramonitor), Packet/APRS AX.25 |
-| **Digital voice** | M17 Codec2 when `m17voice` is present; DMR framing + signaling (no proprietary voice) |
+| **Digital voice** | M17 Codec2 when `m17voice` is present; DMR and D-STAR framing + signaling (no proprietary AMBE voice) |
 | **AI** | On-page instruct model + MCP tools/resources at `/mcp` |
 | **Known channels** | NOAA WX, CB, GMRS, and published digimode dials without scanning |
 
@@ -63,7 +63,7 @@ Optional keys under `Sdr` in `Host/appsettings.json`:
 
 | Key | Meaning |
 | --- | --- |
-| `SampleRateHz`, `GainDb`, `AutoGain`, `Ppm` | Default radio settings |
+| `SampleRateHz`, `GainDb`, `AutoGain`, `Ppm` | Default radio settings (`Ppm` is the fallback until a per-radio correction is saved) |
 | `ItuRegion` | Band plan region (default `2`) |
 | `Latitude` / `Longitude` or `Grid` | Optional repeater name lookup |
 | `CallsignLookup` | Background HamDB / HamQTH DXCC enrichment (default `true`) |
@@ -103,6 +103,8 @@ The plan is US ITU region 2, from 160 m through 23 cm, plus AM broadcast, FM bro
 | Packet | 1200 baud AX.25 / APRS |
 | M17 | Open Codec2 via bundled `m17voice` |
 | DMR | Framing required for a scan hit; signaling text only |
+| D-STAR | DV framing + radio-header callsigns / slow data; AMBE not decoded |
+| Analyze | Per-signal codec ranking (`IModeAnalyzer`) with envelope ±10% and short decode confirmation |
 | Raw | Wide discriminator, minimal voice filtering |
 
 ## Native libraries
@@ -176,7 +178,7 @@ dotnet run --project Host
 dotnet run --project Modes/Cw
 ```
 
-`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8/WSPR, Olivia/JTTY, RDS helpers, packet, M17 plumbing, camp/schedule, callsign lookup, the band plan, Part 97 privileges, and click-gated CW transmit. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
+`dotnet test` covers spectrum classification, demodulation (including WBFM pacing), Morse, FT8/JS8/WSPR, Olivia/JTTY, RDS helpers, packet, DMR/D-STAR framing, M17 plumbing, camp/schedule, callsign lookup, the band plan, Part 97 privileges, and click-gated CW transmit. The live-dongle test opens the NESDR when it is plugged in and checks that the spectrum is not flat.
 
 Packaging scripts: `packaging/build-msi.sh`, `packaging/build-deb.sh`, `packaging/build-mac.sh`. CI workflow: `.github/workflows/packages.yml`.
 

@@ -252,6 +252,17 @@ dialog p { margin: 12px 0; color: var(--muted); }
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.analyze-summary {
+  margin: 10px 0 14px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
 
 .layout {
   display: grid;
