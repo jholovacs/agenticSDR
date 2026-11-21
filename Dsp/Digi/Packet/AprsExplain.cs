@@ -180,17 +180,20 @@ public static partial class AprsExplain
         if (string.IsNullOrEmpty(payload))
             return "No information field.";
 
-        if (payload.StartsWith("!!", StringComparison.Ordinal))
-            return "It is a telemetry (sensor numbers) report, not a map position.";
+        if (TryDescribeUltimeter(payload, out string ultimeter))
+            return ultimeter;
+
+        if (TryDescribeTelemetryT(payload, out string telemetry))
+            return telemetry;
+
+        if (TryDescribeTelemetryDefinition(payload, out string definition))
+            return definition;
 
         if (payload.StartsWith(":", StringComparison.Ordinal) && payload.Length > 1)
             return "Message text: " + TrimComment(payload[1..]);
 
         if (payload.StartsWith(">", StringComparison.Ordinal))
             return "Status text: " + TrimComment(payload[1..]);
-
-        if (payload.StartsWith("T#", StringComparison.OrdinalIgnoreCase))
-            return "It is a formatted telemetry report.";
 
         if (TryParsePosition(payload, out PositionInfo pos))
         {
@@ -224,6 +227,237 @@ public static partial class AprsExplain
         if (payload.Length > 0 && payload[0] >= 32 && payload[0] <= 126)
             return "Information field: " + TrimComment(payload);
         return "Binary or unrecognized APRS payload.";
+    }
+
+    /// <summary>
+    /// Peet Bros Ultimeter logging mode (<c>!!</c>) and packet mode (<c>$ULTW</c>).
+    /// Fields are 4 hex digits; <c>----</c> means that sensor is absent.
+    /// </summary>
+    public static bool TryDescribeUltimeter(string payload, out string text)
+    {
+        text = "";
+        if (payload.StartsWith("!!", StringComparison.Ordinal))
+            return TryDescribeUltimeterLogger(payload[2..], out text);
+        if (payload.StartsWith("$ULTW", StringComparison.OrdinalIgnoreCase))
+            return TryDescribeUltimeterPacket(payload["$ULTW".Length..], out text);
+        return false;
+    }
+
+    static bool TryDescribeUltimeterLogger(string hex, out string text)
+    {
+        text = "";
+        // 1 wind 0.1 kph, 2 dir 0-255, 3 outdoor °F×10, 4 rain 0.01", 5 baro 0.1 mbar,
+        // 6 indoor °F×10, 7 outdoor humidity 0.1%, 8 indoor humidity 0.1%,
+        // 9 day-of-year, 10 minute-of-day, 11 today's rain 0.01", 12 1-min wind avg 0.1 kph
+        if (!TryReadHexFields(hex, 12, out short?[] f) || f[0] is null && f[1] is null && f[2] is null)
+            return false;
+
+        var parts = new List<string>();
+        short? windField = f[0] ?? f[11];
+        if (windField is short windRaw)
+        {
+            double mph = windRaw * 0.1 * 0.621371;
+            if (f[1] is short dirRaw)
+            {
+                double deg = (dirRaw & 0xff) * 360.0 / 256.0;
+                parts.Add(mph < 0.3
+                    ? $"wind calm (from about {deg:0}°)"
+                    : $"wind from {deg:0}° at {mph:0.0} mph");
+            }
+            else if (mph >= 0.3)
+                parts.Add($"wind {mph:0.0} mph");
+        }
+
+        if (f[2] is short ot)
+            parts.Add($"outdoor temperature {ot * 0.1:0.0} °F");
+        if (f[5] is short it)
+            parts.Add($"indoor temperature {it * 0.1:0.0} °F");
+        if (f[4] is short baro)
+            parts.Add($"barometer {baro * 0.1:0.0} mbar");
+        if (f[6] is short oh)
+            parts.Add($"outdoor humidity {oh * 0.1:0.#}%");
+        if (f[7] is short ih)
+            parts.Add($"indoor humidity {ih * 0.1:0.#}%");
+        if (f[3] is short rain && rain > 0)
+            parts.Add($"long-term rain {rain * 0.01:0.##} in");
+        if (f[10] is short today && today > 0)
+            parts.Add($"rain today {today * 0.01:0.##} in");
+        if (f[8] is short day && f[9] is short minute)
+        {
+            int hh = minute / 60;
+            int mm = minute % 60;
+            parts.Add($"station clock day {day} of year, {hh:00}:{mm:00}");
+        }
+
+        if (parts.Count == 0)
+            return false;
+        text = "Ultimeter weather telemetry: " + JoinList(parts) + ".";
+        return true;
+    }
+
+    static bool TryDescribeUltimeterPacket(string hex, out string text)
+    {
+        text = "";
+        // Packet mode field order differs after field 5 (baro correction instead of indoor sensors).
+        if (!TryReadHexFields(hex, 13, out short?[] f) || f[0] is null && f[2] is null)
+            return false;
+
+        var parts = new List<string>();
+        if (f[0] is short peak)
+        {
+            double mph = peak * 0.1 * 0.621371;
+            if (f[1] is short dirRaw)
+            {
+                double deg = (dirRaw & 0xff) * 360.0 / 256.0;
+                parts.Add(mph < 0.3
+                    ? $"peak wind calm (from about {deg:0}°)"
+                    : $"peak wind from {deg:0}° at {mph:0.0} mph");
+            }
+            else if (mph >= 0.3)
+                parts.Add($"peak wind {mph:0.0} mph");
+        }
+
+        if (f[2] is short ot)
+            parts.Add($"outdoor temperature {ot * 0.1:0.0} °F");
+        if (f[4] is short baro)
+            parts.Add($"barometer {baro * 0.1:0.0} mbar");
+        if (f[8] is short oh)
+            parts.Add($"outdoor humidity {oh * 0.1:0.#}%");
+        if (f[3] is short rain && rain > 0)
+            parts.Add($"long-term rain {rain * 0.01:0.##} in");
+        if (f[11] is short today && today > 0)
+            parts.Add($"rain today {today * 0.01:0.##} in");
+        if (f[12] is short avg)
+        {
+            double mph = avg * 0.1 * 0.621371;
+            if (mph >= 0.3)
+                parts.Add($"5-minute average wind {mph:0.0} mph");
+        }
+
+        if (parts.Count == 0)
+            return false;
+        text = "Ultimeter weather telemetry (packet mode): " + JoinList(parts) + ".";
+        return true;
+    }
+
+    /// <summary>Standard APRS <c>T#seq,a1,a2,a3,a4,a5,digital</c> telemetry data report.</summary>
+    public static bool TryDescribeTelemetryT(string payload, out string text)
+    {
+        text = "";
+        var m = TelemetryData().Match(payload);
+        if (!m.Success)
+            return false;
+
+        string seq = m.Groups["seq"].Value;
+        var analogs = new List<string>();
+        for (int i = 1; i <= 5; i++)
+        {
+            if (!m.Groups[$"a{i}"].Success)
+                continue;
+            string raw = m.Groups[$"a{i}"].Value;
+            if (raw is "." or "-" or "")
+                continue;
+            analogs.Add($"channel {i} = {raw}");
+        }
+
+        string bits = m.Groups["bits"].Success ? m.Groups["bits"].Value : "";
+        var parts = new List<string> { $"sequence {seq}" };
+        if (analogs.Count > 0)
+            parts.Add(JoinList(analogs));
+        if (!string.IsNullOrEmpty(bits) && bits.Any(c => c == '1'))
+        {
+            var on = new List<string>();
+            for (int i = 0; i < bits.Length && i < 8; i++)
+            {
+                if (bits[i] == '1')
+                    on.Add($"bit {i + 1}");
+            }
+
+            if (on.Count > 0)
+                parts.Add("digital inputs on for " + JoinList(on));
+        }
+        else if (!string.IsNullOrEmpty(bits))
+            parts.Add("all digital inputs off");
+
+        text = "APRS telemetry data report: " + JoinList(parts) + ".";
+        return true;
+    }
+
+    /// <summary>PARM / UNIT / EQNS / BITS definition messages that label later T# reports.</summary>
+    public static bool TryDescribeTelemetryDefinition(string payload, out string text)
+    {
+        text = "";
+        if (!payload.StartsWith(':') || payload.Length < 12)
+            return false;
+
+        // :ADDRESSE:PARM.Name1,Name2,...  (addressee is 9 chars)
+        string rest = payload[1..];
+        if (rest.Length < 10 || rest[9] != ':')
+            return false;
+        string addressee = rest[..9].Trim();
+        string body = rest[10..];
+        string kind;
+        string detail;
+        if (body.StartsWith("PARM.", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = "parameter names";
+            detail = body["PARM.".Length..];
+        }
+        else if (body.StartsWith("UNIT.", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = "units";
+            detail = body["UNIT.".Length..];
+        }
+        else if (body.StartsWith("EQNS.", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = "scaling equations (a·x² + b·x + c per channel)";
+            detail = body["EQNS.".Length..];
+        }
+        else if (body.StartsWith("BITS.", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = "digital bit labels";
+            detail = body["BITS.".Length..];
+        }
+        else
+            return false;
+
+        text = string.IsNullOrEmpty(addressee)
+            ? $"Telemetry setup message defining {kind}: {TrimComment(detail)}."
+            : $"Telemetry setup for {addressee} defining {kind}: {TrimComment(detail)}.";
+        return true;
+    }
+
+    static bool TryReadHexFields(string hex, int maxFields, out short?[] fields)
+    {
+        fields = new short?[maxFields];
+        string block = hex.Trim();
+        int end = 0;
+        while (end < block.Length && (Uri.IsHexDigit(block[end]) || block[end] == '-'))
+            end++;
+        block = block[..end];
+        if (block.Length < 8)
+            return false;
+
+        for (int i = 0; i < maxFields; i++)
+        {
+            int at = i * 4;
+            if (at + 4 > block.Length)
+                break;
+            string field = block.Substring(at, 4);
+            if (field == "----")
+            {
+                fields[i] = null;
+                continue;
+            }
+
+            if (field.Contains('-', StringComparison.Ordinal))
+                return false;
+            if (!short.TryParse(field, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out short value))
+                return false;
+            fields[i] = value;
+        }
+
+        return true;
     }
 
     static string DescribeStationRole(string source, PositionInfo pos)
@@ -454,6 +688,11 @@ public static partial class AprsExplain
 
     [GeneratedRegex(@"^\d{3}/\d{3}")]
     private static partial Regex CourseSpeed();
+
+    [GeneratedRegex(
+        @"^T#(?<seq>\d{1,3}),(?<a1>[0-9.\-]+),(?<a2>[0-9.\-]+),(?<a3>[0-9.\-]+),(?<a4>[0-9.\-]+),(?<a5>[0-9.\-]+)(?:,(?<bits>[01]{8}))?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TelemetryData();
 
     sealed record PathHop(string Name, bool Used);
 

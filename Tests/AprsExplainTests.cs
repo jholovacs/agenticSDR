@@ -24,8 +24,8 @@ public class AprsExplainTests
     [InlineData(
         "ELPASO>APN382,CABALL*,LTLFLO*,WIDE3-1:!!0000008002140000----------------0009004A00000000",
         "ELPASO",
-        "telemetry",
-        "relayed")]
+        "Ultimeter",
+        "53.2")]
     [InlineData(
         "W7SA-12>AP1WWX*,HELIO*,JACKPK*,WIDE2:@210512z3206.21N/11056.22W_186/000g002t054P000r000h66b10130e1w",
         "W7SA-12",
@@ -65,5 +65,40 @@ public class AprsExplainTests
     {
         Assert.Equal(["packet", "aprs-explain"], ModePipelines.DefaultIds(RadioMode.Packet));
         Assert.True(ModePipelines.IsKnownId("aprs-explain"));
+    }
+
+    [Fact]
+    public void Ultimeter_logger_decodes_elpaso_style_hex()
+    {
+        string english = AprsExplain.Describe(
+            "ELPASO>APN382,CABALL*,LTLFLO*,WIDE3-1:!!0000008002140000----------------0009004A00000000");
+        Assert.Contains("Ultimeter weather telemetry", english, StringComparison.Ordinal);
+        Assert.Contains("53.2 °F", english, StringComparison.Ordinal);
+        Assert.Contains("180°", english, StringComparison.Ordinal); // 0x80 → 180°
+        Assert.Contains("day 9 of year", english, StringComparison.Ordinal);
+        Assert.Contains("01:14", english, StringComparison.Ordinal); // 0x4A minutes
+    }
+
+    [Fact]
+    public void Standard_t_hash_telemetry_lists_channels_and_bits()
+    {
+        string english = AprsExplain.Describe(
+            "N0CALL>APRS:T#123,10,20,30,40,50,01001001");
+        Assert.Contains("sequence 123", english, StringComparison.Ordinal);
+        Assert.Contains("channel 1 = 10", english, StringComparison.Ordinal);
+        Assert.Contains("channel 5 = 50", english, StringComparison.Ordinal);
+        Assert.Contains("bit 2", english, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bit 5", english, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bit 8", english, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Telemetry_parm_definition_is_explained()
+    {
+        string english = AprsExplain.Describe(
+            "N0CALL>APRS::N0CALL   :PARM.Battery,Current,Power,Temp,RSSI");
+        Assert.Contains("Telemetry setup", english, StringComparison.Ordinal);
+        Assert.Contains("parameter names", english, StringComparison.Ordinal);
+        Assert.Contains("Battery", english, StringComparison.Ordinal);
     }
 }

@@ -777,6 +777,25 @@ function compactNumber(value, places) {
   return String(parseFloat(n.toFixed(places)));
 }
 
+/** Coarse listen elapsed: seconds, then minutes, then hours, then days. */
+function formatListenElapsed(seconds) {
+  const s = Math.max(0, Number(seconds) || 0);
+  if (s < 60) {
+    const n = Math.floor(s);
+    return n === 1 ? "1 s" : `${n} s`;
+  }
+  if (s < 3600) {
+    const n = Math.floor(s / 60);
+    return n === 1 ? "1 min" : `${n} min`;
+  }
+  if (s < 86400) {
+    const n = Math.floor(s / 3600);
+    return n === 1 ? "1 hr" : `${n} hr`;
+  }
+  const n = Math.floor(s / 86400);
+  return n === 1 ? "1 day" : `${n} days`;
+}
+
 function paintFoldSummaries() {
   const option = radioSelect.selectedOptions[0];
   const radioLabel = option && option.value !== "" ? option.textContent.split(" · ")[0] : "No radio";
@@ -1543,7 +1562,7 @@ async function playPcmStream(body, context, rate, signal, channels = 1) {
     (played, ch) => {
       liveState.textContent = operatingMode === "camp" && !campActivity
         ? "Waiting for activity."
-        : `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
+        : `Playing${ch > 1 ? " stereo" : ""} · ${formatListenElapsed(played)}.`;
     },
     recording ? appendRecording : null
   );

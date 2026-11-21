@@ -34,6 +34,25 @@
     ["20 m FT8", 14.074, "ft8"]
   ];
 
+  /** Coarse listen elapsed: seconds, then minutes, then hours, then days. */
+  function formatListenElapsed(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    if (s < 60) {
+      const n = Math.floor(s);
+      return n === 1 ? "1 s" : `${n} s`;
+    }
+    if (s < 3600) {
+      const n = Math.floor(s / 60);
+      return n === 1 ? "1 min" : `${n} min`;
+    }
+    if (s < 86400) {
+      const n = Math.floor(s / 3600);
+      return n === 1 ? "1 hr" : `${n} hr`;
+    }
+    const n = Math.floor(s / 86400);
+    return n === 1 ? "1 day" : `${n} days`;
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, "&amp;")
@@ -520,7 +539,7 @@
           liveGain,
           (played, ch) => {
             if (options.liveState)
-              options.liveState.textContent = `Playing${ch > 1 ? " stereo" : ""} · ${played.toFixed(1)} s.`;
+              options.liveState.textContent = `Playing${ch > 1 ? " stereo" : ""} · ${formatListenElapsed(played)}.`;
             if (options.onPcmProgress)
               options.onPcmProgress(played, ch);
           },
@@ -772,6 +791,7 @@
     PRESETS,
     modeLabel,
     fillModeSelect,
+    formatListenElapsed,
     channelsFromHeaders,
     playPcmStream,
     paintDecoded,

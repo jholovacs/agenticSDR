@@ -2,6 +2,12 @@
   "mcpServers": {
     "agentic-sdr": {
       "url": "http://127.0.0.1:5088/mcp"
+    },
+    "home-assistant": {
+      "url": "http://homeassistant.holovacs.local:8123/api/mcp_http",
+      "headers": {
+        "Authorization": "Bearer ${env:HOMEASSISTANT_TOKEN}"
+      }
     }
   }
 }
