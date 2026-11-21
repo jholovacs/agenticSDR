@@ -89,6 +89,97 @@ public static partial class AprsExplain
         return string.Join("\n\n", parts);
     }
 
+    /// <summary>
+    /// Structured complete weather report (position + <c>_</c> symbol + WX fields).
+    /// Returns false for digis, houses, Ultimeter-without-position, and non-APRS lines.
+    /// </summary>
+    public static bool TryParseWeatherReport(string? line, out AprsWeatherReport report)
+    {
+        report = null!;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        string raw = ExtractRawTnc(Normalize(line));
+        if (!TrySplit(raw, out string source, out _, out _, out string payload))
+            return false;
+        if (!TryParsePosition(payload, out PositionInfo pos))
+            return false;
+        if (!pos.IsWeather && pos.Metrics is null)
+            return false;
+
+        WeatherMetrics? m = pos.Metrics;
+        report = new AprsWeatherReport(
+            source,
+            pos.LatDegrees,
+            pos.LonDegrees,
+            m?.WindDegrees,
+            m?.WindMph,
+            m?.GustMph,
+            m?.TemperatureF,
+            m?.HumidityPercent,
+            m?.RainLastHourIn,
+            m?.Rain24hIn,
+            m?.RainSinceMidnightIn,
+            m?.PressureMbar,
+            string.IsNullOrWhiteSpace(pos.Comment) ? null : pos.Comment,
+            raw);
+        return true;
+    }
+
+    /// <summary>Uncompressed APRS position for any symbol (digi, house, weather, …).</summary>
+    public static bool TryParsePositionFix(string? line, out AprsPositionFix fix)
+    {
+        fix = null!;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        string raw = ExtractRawTnc(Normalize(line));
+        if (!TrySplit(raw, out string source, out _, out _, out string payload))
+            return false;
+        if (!TryParsePosition(payload, out PositionInfo pos))
+            return false;
+        fix = new AprsPositionFix(source, pos.LatDegrees, pos.LonDegrees, pos.IsWeather, raw);
+        return true;
+    }
+
+    /// <summary>Ultimeter <c>!!</c> / <c>$ULTW</c> weather without lat/lon.</summary>
+    public static bool TryParseUltimeterMetrics(string? line, out AprsUltimeterMetrics metrics)
+    {
+        metrics = null!;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        string raw = ExtractRawTnc(Normalize(line));
+        if (!TrySplit(raw, out string source, out _, out _, out string payload))
+            return false;
+        if (!TryParseUltimeterFields(payload, out WeatherMetrics m))
+            return false;
+        metrics = new AprsUltimeterMetrics(
+            source,
+            m.WindDegrees,
+            m.WindMph,
+            m.GustMph,
+            m.TemperatureF,
+            m.HumidityPercent,
+            m.RainSinceMidnightIn,
+            m.PressureMbar,
+            raw);
+        return true;
+    }
+
+    /// <summary>Prefer the <c>Raw:</c> TNC-2 line when present (already-explained transcript text).</summary>
+    public static string ExtractRawTnc(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return "";
+        string text = Normalize(line);
+        const string marker = "\nRaw:";
+        int at = text.LastIndexOf(marker, StringComparison.Ordinal);
+        if (at >= 0)
+            return text[(at + marker.Length)..].Trim();
+        if (text.StartsWith("Raw:", StringComparison.Ordinal))
+            return text[4..].Trim();
+        return text;
+    }
+
     static string Normalize(string line)
     {
         string text = WebUtility.HtmlDecode(line).Trim();
@@ -241,6 +332,74 @@ public static partial class AprsExplain
         if (payload.StartsWith("$ULTW", StringComparison.OrdinalIgnoreCase))
             return TryDescribeUltimeterPacket(payload["$ULTW".Length..], out text);
         return false;
+    }
+
+    static bool TryParseUltimeterFields(string payload, out WeatherMetrics metrics)
+    {
+        metrics = default!;
+        if (payload.StartsWith("!!", StringComparison.Ordinal))
+            return TryParseUltimeterLoggerFields(payload[2..], out metrics);
+        if (payload.StartsWith("$ULTW", StringComparison.OrdinalIgnoreCase))
+            return TryParseUltimeterPacketFields(payload["$ULTW".Length..], out metrics);
+        return false;
+    }
+
+    static bool TryParseUltimeterLoggerFields(string hex, out WeatherMetrics metrics)
+    {
+        metrics = default!;
+        // 1 wind 0.1 kph, 2 dir 0-255, 3 outdoor °F×10, 4 rain 0.01", 5 baro 0.1 mbar,
+        // 6 indoor °F×10, 7 outdoor humidity 0.1%, 8 indoor humidity 0.1%,
+        // 9 day-of-year, 10 minute-of-day, 11 today's rain 0.01", 12 1-min wind avg 0.1 kph
+        if (!TryReadHexFields(hex, 12, out short?[] f) || f[0] is null && f[1] is null && f[2] is null)
+            return false;
+
+        int? windDeg = null, windMph = null, temp = null, hum = null;
+        double? rainMid = null, pressure = null;
+        short? windField = f[0] ?? f[11];
+        if (windField is short windRaw)
+            windMph = (int)Math.Round(windRaw * 0.1 * 0.621371);
+        if (f[1] is short dirRaw)
+            windDeg = (int)Math.Round((dirRaw & 0xff) * 360.0 / 256.0);
+        if (f[2] is short ot)
+            temp = (int)Math.Round(ot * 0.1);
+        if (f[4] is short baro)
+            pressure = baro * 0.1;
+        if (f[6] is short oh)
+            hum = (int)Math.Round(oh * 0.1);
+        if (f[10] is short today)
+            rainMid = today * 0.01;
+
+        metrics = new WeatherMetrics(windDeg ?? 0, windMph ?? 0, null, temp, hum, null, null, rainMid, pressure);
+        return temp is not null || windMph is not null || pressure is not null || hum is not null;
+    }
+
+    static bool TryParseUltimeterPacketFields(string hex, out WeatherMetrics metrics)
+    {
+        metrics = default!;
+        if (!TryReadHexFields(hex, 13, out short?[] f) || f[0] is null && f[2] is null)
+            return false;
+
+        int? windDeg = null, windMph = null, gust = null, temp = null, hum = null;
+        double? rainMid = null, pressure = null;
+        if (f[0] is short peak)
+            gust = (int)Math.Round(peak * 0.1 * 0.621371);
+        if (f[1] is short dirRaw)
+            windDeg = (int)Math.Round((dirRaw & 0xff) * 360.0 / 256.0);
+        if (f[12] is short avg)
+            windMph = (int)Math.Round(avg * 0.1 * 0.621371);
+        else if (gust is int g)
+            windMph = g;
+        if (f[2] is short ot)
+            temp = (int)Math.Round(ot * 0.1);
+        if (f[4] is short baro)
+            pressure = baro * 0.1;
+        if (f[8] is short oh)
+            hum = (int)Math.Round(oh * 0.1);
+        if (f[11] is short today)
+            rainMid = today * 0.01;
+
+        metrics = new WeatherMetrics(windDeg ?? 0, windMph ?? 0, gust, temp, hum, null, null, rainMid, pressure);
+        return temp is not null || windMph is not null || gust is not null || pressure is not null || hum is not null;
     }
 
     static bool TryDescribeUltimeterLogger(string hex, out string text)
@@ -519,14 +678,18 @@ public static partial class AprsExplain
         string rest = m.Groups["rest"].Value;
 
         string? weather = null;
+        WeatherMetrics? metrics = null;
         string? phg = null;
         string comment = rest;
 
         if (symbol == '_' || table == '/')
         {
             // Weather data often follows immediately after the symbol for '_' stations.
-            if (TryTakeWeather(ref comment, out string wx))
+            if (TryTakeWeather(ref comment, out string wx, out WeatherMetrics wxMetrics))
+            {
                 weather = wx;
+                metrics = wxMetrics;
+            }
         }
 
         // Course/speed before PHG on some beacons: ddd/sss
@@ -536,7 +699,7 @@ public static partial class AprsExplain
             phg = phgText;
 
         comment = TrimComment(comment);
-        info = new PositionInfo(lat, lon, table, symbol, symbol == '_', weather, phg, comment, timestamp);
+        info = new PositionInfo(lat, lon, table, symbol, symbol == '_', weather, metrics, phg, comment, timestamp);
         return true;
     }
 
@@ -599,20 +762,17 @@ public static partial class AprsExplain
         return true;
     }
 
-    static bool TryTakeWeather(ref string comment, out string text)
+    static bool TryTakeWeather(ref string comment, out string text, out WeatherMetrics metrics)
     {
         text = "";
-        // Common: ccc/sss or course/speed then g…t… etc.
-        var m = WeatherBlock().Match(comment);
-        if (!m.Success)
+        metrics = default!;
+        if (!TryParseWeatherMetrics(comment, out metrics, out int consumed))
             return false;
 
-        comment = comment[m.Length..].TrimStart();
+        comment = comment[consumed..].TrimStart();
         var parts = new List<string>();
-        if (m.Groups["course"].Success && m.Groups["speed"].Success)
+        if (metrics.WindMph is int speed && metrics.WindDegrees is int course)
         {
-            int course = int.Parse(m.Groups["course"].Value, CultureInfo.InvariantCulture);
-            int speed = int.Parse(m.Groups["speed"].Value, CultureInfo.InvariantCulture);
             if (speed == 0 && course == 0)
                 parts.Add("wind calm");
             else if (speed == 0)
@@ -621,29 +781,84 @@ public static partial class AprsExplain
                 parts.Add($"wind from {course}° at {speed} mph");
         }
 
-        if (m.Groups["gust"].Success)
-            parts.Add($"gust {m.Groups["gust"].Value} mph");
-        if (m.Groups["temp"].Success
-            && int.TryParse(m.Groups["temp"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ti))
+        if (metrics.GustMph is int gust)
+            parts.Add($"gust {gust} mph");
+        if (metrics.TemperatureF is int ti)
             parts.Add($"temperature {ti} °F");
-
-        if (m.Groups["rain1"].Success && m.Groups["rain1"].Value != "000")
-            parts.Add($"rain last hour {int.Parse(m.Groups["rain1"].Value, CultureInfo.InvariantCulture) / 100.0:0.##} in");
-        if (m.Groups["hum"].Success)
-        {
-            int h = int.Parse(m.Groups["hum"].Value, CultureInfo.InvariantCulture);
-            if (h == 0)
-                h = 100;
+        if (metrics.RainLastHourIn is double rain1 && rain1 > 0)
+            parts.Add($"rain last hour {rain1:0.##} in");
+        if (metrics.HumidityPercent is int h)
             parts.Add($"humidity {h}%");
-        }
-
-        if (m.Groups["baro"].Success
-            && int.TryParse(m.Groups["baro"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int baro))
-            parts.Add($"pressure {baro / 10.0:0.0} mbar");
+        if (metrics.PressureMbar is double baro)
+            parts.Add($"pressure {baro:0.0} mbar");
 
         if (parts.Count == 0)
             return false;
         text = "Weather: " + JoinList(parts) + ".";
+        return true;
+    }
+
+    /// <summary>
+    /// Parses <c>ddd/sss</c> plus letter-prefixed WX fields in any order
+    /// (<c>g</c>/<c>t</c>/<c>r</c>/<c>p</c>/<c>P</c>/<c>h</c>/<c>b</c>).
+    /// </summary>
+    static bool TryParseWeatherMetrics(string comment, out WeatherMetrics metrics, out int consumed)
+    {
+        metrics = default!;
+        consumed = 0;
+        var head = WeatherHead().Match(comment);
+        if (!head.Success)
+            return false;
+
+        int course = int.Parse(head.Groups["course"].Value, CultureInfo.InvariantCulture);
+        int speed = int.Parse(head.Groups["speed"].Value, CultureInfo.InvariantCulture);
+        string rest = comment[head.Length..];
+
+        int? gust = null, temp = null, hum = null;
+        double? rain1 = null, rain24 = null, rainMid = null, pressure = null;
+        int end = 0;
+
+        foreach (Match field in WeatherField().Matches(rest))
+        {
+            // Stop at the first non-field gap (comment / software id).
+            if (field.Index > end)
+                break;
+            string key = field.Groups["key"].Value;
+            string digits = field.Groups["digits"].Value;
+            end = field.Index + field.Length;
+            switch (key)
+            {
+                case "g" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int g):
+                    gust = g;
+                    break;
+                case "t" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int t):
+                    temp = t;
+                    break;
+                case "r" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r):
+                    rain1 = r / 100.0;
+                    break;
+                case "p" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int p):
+                    rain24 = p / 100.0;
+                    break;
+                case "P" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int P):
+                    rainMid = P / 100.0;
+                    break;
+                case "h" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int h):
+                    hum = h == 0 ? 100 : h;
+                    break;
+                case "b" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int b):
+                    pressure = b / 10.0;
+                    break;
+            }
+        }
+
+        // Require at least temperature or a calm/wind reading to call it weather.
+        if (temp is null && gust is null && hum is null && pressure is null && rain1 is null && rain24 is null && rainMid is null
+            && speed == 0 && course == 0)
+            return false;
+
+        metrics = new WeatherMetrics(course, speed, gust, temp, hum, rain1, rain24, rainMid, pressure);
+        consumed = head.Length + end;
         return true;
     }
 
@@ -682,9 +897,11 @@ public static partial class AprsExplain
     [GeneratedRegex(@"PHG(\d{4,5})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PhgCode();
 
-    [GeneratedRegex(@"^(?<course>\d{3})/(?<speed>\d{3})(?:g(?<gust>\d{3}))?(?:t(?<temp>-?\d{2,3}))?(?:r(?<rain1>\d{3}))?(?:p(?<rain24>\d{3}))?(?:P(?<rainMid>\d{3}))?(?:h(?<hum>\d{2}))?(?:b(?<baro>\d{4,5}))?",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex WeatherBlock();
+    [GeneratedRegex(@"^(?<course>\d{3})/(?<speed>\d{3})", RegexOptions.CultureInvariant)]
+    private static partial Regex WeatherHead();
+
+    [GeneratedRegex(@"(?<key>[gtprPhb])(?<digits>-?\d{2,5})", RegexOptions.CultureInvariant)]
+    private static partial Regex WeatherField();
 
     [GeneratedRegex(@"^\d{3}/\d{3}")]
     private static partial Regex CourseSpeed();
@@ -696,6 +913,17 @@ public static partial class AprsExplain
 
     sealed record PathHop(string Name, bool Used);
 
+    sealed record WeatherMetrics(
+        int WindDegrees,
+        int WindMph,
+        int? GustMph,
+        int? TemperatureF,
+        int? HumidityPercent,
+        double? RainLastHourIn,
+        double? Rain24hIn,
+        double? RainSinceMidnightIn,
+        double? PressureMbar);
+
     sealed record PositionInfo(
         double LatDegrees,
         double LonDegrees,
@@ -703,6 +931,7 @@ public static partial class AprsExplain
         char Symbol,
         bool IsWeather,
         string? Weather,
+        WeatherMetrics? Metrics,
         string? Phg,
         string Comment,
         string? Timestamp);

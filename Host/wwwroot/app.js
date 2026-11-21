@@ -671,6 +671,7 @@ async function refreshStatus() {
     }
     followCamp(status);
     paintBusyModal(status.phase, status.message, progress);
+    paintWeatherMap(status.weatherStations, status.mapLatitude, status.mapLongitude);
     paintFoldSummaries();
   } catch (ex) {
     statusLine.textContent = ex.message;
@@ -794,6 +795,14 @@ function formatListenElapsed(seconds) {
   }
   const n = Math.floor(s / 86400);
   return n === 1 ? "1 day" : `${n} days`;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function paintFoldSummaries() {
@@ -1670,6 +1679,171 @@ function paintCampSnr(status) {
   mark.style.left = `${markPct}%`;
 }
 
+let weatherMap = null;
+const weatherMarkers = new Map();
+
+function weatherPopupHtml(station) {
+  const bits = [];
+  if (Number.isFinite(station.temperatureF)) bits.push(`${station.temperatureF} °F`);
+  if (Number.isFinite(station.humidityPercent)) bits.push(`${station.humidityPercent}% RH`);
+  if (Number.isFinite(station.windMph)) {
+    const dir = Number.isFinite(station.windDegrees) ? `${station.windDegrees}° ` : "";
+    bits.push(station.windMph === 0 ? "wind calm" : `wind ${dir}${station.windMph} mph`);
+  }
+  if (Number.isFinite(station.gustMph) && station.gustMph > 0)
+    bits.push(`gust ${station.gustMph} mph`);
+  if (Number.isFinite(station.pressureMbar))
+    bits.push(`${Number(station.pressureMbar).toFixed(1)} mbar`);
+  if (Number.isFinite(station.rainLastHourIn) && station.rainLastHourIn > 0)
+    bits.push(`rain ${station.rainLastHourIn} in/hr`);
+  const heard = station.heardAt ? new Date(station.heardAt) : null;
+  const age = heard && Number.isFinite(heard.getTime())
+    ? formatListenElapsed((Date.now() - heard.getTime()) / 1000) + " ago"
+    : "";
+  return `<div class="wx-popup"><strong>${escapeHtml(station.callsign || "")}</strong>${bits.map(escapeHtml).join("<br>")}${age ? `<br><span class="quiet">${escapeHtml(age)}</span>` : ""}</div>`;
+}
+
+function weatherMarkerLabel(station) {
+  if (Number.isFinite(station.temperatureF))
+    return String(Math.round(station.temperatureF));
+  const call = String(station.callsign || "?");
+  return call.includes("-") ? call.split("-").pop() : call.slice(0, 3);
+}
+
+function ensureWeatherMap(centerLat, centerLon) {
+  const el = document.querySelector("#weather-map");
+  if (!el || typeof L === "undefined")
+    return null;
+  if (weatherMap)
+    return weatherMap;
+
+  const lat = Number.isFinite(centerLat) ? centerLat : 39.5;
+  const lon = Number.isFinite(centerLon) ? centerLon : -98.35;
+  weatherMap = L.map(el, {
+    zoomControl: true,
+    attributionControl: true
+  }).setView([lat, lon], Number.isFinite(centerLat) ? 8 : 4);
+  // OSM tiles — no API key. Fair-use for a local receiver UI; see openstreetmap.org/copyright.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>",
+    maxZoom: 19
+  }).addTo(weatherMap);
+  return weatherMap;
+}
+
+function paintWeatherMap(stations, mapLatitude, mapLongitude) {
+  const empty = document.querySelector("#weather-map-empty");
+  const mapEl = document.querySelector("#weather-map");
+  const legend = document.querySelector("#weather-map-legend");
+  if (!empty || !mapEl || !legend)
+    return;
+
+  const list = Array.isArray(stations) ? stations.filter((s) =>
+    Number.isFinite(Number(s.latitude)) && Number.isFinite(Number(s.longitude))) : [];
+
+  // Always show the map shell while listening — markers fill in as APRS frames decode.
+  mapEl.hidden = false;
+  empty.hidden = list.length > 0;
+  empty.textContent = list.length > 0
+    ? ""
+    : "Listening for APRS positions and weather on RF. Markers appear as packets decode.";
+  legend.hidden = list.length === 0;
+
+  const map = ensureWeatherMap(mapLatitude, mapLongitude);
+  if (!map) {
+    empty.hidden = false;
+    empty.textContent = "Map library did not load. Check the network and refresh.";
+    mapEl.hidden = true;
+    legend.hidden = true;
+    return;
+  }
+
+  requestAnimationFrame(() => map.invalidateSize());
+
+  const seen = new Set();
+  const bounds = [];
+  for (const station of list) {
+    const key = String(station.callsign || "").toUpperCase();
+    if (!key) continue;
+    seen.add(key);
+    const lat = Number(station.latitude);
+    const lon = Number(station.longitude);
+    bounds.push([lat, lon]);
+    const wx = station.isWeather !== false && (
+      Number.isFinite(station.temperatureF)
+      || Number.isFinite(station.humidityPercent)
+      || Number.isFinite(station.windMph)
+      || station.isWeather === true);
+    const klass = wx ? "wx-marker" : "wx-marker digi";
+    const html = `<div class="${klass}">${escapeHtml(weatherMarkerLabel(station))}</div>`;
+    const icon = L.divIcon({ className: "", html, iconSize: [34, 34], iconAnchor: [17, 17] });
+    let marker = weatherMarkers.get(key);
+    if (!marker) {
+      marker = L.marker([lat, lon], { icon }).addTo(map);
+      weatherMarkers.set(key, marker);
+    } else {
+      marker.setLatLng([lat, lon]);
+      marker.setIcon(icon);
+    }
+    marker.bindPopup(weatherPopupHtml(station));
+  }
+
+  for (const [key, marker] of [...weatherMarkers.entries()]) {
+    if (seen.has(key)) continue;
+    map.removeLayer(marker);
+    weatherMarkers.delete(key);
+  }
+
+  if (bounds.length === 1)
+    map.setView(bounds[0], Math.max(map.getZoom(), 9));
+  else if (bounds.length > 1)
+    map.fitBounds(bounds, { padding: [28, 28], maxZoom: 11 });
+
+  legend.replaceChildren(...list.map((station) => {
+    const li = document.createElement("li");
+    const call = document.createElement("span");
+    call.className = "call";
+    call.textContent = station.callsign || "";
+    li.append(call);
+    if (Number.isFinite(station.temperatureF)) {
+      const temp = document.createElement("span");
+      temp.className = "temp";
+      temp.textContent = `${station.temperatureF} °F`;
+      li.append(temp);
+    } else if (station.isWeather === false) {
+      const role = document.createElement("span");
+      role.textContent = "position";
+      li.append(role);
+    }
+    if (Number.isFinite(station.humidityPercent)) {
+      const hum = document.createElement("span");
+      hum.textContent = `${station.humidityPercent}% RH`;
+      li.append(hum);
+    }
+    if (Number.isFinite(station.windMph)) {
+      const wind = document.createElement("span");
+      wind.textContent = station.windMph === 0
+        ? "calm"
+        : `${Number.isFinite(station.windDegrees) ? station.windDegrees + "° / " : ""}${station.windMph} mph`;
+      li.append(wind);
+    }
+    const heard = station.heardAt ? new Date(station.heardAt) : null;
+    if (heard && Number.isFinite(heard.getTime())) {
+      const age = document.createElement("span");
+      age.textContent = formatListenElapsed((Date.now() - heard.getTime()) / 1000) + " ago";
+      li.append(age);
+    }
+    li.addEventListener("click", () => {
+      const marker = weatherMarkers.get(String(station.callsign || "").toUpperCase());
+      if (marker) {
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), 10));
+        marker.openPopup();
+      }
+    });
+    return li;
+  }));
+}
+
 function listenCampBody(frequencyHz, heard) {
   const body = { frequencyHz, mode: heard || "nbfm" };
   if (body.mode === "dmr") {
@@ -2111,6 +2285,7 @@ const tips = {
   "col-snr": `How far the signal stands above the noise, in decibels. Bigger is cleaner. See ${wiki("Signal-to-noise_ratio", "signal-to-noise ratio")}.`,
   "col-source": `A ${wiki("Band_plan", "band plan")} label, such as a calling frequency or “FM broadcast.” It is not a station’s name.`,
   selected: "The frequency you are hearing or camping on, with live audio and decoded text.",
+  "weather-map": `Stations that send an ${wiki("Automatic_Packet_Reporting_System", "APRS")} complete weather report while you listen on RF. Markers update from decoded packet frames only (no internet APRS-IS feed). Stale stations drop after about an hour.`,
   record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",
   transcript: `Downloads ${wiki("Morse_code", "Morse")}, ${wiki("FT8", "FT8")}, ${wiki("Radio_Data_System", "RDS")}, and ${wiki("Speech_recognition", "speech")} text as XML, with the time and which decoder wrote each line.`,
   decoded: `Letters from ${wiki("Morse_code", "Morse")}, messages from ${wiki("FT8", "FT8")} / JS8 / ${wiki("WSPR", "WSPR")} / Olivia / JTTY / VarAC (xara/zara monitor), ${wiki("Speech_recognition", "speech")}, DMR talkgroup / radio ID / alias text, D-STAR callsigns / slow-data text, and broadcast-FM ${wiki("Radio_Data_System", "RDS")} name and radio text.`,

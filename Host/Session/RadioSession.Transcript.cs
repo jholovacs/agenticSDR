@@ -206,7 +206,146 @@ public sealed partial class RadioSession
         _ => DigiListenSeconds(mode)
     };
 
-    private void AppendPacket(string text) => AppendSpan("packet", AprsExplain.Format(text), "Packet");
+    private void AppendPacket(string text)
+    {
+        NoteWeatherFromPacket(text);
+        AppendSpan("packet", AprsExplain.Format(text), "Packet");
+    }
+
+    private void NoteWeatherFromPacket(string text)
+    {
+        // Remember every uncompressed position so Ultimeter (no lat/lon) can be placed later.
+        if (AprsExplain.TryParsePositionFix(text, out AprsPositionFix fix))
+        {
+            _aprsPositions[fix.Callsign] = (fix.LatitudeDegrees, fix.LongitudeDegrees);
+            // Plot digis / houses immediately so the map is live; weather frames upgrade the pin.
+            if (!AprsExplain.TryParseWeatherReport(text, out _))
+            {
+                UpsertWeatherStation(
+                    fix.Callsign,
+                    fix.LatitudeDegrees,
+                    fix.LongitudeDegrees,
+                    null, null, null, null, null, null, null, null, null,
+                    fix.IsWeatherSymbol ? "Weather station" : null,
+                    fix.Raw,
+                    isWeather: fix.IsWeatherSymbol);
+            }
+        }
+
+        if (AprsExplain.TryParseWeatherReport(text, out AprsWeatherReport report))
+        {
+            UpsertWeatherStation(
+                report.Callsign,
+                report.LatitudeDegrees,
+                report.LongitudeDegrees,
+                report.WindDegrees,
+                report.WindMph,
+                report.GustMph,
+                report.TemperatureF,
+                report.HumidityPercent,
+                report.RainLastHourIn,
+                report.Rain24hIn,
+                report.RainSinceMidnightIn,
+                report.PressureMbar,
+                report.Comment,
+                report.Raw,
+                isWeather: true);
+            return;
+        }
+
+        // Peet Bros Ultimeter: weather without a position — reuse last heard fix for that call.
+        if (!AprsExplain.TryParseUltimeterMetrics(text, out AprsUltimeterMetrics ultimeter))
+            return;
+
+        double lat;
+        double lon;
+        if (_weatherStations.TryGetValue(ultimeter.Callsign, out AprsWeatherStation? prior))
+        {
+            lat = prior.Latitude;
+            lon = prior.Longitude;
+        }
+        else if (_aprsPositions.TryGetValue(ultimeter.Callsign, out var pos))
+        {
+            lat = pos.Lat;
+            lon = pos.Lon;
+        }
+        else
+            return;
+
+        UpsertWeatherStation(
+            ultimeter.Callsign,
+            lat,
+            lon,
+            ultimeter.WindDegrees,
+            ultimeter.WindMph,
+            ultimeter.GustMph,
+            ultimeter.TemperatureF,
+            ultimeter.HumidityPercent,
+            null,
+            null,
+            ultimeter.RainSinceMidnightIn,
+            ultimeter.PressureMbar,
+            "Ultimeter",
+            ultimeter.Raw,
+            isWeather: true);
+    }
+
+    private void UpsertWeatherStation(
+        string callsign,
+        double latitude,
+        double longitude,
+        int? windDegrees,
+        int? windMph,
+        int? gustMph,
+        int? temperatureF,
+        int? humidityPercent,
+        double? rainLastHourIn,
+        double? rain24hIn,
+        double? rainSinceMidnightIn,
+        double? pressureMbar,
+        string? comment,
+        string raw,
+        bool isWeather)
+    {
+        // Don't let a bare digi beacon wipe a richer weather pin for the same call.
+        if (!isWeather
+            && _weatherStations.TryGetValue(callsign, out AprsWeatherStation? existing)
+            && existing.IsWeather)
+            return;
+
+        _weatherStations[callsign] = new AprsWeatherStation(
+            callsign,
+            latitude,
+            longitude,
+            windDegrees,
+            windMph,
+            gustMph,
+            temperatureF,
+            humidityPercent,
+            rainLastHourIn,
+            rain24hIn,
+            rainSinceMidnightIn,
+            pressureMbar,
+            comment,
+            DateTimeOffset.UtcNow,
+            raw,
+            isWeather);
+        _aprsPositions[callsign] = (latitude, longitude);
+    }
+
+    private IReadOnlyList<AprsWeatherStation> SnapshotWeatherStations()
+    {
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow - WeatherStationTtl;
+        foreach (var pair in _weatherStations)
+        {
+            if (pair.Value.HeardAt < cutoff)
+                _weatherStations.TryRemove(pair.Key, out _);
+        }
+
+        return _weatherStations.Values
+            .OrderBy(s => s.Callsign, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
 
     private void AppendRibbit(string text) => AppendSpan("ribbit", text, "Ribbit");
 
@@ -714,7 +853,33 @@ public sealed partial class RadioSession
             return true;
         }
 
-        return Maidenhead.TryParse(options.Grid, out latitude, out longitude);
+        if (Maidenhead.TryParse(options.Grid, out latitude, out longitude))
+            return true;
+
+        // Fall back to the signed-in operator grid from the shared desk identity.
+        try
+        {
+            string path = AgenticSdr.Shared.SharedPaths.OperatorJson();
+            if (File.Exists(path))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                if (doc.RootElement.TryGetProperty("grid", out System.Text.Json.JsonElement gridEl)
+                    || doc.RootElement.TryGetProperty("Grid", out gridEl))
+                {
+                    string? grid = gridEl.GetString();
+                    if (Maidenhead.TryParse(grid, out latitude, out longitude))
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore unreadable operator files.
+        }
+
+        latitude = 0;
+        longitude = 0;
+        return false;
     }
 
     private IRadioDevice RequireDevice() =>

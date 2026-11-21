@@ -34,7 +34,10 @@ public sealed record SessionStatus(
     bool CampActivity,
     double? CampSnrDb,
     CampTune? Camp,
-    int CampRevision);
+    int CampRevision,
+    IReadOnlyList<AprsWeatherStation> WeatherStations,
+    double? MapLatitude,
+    double? MapLongitude);
 
 /// <summary>
 /// One row in the band menu. Tunable is false when the open radio cannot reach it.
@@ -175,6 +178,11 @@ public sealed partial class RadioSession(
     private int _campSquelch = 50;
     private int _radioBorrow;
     private string _lastLiveDigiBody = "";
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AprsWeatherStation> _weatherStations =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (double Lat, double Lon)> _aprsPositions =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan WeatherStationTtl = TimeSpan.FromMinutes(60);
 
     /// <summary>True while a scan, guess, inspect, or clip listen holds the radio away from camp.</summary>
     public bool RadioBorrowed => Volatile.Read(ref _radioBorrow) > 0;
@@ -185,6 +193,7 @@ public sealed partial class RadioSession(
         {
             lock (_statusGate)
             {
+                bool haveMap = TryLocation(out double mapLat, out double mapLon);
                 return new SessionStatus(
                     _device is not null,
                     _deviceName,
@@ -202,7 +211,10 @@ public sealed partial class RadioSession(
                     _campActivity,
                     _campSnrDb,
                     _campTune,
-                    _campRevision);
+                    _campRevision,
+                    SnapshotWeatherStations(),
+                    haveMap ? mapLat : null,
+                    haveMap ? mapLon : null);
             }
         }
     }

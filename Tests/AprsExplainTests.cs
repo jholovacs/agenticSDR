@@ -80,6 +80,65 @@ public class AprsExplainTests
     }
 
     [Fact]
+    public void TryParseWeatherReport_reads_scrambled_rain_field_order()
+    {
+        const string raw =
+            "W7SA-12>AP1WWX*,HELIO*,JACKPK*,WIDE2:@210512z3206.21N/11056.22W_186/000g002t054P000r000h66b10130e1w";
+        Assert.True(AprsExplain.TryParseWeatherReport(raw, out AprsWeatherReport report));
+        Assert.Equal("W7SA-12", report.Callsign);
+        Assert.Equal(186, report.WindDegrees);
+        Assert.Equal(0, report.WindMph);
+        Assert.Equal(2, report.GustMph);
+        Assert.Equal(54, report.TemperatureF);
+        Assert.Equal(66, report.HumidityPercent);
+        Assert.Equal(0.0, report.RainLastHourIn);
+        Assert.Equal(0.0, report.RainSinceMidnightIn);
+        Assert.Equal(1013.0, report.PressureMbar);
+        Assert.InRange(report.LatitudeDegrees, 32.10, 32.11);
+        Assert.InRange(report.LongitudeDegrees, -110.94, -110.93);
+    }
+
+    [Fact]
+    public void TryParseWeatherReport_rejects_digipeater()
+    {
+        Assert.False(AprsExplain.TryParseWeatherReport(
+            "CABALL>APN382:!3258.27NS10713.44W#PHG7830/W4 Digi",
+            out _));
+    }
+
+    [Fact]
+    public void TryParsePositionFix_reads_digipeater()
+    {
+        Assert.True(AprsExplain.TryParsePositionFix(
+            "N7GEE-10>APDW19:=3159.35NS11058.94W#PHG5870 Digi",
+            out AprsPositionFix fix));
+        Assert.Equal("N7GEE-10", fix.Callsign);
+        Assert.False(fix.IsWeatherSymbol);
+        Assert.InRange(fix.LatitudeDegrees, 31.98, 32.00);
+    }
+
+    [Fact]
+    public void TryParseUltimeterMetrics_reads_elpaso_logger()
+    {
+        Assert.True(AprsExplain.TryParseUltimeterMetrics(
+            "ELPASO>APN382,CABALL*,LTLFLO*,WIDE3-1:!!0000008002140000----------------0009004A00000000",
+            out AprsUltimeterMetrics m));
+        Assert.Equal("ELPASO", m.Callsign);
+        Assert.Equal(53, m.TemperatureF);
+        Assert.Equal(180, m.WindDegrees);
+    }
+
+    [Fact]
+    public void TryParseWeatherReport_accepts_explained_transcript_raw_line()
+    {
+        string explained = AprsExplain.Format(
+            "W7SA-12>AP1WWX:@210512z3206.21N/11056.22W_186/000g002t054r000p000P000h66b10130");
+        Assert.True(AprsExplain.TryParseWeatherReport(explained, out AprsWeatherReport report));
+        Assert.Equal("W7SA-12", report.Callsign);
+        Assert.Equal(54, report.TemperatureF);
+    }
+
+    [Fact]
     public void Standard_t_hash_telemetry_lists_channels_and_bits()
     {
         string english = AprsExplain.Describe(
