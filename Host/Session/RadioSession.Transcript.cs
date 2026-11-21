@@ -201,8 +201,10 @@ public sealed partial class RadioSession
         // 30 s is the LCM of Normal (15), Fast (10), Turbo (6), and Slow (30).
         RadioMode.Js8 => 30,
         RadioMode.Wspr => 120,
-        // Overlapping 4 s steps on a longer buffer so mid-block CQs still decode.
-        RadioMode.Olivia or RadioMode.Jtty => 4,
+        // Overlapping steps on a longer buffer so mid-block CQs still decode.
+        // Olivia Walsh hunt is ~1 s on a 16 s window; 6 s keeps the queue from stacking.
+        RadioMode.Olivia => 6,
+        RadioMode.Jtty => 4,
         _ => DigiListenSeconds(mode)
     };
 

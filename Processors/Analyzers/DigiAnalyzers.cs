@@ -47,10 +47,19 @@ public sealed class OliviaAnalyzer : DigiUsbAnalyzer
 
     protected override (bool Ok, string Detail) TryConfirm(float[] audio, int rate)
     {
-        string text = OliviaDecoder.Format(OliviaDecoder.Decode(audio, rate));
-        return !string.IsNullOrWhiteSpace(text)
-            ? (true, "Olivia text decoded from the capture.")
-            : (false, "Olivia envelope/dial fit; no confident text yet.");
+        // Short Analyze IQ (~2.5 s) can invent Walsh "chat" from noise; need a real block.
+        if (audio.Length < rate * 6)
+            return (false, "Olivia envelope/dial fit; capture too short to confirm keyboard text.");
+
+        var messages = OliviaDecoder.Decode(audio, rate);
+        if (messages.Count == 0)
+            return (false, "Olivia envelope/dial fit; no confident text yet.");
+
+        string shown = messages[0].Text.Trim();
+        if (shown.Length < 6)
+            return (false, "Olivia envelope/dial fit; text too short to trust.");
+
+        return (true, $"Olivia text decoded: “{shown}”.");
     }
 }
 

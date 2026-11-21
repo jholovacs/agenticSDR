@@ -639,7 +639,9 @@ public sealed class Demodulator
         if (!_ft8OrientationLocked)
         {
             // Wait for ~0.25 s of baseband so the first noisy tuner block cannot lock the wrong sideband.
-            if (baseband.Count >= Math.Max(64, _audioRate / 4))
+            int quarter = Math.Max(64, _audioRate / 4);
+            int full = Math.Max(quarter, _audioRate);
+            if (baseband.Count >= quarter)
             {
                 double plain = UsbOverLsb(baseband, conjugate: false);
                 double flipped = UsbOverLsb(baseband, conjugate: true);
@@ -653,7 +655,17 @@ public sealed class Demodulator
                     _ft8Conjugate = false;
                     _ft8OrientationLocked = true;
                 }
-                // else keep default (no conjugate) until a later block is decisive
+                else if (baseband.Count >= full)
+                {
+                    // Olivia/FT8 on HF direct-sampling: a weak lock is better than staying unlocked forever
+                    // (wrong default sideband wipes the USB tone window and keyboard text never appears).
+                    double ratio = Math.Max(plain, flipped) / Math.Max(1e-18, Math.Min(plain, flipped));
+                    if (ratio >= 1.12)
+                    {
+                        _ft8Conjugate = flipped > plain;
+                        _ft8OrientationLocked = true;
+                    }
+                }
             }
         }
 

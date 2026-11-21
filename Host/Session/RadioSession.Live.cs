@@ -125,6 +125,13 @@ public sealed partial class RadioSession
                 AppendNote("DMR framing found.");
             if (mode == RadioMode.Dstar)
                 AppendNote("Listening for D-STAR radio headers (AMBE voice is not decoded).");
+            if (mode == RadioMode.Olivia)
+            {
+                AppendNote(
+                    device.DirectSampling
+                        ? "Olivia on HF direct sampling — locking USB orientation, then reading 8/250 keyboard text (often needs ~10–20 s of a clear CQ)."
+                        : "Olivia listens for 8/250 (then wider profiles). A clear CQ usually needs about 10–20 s in the buffer.");
+            }
             // USB/LSB on a digi watering hole will play tones but never decode text.
             if (mode is RadioMode.Usb or RadioMode.Lsb
                 && Region2BandPlan.TryAnyDigiDial(tuneHz, out RadioMode dialMode, out _))

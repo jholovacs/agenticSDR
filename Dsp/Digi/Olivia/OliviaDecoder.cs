@@ -77,6 +77,10 @@ public static class OliviaDecoder
         if (!HasToneEnergy(wave))
             return [];
 
+        // Pull the tone stack onto the calling cursor before the fine hunt (dongle ppm / LO residual).
+        (wave, _) = DialFrequency.AlignToCenter(
+            wave, SampleRate, CenterHz, BandwidthHz * 0.5, DialFrequency.DefaultSearchHz + 250);
+
         // Hunt the tone stack across the usual USB cursor range (1000–1500) plus dongle residual.
         var centers = new List<double>();
         var seen = new HashSet<int>();
@@ -88,6 +92,7 @@ public static class OliviaDecoder
             centers.Add(hz);
         }
 
+        Offer(CenterHz);
         foreach (double nominal in NominalCenters)
         {
             double offset = DialFrequency.EstimateBandOffsetHz(
@@ -261,8 +266,8 @@ public static class OliviaDecoder
         for (int i = 0; i < wave.Length; i++)
             sum += wave[i] * wave[i];
         double rms = Math.Sqrt(sum / Math.Max(1, wave.Length));
-        // Only lift truly quiet HF digi; leave normal/noisy clips alone so noise does not get “boosted” into false Walsh peaks.
-        if (rms < 1e-9 || rms > 0.05)
+        // Only lift quiet HF digi; leave hot clips alone so noise does not get “boosted” into false Walsh peaks.
+        if (rms < 1e-9 || rms > 0.08)
             return;
         float gain = (float)(0.12 / rms);
         for (int i = 0; i < wave.Length; i++)
@@ -283,7 +288,7 @@ public static class OliviaDecoder
                 printable++;
             if (ch == ' ')
                 spaces++;
-            if (char.IsLetterOrDigit(ch) || ch is ' ' or '.' or ',' or '?' or '!' or '/' or '-')
+            if (char.IsLetterOrDigit(ch) || ch is ' ' or '.' or ',' or '?' or '!' or '/' or '-' or ':' or '@' or '=')
                 letters++;
             else if (ch is >= ' ' and <= '~')
                 weird++;
@@ -291,8 +296,8 @@ public static class OliviaDecoder
 
         if (printable < 4)
             return false;
-        // Real keyboard chat is mostly letters/spaces; any bracket/symbol soup is noise.
-        if (letters < printable * 0.75 || weird > 0)
+        // Real keyboard chat is mostly letters/spaces; bracket/symbol soup is noise.
+        if (letters < printable * 0.72 || weird > printable * 0.15)
             return false;
 
         int upper = 0, lower = 0, digits = 0;
