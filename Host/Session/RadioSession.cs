@@ -158,6 +158,9 @@ public sealed partial class RadioSession(
     private string? _liveText;
     private readonly List<TranscriptSpan> _transcript = [];
     private PipelineStageInfo[] _pipeline = [];
+    private readonly object _liveChainGate = new();
+    private SignalChain? _liveChain;
+    private RadioMode _liveMode = RadioMode.Unknown;
     private string _morseWindow = "";
     private double? _transcriptHz;
     private bool _directSampling;

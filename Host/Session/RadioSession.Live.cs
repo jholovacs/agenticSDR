@@ -140,28 +140,26 @@ public sealed partial class RadioSession
                     $"This frequency is a published {dialMode} dial. Choose {dialMode} in Mode (or Known channels) to decode text — {mode} only plays the audio.");
             }
 
-            SignalChain? chain = null;
             SignalChain? sideOlivia = null;
             try
             {
-                chain = OpenPipeline(mode, pipeline);
+                InstallLivePipeline(mode, pipeline);
                 // USB on an Olivia dial: decode on a second off-thread chain so voice Morse/speech stay intact.
                 if (mode == RadioMode.Usb
                     && Region2BandPlan.TryPublishedStation(tuneHz, RadioMode.Olivia, out _, out _))
                 {
-                    sideOlivia = OpenPipeline(RadioMode.Olivia, null);
+                    sideOlivia = CreatePipeline(RadioMode.Olivia, null);
                     AppendNote("Olivia dial on USB — decoding in the background. Mode Olivia uses a wider USB window.");
                 }
 
                 await PumpLiveAsync(
                     device, loHz, shiftHz, tuneHz, mode, demod, response?.Body, fanout, squelch,
-                    (mode == RadioMode.Dmr && !dmrFramed) || mode == RadioMode.Dstar, dmr, chain, sideOlivia, ct);
+                    (mode == RadioMode.Dmr && !dmrFramed) || mode == RadioMode.Dstar, dmr, sideOlivia, ct);
             }
             finally
             {
                 sideOlivia?.Dispose();
-                chain?.Dispose();
-                ClearPipeline();
+                ClearLivePipeline();
                 if (EasedGain(demodMode))
                     RestoreGain(device);
                 ReleaseTuner(device);
@@ -192,24 +190,113 @@ public sealed partial class RadioSession
         }
     }
 
-    private SignalChain? OpenPipeline(RadioMode mode, IReadOnlyList<string>? overrideIds)
+    /// <summary>
+    /// Build a chain. <paramref name="overrideIds"/> null = mode default; empty = no decoders.
+    /// </summary>
+    private SignalChain? CreatePipeline(RadioMode mode, IReadOnlyList<string>? overrideIds)
     {
         try
         {
-            SignalChain? chain = overrideIds is { Count: > 0 }
-                ? processors.CreateChain(overrideIds, mode)
-                : processors.TryCreateDefault(mode);
-            lock (_statusGate)
-                _pipeline = chain?.Stages.ToArray() ?? [];
-            return chain;
+            if (overrideIds is null)
+                return processors.TryCreateDefault(mode);
+            if (overrideIds.Count == 0)
+                return null;
+            return processors.CreateChain(overrideIds, mode);
         }
         catch (Exception ex)
         {
             AppendNote("Pipeline was not started. " + ex.Message);
-            lock (_statusGate)
-                _pipeline = [];
             return null;
         }
+    }
+
+    private void InstallLivePipeline(RadioMode mode, IReadOnlyList<string>? overrideIds)
+    {
+        SignalChain? chain = CreatePipeline(mode, overrideIds);
+        SignalChain? old;
+        lock (_liveChainGate)
+        {
+            old = _liveChain;
+            _liveChain = chain;
+            _liveMode = mode;
+        }
+
+        lock (_statusGate)
+            _pipeline = chain?.Stages.ToArray() ?? [];
+        old?.Dispose();
+    }
+
+    /// <summary>Hot-swap decoders while audio keeps playing (pipeline editor × / add / reorder).</summary>
+    public bool TrySetLivePipeline(IReadOnlyList<string> ids)
+    {
+        lock (_statusGate)
+        {
+            // Live explore and camp both report phase "listening".
+            if (!string.Equals(_phase, "listening", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        RadioMode mode;
+        lock (_liveChainGate)
+            mode = _liveMode;
+        if (mode == RadioMode.Unknown)
+            return false;
+
+        string[] cleaned = ids
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Where(ModePipelines.IsKnownId)
+            .ToArray();
+
+        SignalChain? chain = CreatePipeline(mode, cleaned);
+        SignalChain? old;
+        lock (_liveChainGate)
+        {
+            old = _liveChain;
+            _liveChain = chain;
+        }
+
+        lock (_statusGate)
+        {
+            _pipeline = chain?.Stages.ToArray() ?? [];
+            _morseWindow = "";
+        }
+
+        old?.Dispose();
+        AppendNote(cleaned.Length == 0
+            ? "Pipeline cleared — no decoders on this listen."
+            : "Pipeline updated: " + string.Join(", ", cleaned) + ".");
+        return true;
+    }
+
+    private SignalChain? CurrentLiveChain()
+    {
+        lock (_liveChainGate)
+            return _liveChain;
+    }
+
+    private void ClearLivePipeline()
+    {
+        SignalChain? old;
+        lock (_liveChainGate)
+        {
+            old = _liveChain;
+            _liveChain = null;
+            _liveMode = RadioMode.Unknown;
+        }
+
+        lock (_statusGate)
+            _pipeline = [];
+        old?.Dispose();
+    }
+
+    /// <summary>Scan / clip listen still uses a one-shot chain (not the live hot-swap slot).</summary>
+    private SignalChain? OpenPipeline(RadioMode mode, IReadOnlyList<string>? overrideIds)
+    {
+        SignalChain? chain = CreatePipeline(mode, overrideIds);
+        lock (_statusGate)
+            _pipeline = chain?.Stages.ToArray() ?? [];
+        return chain;
     }
 
     private void ClearPipeline()
@@ -220,8 +307,26 @@ public sealed partial class RadioSession
 
     private void PublishPipelineTexts(SignalChain chain, RadioMode mode, ref bool digiHeader)
     {
-        foreach (AttributedText text in chain.DrainTexts())
-            ApplyAttributed(text, mode, ref digiHeader);
+        try
+        {
+            foreach (AttributedText text in chain.DrainTexts())
+                ApplyAttributed(text, mode, ref digiHeader);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Chain was swapped out while this pump iteration still held a reference.
+        }
+    }
+
+    private static void TrySubmitLive(SignalChain chain, SignalFrame frame)
+    {
+        try
+        {
+            chain.TrySubmit(frame);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private void ApplyAttributed(AttributedText text, RadioMode mode, ref bool digiHeader)
@@ -279,7 +384,6 @@ public sealed partial class RadioSession
         bool squelch,
         bool recheckDmr,
         DmrFilter dmr,
-        SignalChain? chain,
         SignalChain? sideOlivia,
         CancellationToken cancellationToken)
     {
@@ -549,6 +653,9 @@ public sealed partial class RadioSession
             });
             varacWorker?.Drain((_, text) => AppendDigiLines(RadioMode.Varac, text, ref digiHeader));
 
+            // Hot-swappable: pipeline editor updates replace this mid-listen.
+            SignalChain? chain = CurrentLiveChain();
+
             if (mode == RadioMode.Wbfm)
             {
                 string[] rdsLines = demod.TakeRds().ToArray();
@@ -587,7 +694,7 @@ public sealed partial class RadioSession
                         var frame = SignalFrame.FromAudio(recent.ToArray(), rate, 1);
                         if (rdsLines.Length > 0)
                             frame.Meta["rdsLines"] = rdsLines;
-                        chain.TrySubmit(frame);
+                        TrySubmitLive(chain, frame);
                         nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                     }
                 }
@@ -601,7 +708,7 @@ public sealed partial class RadioSession
                 AppendLimited(recent, fresh, remember);
                 if (DateTime.UtcNow >= nextText)
                 {
-                    chain.TrySubmit(SignalFrame.FromAudio(recent.ToArray(), rate));
+                    TrySubmitLive(chain, SignalFrame.FromAudio(recent.ToArray(), rate));
                     nextText = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 }
             }
@@ -611,7 +718,7 @@ public sealed partial class RadioSession
                 AppendLimited(recent, mono, sideband ? 8 * rate : remember);
                 if (recent.Count >= rate && DateTime.UtcNow >= nextMorse)
                 {
-                    chain.TrySubmit(SignalFrame.FromAudio(recent.ToArray(), rate));
+                    TrySubmitLive(chain, SignalFrame.FromAudio(recent.ToArray(), rate));
                     nextMorse = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 }
             }
@@ -671,7 +778,7 @@ public sealed partial class RadioSession
                                 digiPeriod.RemoveRange(0, digiStep);
                             float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
                             digiPeriod.RemoveRange(0, digiStep);
-                            chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                            TrySubmitLive(chain, SignalFrame.FromAudio(block, rate));
                         }
                     }
                 }
@@ -687,7 +794,7 @@ public sealed partial class RadioSession
                         {
                             digiSinceSubmit = 0;
                             // Off-thread SignalChain worker runs Olivia/JTTY; DropOldest if still busy.
-                            chain.TrySubmit(SignalFrame.FromAudio(digiPeriod.ToArray(), rate));
+                            TrySubmitLive(chain, SignalFrame.FromAudio(digiPeriod.ToArray(), rate));
                         }
                     }
                     else if (digiPeriod.Count >= digiStep)
@@ -696,7 +803,7 @@ public sealed partial class RadioSession
                             digiPeriod.RemoveRange(0, digiStep);
                         float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
                         digiPeriod.RemoveRange(0, digiStep);
-                        chain.TrySubmit(SignalFrame.FromAudio(block, rate));
+                        TrySubmitLive(chain, SignalFrame.FromAudio(block, rate));
                     }
                 }
             }
@@ -704,8 +811,9 @@ public sealed partial class RadioSession
         }
         finally
         {
-            if (chain is not null)
-                PublishPipelineTexts(chain, mode, ref digiHeader);
+            SignalChain? ending = CurrentLiveChain();
+            if (ending is not null)
+                PublishPipelineTexts(ending, mode, ref digiHeader);
             if (sideOlivia is not null)
                 PublishPipelineTexts(sideOlivia, RadioMode.Olivia, ref digiHeader);
             packetWorker?.Drain((kind, text) => { if (kind == "packet") AppendPacket(text); });

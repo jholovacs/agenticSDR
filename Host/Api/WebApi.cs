@@ -311,11 +311,18 @@ public static class WebApi
             RadioMode parsed = ModeClassifier.Parse(mode);
             return Results.Ok(new { mode = parsed.ToString(), pipeline = ModePipelines.DefaultIds(parsed) });
         });
-        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, string? wbfmProgram, string? pipeline, HttpContext http, RadioSession session, CancellationToken ct) =>
+        app.MapPut("/api/live/pipeline", (LivePipelineBody? body, RadioSession session) =>
+        {
+            string[] stages = body?.Pipeline ?? [];
+            if (!session.TrySetLivePipeline(stages))
+                return Results.Conflict(new { error = "No live listen is running." });
+            return Results.Ok(new { pipeline = stages });
+        });
+        app.MapGet("/api/live", async (double frequencyHz, string? mode, int? colorCode, int? slot, int? talkgroup, string? wbfmProgram, string? pipeline, bool? pipelineSet, HttpContext http, RadioSession session, CancellationToken ct) =>
         {
             try
             {
-                IReadOnlyList<string>? stages = ParsePipelineQuery(pipeline);
+                IReadOnlyList<string>? stages = ParsePipelineQuery(pipeline, pipelineSet == true);
                 await session.WriteLiveAsync(frequencyHz, mode, new DmrFilter(colorCode, slot, talkgroup), http.Response, ct, wbfmProgram, stages);
             }
             catch (OperationCanceledException)
@@ -451,17 +458,24 @@ public static class WebApi
         }
     }
 
-    private static IReadOnlyList<string>? ParsePipelineQuery(string? pipeline)
+    /// <summary>
+    /// Null = mode default. Empty list = intentionally no decoders (editor cleared the pipeline).
+    /// </summary>
+    private static IReadOnlyList<string>? ParsePipelineQuery(string? pipeline, bool explicitEmpty = false)
     {
         if (string.IsNullOrWhiteSpace(pipeline))
-            return null;
+            return explicitEmpty ? Array.Empty<string>() : null;
         string[] parts = pipeline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return parts.Length == 0 ? null : parts;
+        return parts.Length == 0 ? (explicitEmpty ? Array.Empty<string>() : null) : parts;
     }
 }
 
+/// <summary>Body of PUT /api/live/pipeline. Empty array clears all decoders for the current listen.</summary>
+public sealed record LivePipelineBody(string[]? Pipeline);
+
 /// <summary>Body of POST /api/open. Index is the position from the device list.</summary>
 public sealed record OpenBody(int? Index);
+
 /// <summary>Body of PUT /api/radio/ppm. Index is the device list position; Ppm is crystal correction (−500…500).</summary>
 public sealed record PpmBody(int Index, int Ppm);
 /// <summary>Body of POST /api/radio/simulate-transmit. Enables the shared test TX facade.</summary>

@@ -570,8 +570,7 @@ function renderPipelineEditor() {
     remove.textContent = "×";
     remove.addEventListener("click", () => {
       pipelineIds = pipelineIds.filter((_, i) => i !== index);
-      pipelineDirty = true;
-      renderPipelineEditor();
+      applyPipelineEdit();
     });
     item.append(up, down, remove);
     list.append(item);
@@ -585,8 +584,20 @@ function movePipeline(index, delta) {
   const [item] = copy.splice(index, 1);
   copy.splice(next, 0, item);
   pipelineIds = copy;
+  applyPipelineEdit();
+}
+
+/** Keep the live listen chain in sync when the editor changes mid-listen. */
+function applyPipelineEdit() {
   pipelineDirty = true;
   renderPipelineEditor();
+  if (!liveAbort)
+    return;
+  api("/api/live/pipeline", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pipeline: pipelineIds.slice() })
+  }).catch((ex) => showError(ex.message || String(ex)));
 }
 
 async function loadProcessorCatalog() {
@@ -1500,8 +1511,10 @@ async function listen(explicitMode) {
   if (sendMode === "wbfm" || document.querySelector("#listen-mode").value === "wbfm" || nextWbfm !== "main") {
     params.set("wbfmProgram", nextWbfm);
   }
-  if (pipelineDirty && pipelineIds.length > 0)
+  if (pipelineDirty) {
     params.set("pipeline", pipelineIds.join(","));
+    params.set("pipelineSet", "true");
+  }
   try {
     const response = await fetch(`/api/live?${params}`, { signal: controller.signal });
     if (token !== listenToken) return;
@@ -1999,12 +2012,13 @@ document.querySelector("#pipeline-add-btn")?.addEventListener("click", () => {
   const id = document.querySelector("#pipeline-add")?.value;
   if (!id) return;
   pipelineIds = pipelineIds.concat(id);
-  pipelineDirty = true;
-  renderPipelineEditor();
+  applyPipelineEdit();
 });
-document.querySelector("#pipeline-reset")?.addEventListener("click", () => {
+document.querySelector("#pipeline-reset")?.addEventListener("click", async () => {
   const hear = document.querySelector("#listen-mode")?.value || mode.value || "auto";
-  syncPipelineToMode(hear).catch(() => {});
+  await syncPipelineToMode(hear).catch(() => {});
+  if (liveAbort)
+    applyPipelineEdit();
 });
 for (const id of ["#dmr-color", "#dmr-slot", "#dmr-tg"]) {
   document.querySelector(id).addEventListener("change", () => {
