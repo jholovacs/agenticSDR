@@ -21,6 +21,12 @@ public class AprsExplainTests
         "LTLFLO",
         "digipeater",
         "Deming")]
+    // On-air form with overlay X plus a spare '/' before longitude (would otherwise miss the map).
+    [InlineData(
+        "LTLFLO>APN382:!3211.64NX/10736.34W# WIDE2_-N, NM2-N Little Flooritarita, Deming",
+        "LTLFLO",
+        "digipeater",
+        "Deming")]
     [InlineData(
         "ELPASO>APN382,CABALL*,LTLFLO*,WIDE3-1:!!0000008002140000----------------0009004A00000000",
         "ELPASO",
@@ -99,6 +105,26 @@ public class AprsExplainTests
     }
 
     [Fact]
+    public void TryParseWeatherReport_accepts_dotted_unknown_fields()
+    {
+        const string raw =
+            "KG7KID-4>APRS,HELIO*,WIDE2:@211201z3218.27N/10930.35W_.../...g...t...r000p000P000h..b00000.DsVP";
+        Assert.True(AprsExplain.TryParseWeatherReport(raw, out AprsWeatherReport report));
+        Assert.Equal("KG7KID-4", report.Callsign);
+        Assert.Null(report.WindDegrees);
+        Assert.Null(report.WindMph);
+        Assert.Null(report.TemperatureF);
+        Assert.Null(report.HumidityPercent);
+        Assert.Null(report.PressureMbar);
+        Assert.Equal(0.0, report.RainLastHourIn);
+        Assert.Equal(0.0, report.Rain24hIn);
+        Assert.Equal(0.0, report.RainSinceMidnightIn);
+        Assert.Equal("DsVP", report.Comment);
+        Assert.InRange(report.LatitudeDegrees, 32.30, 32.31);
+        Assert.InRange(report.LongitudeDegrees, -109.51, -109.50);
+    }
+
+    [Fact]
     public void TryParseWeatherReport_rejects_digipeater()
     {
         Assert.False(AprsExplain.TryParseWeatherReport(
@@ -115,6 +141,33 @@ public class AprsExplainTests
         Assert.Equal("N7GEE-10", fix.Callsign);
         Assert.False(fix.IsWeatherSymbol);
         Assert.InRange(fix.LatitudeDegrees, 31.98, 32.00);
+    }
+
+    [Fact]
+    public void TryParsePositionFix_accepts_overlay_with_extra_slash()
+    {
+        Assert.True(AprsExplain.TryParsePositionFix(
+            "LTLFLO>APN382:!3211.64NX/10736.34W# WIDE2_-N, NM2-N Little Flooritarita, Deming",
+            out AprsPositionFix fix));
+        Assert.Equal("LTLFLO", fix.Callsign);
+        Assert.InRange(fix.LatitudeDegrees, 32.19, 32.20);
+        Assert.InRange(fix.LongitudeDegrees, -107.61, -107.60);
+    }
+
+    [Fact]
+    public void TryParseGridFix_plots_status_maidenhead_without_lat_lon()
+    {
+        Assert.True(AprsExplain.TryParseGridFix(
+            "KJ5SKJ>APRS,WIDE1-1:>EM13dd listening",
+            out AprsGridFix fix));
+        Assert.Equal("KJ5SKJ", fix.Callsign);
+        Assert.Equal("EM13DD", fix.Grid);
+        Assert.True(Maidenhead.TryParse("EM13DD", out double lat, out double lon));
+        Assert.Equal(lat, fix.LatitudeDegrees, 5);
+        Assert.Equal(lon, fix.LongitudeDegrees, 5);
+        Assert.False(AprsExplain.TryParseGridFix(
+            "N7GEE-10>APDW19:=3159.35NS11058.94W#PHG5870 Digi",
+            out _));
     }
 
     [Fact]

@@ -28,6 +28,14 @@ public sealed record AprsPositionFix(
     bool IsWeatherSymbol,
     string Raw);
 
+/// <summary>APRS status/message with a Maidenhead square but no lat/lon — plot the square center.</summary>
+public sealed record AprsGridFix(
+    string Callsign,
+    string Grid,
+    double LatitudeDegrees,
+    double LongitudeDegrees,
+    string Raw);
+
 /// <summary>Peet Bros Ultimeter metrics without a position (position comes from a prior fix).</summary>
 public sealed record AprsUltimeterMetrics(
     string Callsign,

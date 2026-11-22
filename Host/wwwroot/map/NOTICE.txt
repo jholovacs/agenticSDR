@@ -1,0 +1,12 @@
+Natural Earth vector data (public domain)
+https://www.naturalearthdata.com/
+https://github.com/nvkelso/natural-earth-vector
+
+Bundled offline basemap layers (no tile servers):
+- land.geojson — ne_110m_land
+- lakes.geojson — ne_110m_lakes
+- rivers.geojson — ne_110m_rivers_lake_centerlines
+- countries.geojson — ne_50m_admin_0_boundary_lines_land (international boundaries)
+- states.geojson — ne_110m_admin_1_states_provinces_lines
+- country-labels.geojson / state-labels.geojson — label points derived from Natural Earth admin polygons
+- peaks.geojson — major mountains from ne_50m_geography_regions_elevation_points (elevation ASL)

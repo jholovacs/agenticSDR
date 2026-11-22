@@ -144,7 +144,8 @@ public static class Region2BandPlan
                 Call("6 m WSPR", 50_293_000, RadioMode.Wspr, 2_000),
                 Call("6 m VarAC", 50_330_000, RadioMode.Varac, 2_500),
                 Call("6 m SSB calling", 50_125_000, RadioMode.Usb, 3_000),
-                Call("6 m FM calling", 52_525_000, RadioMode.Nbfm, 7_500)
+                Call("6 m FM calling", 52_525_000, RadioMode.Nbfm, 7_500),
+                Call("6 m packet", 50_620_000, RadioMode.Packet, 7_500)
             ]),
         Band("2m", "2 m", 144_000_000, 148_000_000,
             [
@@ -166,6 +167,12 @@ public static class Region2BandPlan
                 Call("2 m SSB calling", 144_200_000, RadioMode.Usb, 3_000),
                 Call("2 m VarAC FM", 144_950_000, RadioMode.Nbfm, 7_500),
                 Call("2 m APRS packet", 144_390_000, RadioMode.Packet, 7_500),
+                // Traditional North American 1200-baud packet simplex cluster (odd 10 kHz).
+                Call("2 m packet 145.01", 145_010_000, RadioMode.Packet, 7_500),
+                Call("2 m packet 145.03", 145_030_000, RadioMode.Packet, 7_500),
+                Call("2 m packet 145.05", 145_050_000, RadioMode.Packet, 7_500),
+                Call("2 m packet 145.07", 145_070_000, RadioMode.Packet, 7_500),
+                Call("2 m packet 145.09", 145_090_000, RadioMode.Packet, 7_500),
                 Call("2 m ISS APRS", 145_825_000, RadioMode.Packet, DopplerFilter.VhfHalfWindowHz),
                 Call("2 m ISS voice downlink", 145_800_000, RadioMode.Nbfm, DopplerFilter.VhfHalfWindowHz),
                 Call("2 m national FM simplex calling", 146_520_000, RadioMode.Nbfm, 7_500)
@@ -177,6 +184,7 @@ public static class Region2BandPlan
             ],
             [
                 Call("1.25 m FT8", 222_065_000, RadioMode.Ft8, 3_600),
+                Call("1.25 m packet", 223_400_000, RadioMode.Packet, 7_500),
                 Call("1.25 m FM calling", 223_500_000, RadioMode.Nbfm, 7_500)
             ]),
         Band("70cm", "70 cm", 420_000_000, 450_000_000,
@@ -286,7 +294,7 @@ public static class Region2BandPlan
             .ToArray();
     }
 
-    /// <summary>CB, GMRS, NOAA weather, Marine, ISS, and published digimode dials for the Known channels panel.</summary>
+    /// <summary>CB, GMRS, NOAA weather, Marine, ISS, packet/APRS, and published digimode dials for the Known channels panel.</summary>
     public static IReadOnlyList<KnownChannelGroup> KnownServiceChannels()
     {
         string[] ids = ["cb", "gmrs", "noaa", "marine"];
@@ -325,6 +333,7 @@ public static class Region2BandPlan
         }
 
         AddIssGroup(groups);
+        AddDigiGroup(groups, "packet", "Packet", RadioMode.Packet);
         AddDigiGroup(groups, "ft8", "FT8", RadioMode.Ft8);
         AddDigiGroup(groups, "js8", "JS8", RadioMode.Js8);
         AddDigiGroup(groups, "olivia", "Olivia", RadioMode.Olivia);

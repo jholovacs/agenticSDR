@@ -45,7 +45,7 @@ public class BandPlanTests
     public void Known_service_channels_list_cb_gmrs_noaa_marine_iss_and_digi()
     {
         IReadOnlyList<KnownChannelGroup> groups = Region2BandPlan.KnownServiceChannels();
-        Assert.Equal(["cb", "gmrs", "noaa", "marine", "iss", "ft8", "js8", "olivia", "jtty", "wspr", "varac"], groups.Select(group => group.Id).ToArray());
+        Assert.Equal(["cb", "gmrs", "noaa", "marine", "iss", "packet", "ft8", "js8", "olivia", "jtty", "wspr", "varac"], groups.Select(group => group.Id).ToArray());
         Assert.Contains(groups.Single(group => group.Id == "cb").Channels, channel => channel.Label == "19 highway" && channel.FrequencyHz == 27_185_000 && channel.Mode == "am");
         Assert.Contains(groups.Single(group => group.Id == "noaa").Channels, channel => channel.Label == "WX1" && channel.FrequencyHz == 162_550_000 && channel.Mode == "nbfm");
         Assert.Contains(groups.Single(group => group.Id == "marine").Channels, channel => channel.Label == "16 distress calling" && channel.FrequencyHz == 156_800_000 && channel.Mode == "nbfm");
@@ -53,6 +53,8 @@ public class BandPlanTests
         Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.Label == "voice downlink" && channel.FrequencyHz == 145_800_000 && channel.Mode == "nbfm");
         Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.Label == "APRS" && channel.FrequencyHz == 145_825_000 && channel.Mode == "packet");
         Assert.Contains(groups.Single(group => group.Id == "iss").Channels, channel => channel.FrequencyHz == 437_800_000 && channel.Mode == "nbfm");
+        Assert.Contains(groups.Single(group => group.Id == "packet").Channels, channel => channel.FrequencyHz == 144_390_000 && channel.Mode == "packet");
+        Assert.Contains(groups.Single(group => group.Id == "packet").Channels, channel => channel.FrequencyHz == 145_010_000 && channel.Mode == "packet");
         Assert.DoesNotContain(groups.Single(group => group.Id == "gmrs").Channels, channel => channel.Name.Contains("input", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(22, groups.Single(group => group.Id == "gmrs").Channels.Count);
         Assert.Contains(groups.Single(group => group.Id == "ft8").Channels, channel => channel.FrequencyHz == 28_074_000 && channel.Mode == "ft8" && channel.Label.Contains("10 m", StringComparison.Ordinal));

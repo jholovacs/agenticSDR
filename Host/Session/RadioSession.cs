@@ -141,6 +141,7 @@ public sealed partial class RadioSession(
     AntennaStore antennas,
     RadioPreferenceStore radioPreference,
     RadioCorrectionStore radioCorrections,
+    UiPrefsStore uiPrefs,
     ILogger<RadioSession> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);

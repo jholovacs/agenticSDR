@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Station map — Agentic SDR</title>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="any">
+  <link rel="stylesheet" href="/app.css?v=50">
+  <link rel="stylesheet" href="/lib/leaflet/leaflet.css">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #12100e;
+      color: #e8e0d4;
+      font: 15px/1.4 "Segoe UI", system-ui, sans-serif;
+    }
+    .popout-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    .popout-bar {
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 10px 18px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #2c241c;
+      background: #1a1612;
+      z-index: 2;
+    }
+    .popout-bar h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 650;
+    }
+    .popout-bar .meta {
+      color: #9a8f82;
+      font-size: 0.9rem;
+    }
+    .popout-bar .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+    .popout-bar .home-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      align-items: end;
+      font-size: 0.85rem;
+      color: #9a8f82;
+    }
+    .popout-bar .home-fields label {
+      display: grid;
+      gap: 2px;
+    }
+    .popout-bar .home-fields input {
+      width: 5.5rem;
+      padding: 4px 6px;
+      border: 1px solid #3a3228;
+      border-radius: 6px;
+      background: #12100e;
+      color: #e8e0d4;
+      font: inherit;
+    }
+    .popout-bar .home-fields #map-home-grid { width: 4.5rem; text-transform: uppercase; }
+    .popout-bar button {
+      appearance: none;
+      border: 1px solid #3a3228;
+      background: #241e18;
+      color: #e8e0d4;
+      border-radius: 8px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .popout-bar button:hover { border-color: #6e6458; }
+    .popout-stage {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+    }
+    /* Fill the stage completely — beat app.css’s 280px desk map height and Leaflet’s relative positioning. */
+    #weather-map.weather-map,
+    #weather-map.leaflet-container,
+    #weather-map.station-map-popout {
+      position: absolute !important;
+      inset: 0 !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-sizing: border-box !important;
+    }
+    #weather-map .leaflet-pane,
+    #weather-map .leaflet-map-pane,
+    #weather-map .leaflet-overlay-pane,
+    #weather-map .leaflet-overlay-pane svg {
+      max-width: none !important;
+    }
+    #weather-map-empty {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 500;
+      margin: 0;
+      max-width: min(28rem, calc(100% - 24px));
+      padding: 8px 12px;
+      border: 1px solid #2c241c;
+      border-radius: 8px;
+      background: rgba(26, 22, 18, 0.92);
+      color: #9a8f82;
+      pointer-events: none;
+    }
+    #weather-map-empty[hidden] { display: none !important; }
+    .popout-legend-wrap {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      z-index: 500;
+      width: min(22rem, calc(100% - 20px));
+      max-height: min(40%, 320px);
+      overflow: auto;
+      overscroll-behavior: contain;
+      border: 1px solid #2c241c;
+      border-radius: 10px;
+      background: rgba(26, 22, 18, 0.92);
+      padding: 8px 10px;
+      box-sizing: border-box;
+      pointer-events: auto;
+    }
+    .popout-legend-wrap:has(#weather-map-legend[hidden]) {
+      display: none;
+    }
+    .weather-map-legend { margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="popout-shell">
+    <header class="popout-bar">
+      <h1>Station map</h1>
+      <span id="station-map-aside" class="meta"></span>
+      <span id="popout-status" class="meta">Connecting…</span>
+      <div class="home-fields">
+        <label>lat <input id="map-home-lat" inputmode="decimal" placeholder="32.5" autocomplete="off"></label>
+        <label>lon <input id="map-home-lon" inputmode="decimal" placeholder="-107" autocomplete="off"></label>
+        <label>grid <input id="map-home-grid" placeholder="DM62" maxlength="6" autocomplete="off" spellcheck="false"></label>
+        <button id="map-home-save" type="button">Set home</button>
+      </div>
+      <div class="actions">
+        <button id="fit-all" type="button">Fit all</button>
+        <button id="reload" type="button">Refresh</button>
+      </div>
+    </header>
+    <div class="popout-stage">
+      <div id="weather-map" class="weather-map"></div>
+      <p id="weather-map-empty" class="source">Listening for APRS weather, positions, and digimode grids on RF.</p>
+      <div class="popout-legend-wrap">
+        <ul id="weather-map-legend" class="weather-map-legend" hidden></ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="/lib/leaflet/leaflet.js"></script>
+  <script src="/station-map.js?v=14"></script>
+  <script>
+    const statusEl = document.querySelector("#popout-status");
+    const emptyEl = document.querySelector("#weather-map-empty");
+    const latEl = document.querySelector("#map-home-lat");
+    const lonEl = document.querySelector("#map-home-lon");
+    const gridEl = document.querySelector("#map-home-grid");
+    const controller = StationMap.create({
+      mapEl: document.querySelector("#weather-map"),
+      emptyEl,
+      legendEl: document.querySelector("#weather-map-legend"),
+      asideEl: document.querySelector("#station-map-aside"),
+      popout: true
+    });
+
+    function fillHome(lat, lon, grid) {
+      if (latEl && Number.isFinite(lat) && document.activeElement !== latEl)
+        latEl.value = Number(lat).toFixed(5);
+      if (lonEl && Number.isFinite(lon) && document.activeElement !== lonEl)
+        lonEl.value = Number(lon).toFixed(5);
+      if (gridEl && grid && document.activeElement !== gridEl)
+        gridEl.value = String(grid).toUpperCase();
+    }
+
+    document.querySelector("#fit-all").addEventListener("click", () => controller.fitAll());
+    document.querySelector("#reload").addEventListener("click", () => poll());
+    document.querySelector("#map-home-save").addEventListener("click", async () => {
+      const grid = (gridEl.value || "").trim().toUpperCase();
+      const lat = Number(latEl.value);
+      const lon = Number(lonEl.value);
+      const patch = grid
+        ? { homeGrid: grid }
+        : (Number.isFinite(lat) && Number.isFinite(lon)
+          ? { homeLatitude: lat, homeLongitude: lon, homeGrid: "" }
+          : null);
+      if (!patch) {
+        statusEl.textContent = "Enter lat/lon or a Maidenhead grid";
+        return;
+      }
+      try {
+        const res = await fetch("/api/ui-prefs", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch)
+        });
+        if (!res.ok) throw new Error(await res.text() || `prefs ${res.status}`);
+        const prefs = await res.json();
+        fillHome(prefs.homeLatitude, prefs.homeLongitude, prefs.homeGrid);
+        await poll();
+        controller.fitAll();
+      } catch (ex) {
+        statusEl.textContent = ex.message || "Home save failed";
+      }
+    });
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const status = await res.json();
+        controller.paint(status.weatherStations, status.mapLatitude, status.mapLongitude);
+        if (Number.isFinite(status.mapLatitude) && Number.isFinite(status.mapLongitude))
+          fillHome(status.mapLatitude, status.mapLongitude, gridEl.value);
+        const n = Array.isArray(status.weatherStations) ? status.weatherStations.length : 0;
+        statusEl.textContent = n === 0
+          ? (status.message || status.phase || "Listening")
+          : `${n} pin${n === 1 ? "" : "s"} · ${status.message || status.phase || "live"}`;
+      } catch (ex) {
+        statusEl.textContent = ex.message || "Offline";
+      }
+    }
+
+    window.addEventListener("resize", () => controller.invalidate());
+    window.visualViewport?.addEventListener("resize", () => controller.invalidate());
+    fetch("/api/ui-prefs").then((r) => r.json()).then((prefs) => {
+      fillHome(prefs.homeLatitude, prefs.homeLongitude, prefs.homeGrid);
+    }).catch(() => {});
+    poll();
+    setInterval(poll, 1000);
+    // Kick sizing after the flex shell and wrapped header settle.
+    requestAnimationFrame(() => {
+      controller.invalidate();
+      setTimeout(() => controller.invalidate(), 100);
+      setTimeout(() => controller.invalidate(), 400);
+    });
+  </script>
+</body>
+</html>

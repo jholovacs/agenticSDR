@@ -141,6 +141,44 @@ public static partial class AprsExplain
         return true;
     }
 
+    /// <summary>
+    /// Maidenhead 4-/6-character square in an APRS payload when there is no lat/lon position.
+    /// Plots at the square center so status text like <c>&gt;EM13 home</c> still appears on the map.
+    /// </summary>
+    public static bool TryParseGridFix(string? line, out AprsGridFix fix)
+    {
+        fix = null!;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        string raw = ExtractRawTnc(Normalize(line));
+        if (!TrySplit(raw, out string source, out _, out _, out string payload))
+            return false;
+        if (TryParsePosition(payload, out _))
+            return false;
+
+        string? grid = null;
+        double lat = 0, lon = 0;
+        foreach (Match match in MaidenheadToken().Matches(payload))
+        {
+            string candidate = match.Groups[1].Value.ToUpperInvariant();
+            if (candidate is "RR73" or "RRR")
+                continue;
+            if (!Maidenhead.TryParse(candidate, out double cLat, out double cLon))
+                continue;
+            if (grid is not null && candidate.Length < grid.Length)
+                continue;
+            grid = candidate;
+            lat = cLat;
+            lon = cLon;
+        }
+
+        if (grid is null)
+            return false;
+
+        fix = new AprsGridFix(source, grid, lat, lon, raw);
+        return true;
+    }
+
     /// <summary>Ultimeter <c>!!</c> / <c>$ULTW</c> weather without lat/lon.</summary>
     public static bool TryParseUltimeterMetrics(string? line, out AprsUltimeterMetrics metrics)
     {
@@ -369,7 +407,7 @@ public static partial class AprsExplain
         if (f[10] is short today)
             rainMid = today * 0.01;
 
-        metrics = new WeatherMetrics(windDeg ?? 0, windMph ?? 0, null, temp, hum, null, null, rainMid, pressure);
+        metrics = new WeatherMetrics(windDeg, windMph, null, temp, hum, null, null, rainMid, pressure);
         return temp is not null || windMph is not null || pressure is not null || hum is not null;
     }
 
@@ -398,7 +436,7 @@ public static partial class AprsExplain
         if (f[11] is short today)
             rainMid = today * 0.01;
 
-        metrics = new WeatherMetrics(windDeg ?? 0, windMph ?? 0, gust, temp, hum, null, null, rainMid, pressure);
+        metrics = new WeatherMetrics(windDeg, windMph, gust, temp, hum, null, null, rainMid, pressure);
         return temp is not null || windMph is not null || gust is not null || pressure is not null || hum is not null;
     }
 
@@ -690,6 +728,8 @@ public static partial class AprsExplain
                 weather = wx;
                 metrics = wxMetrics;
             }
+            else
+                comment = StripUnparsedWeather(comment);
         }
 
         // Course/speed before PHG on some beacons: ddd/sss
@@ -769,24 +809,30 @@ public static partial class AprsExplain
         if (!TryParseWeatherMetrics(comment, out metrics, out int consumed))
             return false;
 
-        comment = comment[consumed..].TrimStart();
+        comment = comment[consumed..].TrimStart('.', '/', ' ');
         var parts = new List<string>();
-        if (metrics.WindMph is int speed && metrics.WindDegrees is int course)
+        if (metrics.WindMph is int speed)
         {
-            if (speed == 0 && course == 0)
+            if (speed == 0 && metrics.WindDegrees is 0 or null)
                 parts.Add("wind calm");
-            else if (speed == 0)
-                parts.Add($"wind from {course}° (calm)");
-            else
+            else if (speed == 0 && metrics.WindDegrees is int courseCalm)
+                parts.Add($"wind from {courseCalm}° (calm)");
+            else if (metrics.WindDegrees is int course)
                 parts.Add($"wind from {course}° at {speed} mph");
+            else
+                parts.Add($"wind {speed} mph");
         }
 
         if (metrics.GustMph is int gust)
             parts.Add($"gust {gust} mph");
         if (metrics.TemperatureF is int ti)
             parts.Add($"temperature {ti} °F");
-        if (metrics.RainLastHourIn is double rain1 && rain1 > 0)
-            parts.Add($"rain last hour {rain1:0.##} in");
+        if (metrics.RainLastHourIn is double rain1)
+            parts.Add(rain1 > 0 ? $"rain last hour {rain1:0.##} in" : "no rain last hour");
+        if (metrics.Rain24hIn is double rain24 && rain24 > 0)
+            parts.Add($"rain 24 h {rain24:0.##} in");
+        if (metrics.RainSinceMidnightIn is double rainMid && rainMid > 0)
+            parts.Add($"rain today {rainMid:0.##} in");
         if (metrics.HumidityPercent is int h)
             parts.Add($"humidity {h}%");
         if (metrics.PressureMbar is double baro)
@@ -799,8 +845,8 @@ public static partial class AprsExplain
     }
 
     /// <summary>
-    /// Parses <c>ddd/sss</c> plus letter-prefixed WX fields in any order
-    /// (<c>g</c>/<c>t</c>/<c>r</c>/<c>p</c>/<c>P</c>/<c>h</c>/<c>b</c>).
+    /// Parses <c>ddd/sss</c> (or APRS <c>.../...</c> unknowns) plus letter-prefixed WX fields
+    /// (<c>g</c>/<c>t</c>/<c>r</c>/<c>p</c>/<c>P</c>/<c>h</c>/<c>b</c>). Dotted placeholders are skipped.
     /// </summary>
     static bool TryParseWeatherMetrics(string comment, out WeatherMetrics metrics, out int consumed)
     {
@@ -810,8 +856,8 @@ public static partial class AprsExplain
         if (!head.Success)
             return false;
 
-        int course = int.Parse(head.Groups["course"].Value, CultureInfo.InvariantCulture);
-        int speed = int.Parse(head.Groups["speed"].Value, CultureInfo.InvariantCulture);
+        int? course = ParseWxNumber(head.Groups["course"].Value);
+        int? speed = ParseWxNumber(head.Groups["speed"].Value);
         string rest = comment[head.Length..];
 
         int? gust = null, temp = null, hum = null;
@@ -826,6 +872,8 @@ public static partial class AprsExplain
             string key = field.Groups["key"].Value;
             string digits = field.Groups["digits"].Value;
             end = field.Index + field.Length;
+            if (digits.Contains('.', StringComparison.Ordinal))
+                continue;
             switch (key)
             {
                 case "g" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int g):
@@ -847,19 +895,31 @@ public static partial class AprsExplain
                     hum = h == 0 ? 100 : h;
                     break;
                 case "b" when int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out int b):
-                    pressure = b / 10.0;
+                    // b00000 is a Davis/etc placeholder, not a real 0 mbar reading.
+                    if (b > 0)
+                        pressure = b / 10.0;
                     break;
             }
         }
 
-        // Require at least temperature or a calm/wind reading to call it weather.
-        if (temp is null && gust is null && hum is null && pressure is null && rain1 is null && rain24 is null && rainMid is null
-            && speed == 0 && course == 0)
+        // Need at least one real reading (including explicit rain zeros or calm wind).
+        bool hasWind = speed is not null || course is not null;
+        if (temp is null && gust is null && hum is null && pressure is null
+            && rain1 is null && rain24 is null && rainMid is null && !hasWind)
             return false;
 
         metrics = new WeatherMetrics(course, speed, gust, temp, hum, rain1, rain24, rainMid, pressure);
         consumed = head.Length + end;
         return true;
+    }
+
+    static int? ParseWxNumber(string token)
+    {
+        if (string.IsNullOrEmpty(token) || token.Contains('.', StringComparison.Ordinal))
+            return null;
+        return int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+            ? value
+            : null;
     }
 
     static string StripLeadingCourseSpeed(string comment)
@@ -868,6 +928,24 @@ public static partial class AprsExplain
         if (!m.Success)
             return comment;
         return comment[m.Length..].TrimStart();
+    }
+
+    /// <summary>Drop an unparseable WX block so map comments are not raw <c>.../...g...</c> telemetry.</summary>
+    static string StripUnparsedWeather(string comment)
+    {
+        var head = WeatherHead().Match(comment);
+        if (!head.Success)
+            return comment;
+        string rest = comment[head.Length..];
+        int end = 0;
+        foreach (Match field in WeatherField().Matches(rest))
+        {
+            if (field.Index > end)
+                break;
+            end = field.Index + field.Length;
+        }
+
+        return rest[end..].TrimStart('.', '/', ' ');
     }
 
     static string TrimComment(string text)
@@ -889,22 +967,30 @@ public static partial class AprsExplain
     [GeneratedRegex(@"^WIDE\d(?:-\d)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex WideHop();
 
+    // Table is one char (/ \ or overlay A–Z/0–9). Some beacons (and decode glitches)
+    // insert a spare '/' after an overlay, e.g. LTLFLO "!3211.64NX/10736.34W#".
     [GeneratedRegex(
-        @"^(?<lat>\d{4}\.\d{2})(?<ns>[NnSs])(?<table>.)(?<lon>\d{5}\.\d{2})(?<ew>[EeWw])(?<symbol>.)(?<rest>.*)$",
+        @"^(?<lat>\d{4}\.\d{2})(?<ns>[NnSs])(?<table>.)(?:\/)?(?<lon>\d{5}\.\d{2})(?<ew>[EeWw])(?<symbol>.)(?<rest>.*)$",
         RegexOptions.CultureInvariant)]
     private static partial Regex UncompressedPosition();
 
     [GeneratedRegex(@"PHG(\d{4,5})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PhgCode();
 
-    [GeneratedRegex(@"^(?<course>\d{3})/(?<speed>\d{3})", RegexOptions.CultureInvariant)]
+    // APRS allows "..." for unknown course/speed.
+    [GeneratedRegex(@"^(?<course>\d{3}|\.{3})/(?<speed>\d{3}|\.{3})", RegexOptions.CultureInvariant)]
     private static partial Regex WeatherHead();
 
-    [GeneratedRegex(@"(?<key>[gtprPhb])(?<digits>-?\d{2,5})", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<key>[gtprPhb])(?<digits>-?\d{2,5}|\.{2,5})", RegexOptions.CultureInvariant)]
     private static partial Regex WeatherField();
 
-    [GeneratedRegex(@"^\d{3}/\d{3}")]
+    [GeneratedRegex(@"^(?:\d{3}|\.{3})/(?:\d{3}|\.{3})")]
     private static partial Regex CourseSpeed();
+
+    [GeneratedRegex(
+        @"\b([A-R]{2}\d{2}(?:[A-X]{2})?)\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex MaidenheadToken();
 
     [GeneratedRegex(
         @"^T#(?<seq>\d{1,3}),(?<a1>[0-9.\-]+),(?<a2>[0-9.\-]+),(?<a3>[0-9.\-]+),(?<a4>[0-9.\-]+),(?<a5>[0-9.\-]+)(?:,(?<bits>[01]{8}))?",
@@ -914,8 +1000,8 @@ public static partial class AprsExplain
     sealed record PathHop(string Name, bool Used);
 
     sealed record WeatherMetrics(
-        int WindDegrees,
-        int WindMph,
+        int? WindDegrees,
+        int? WindMph,
         int? GustMph,
         int? TemperatureF,
         int? HumidityPercent,

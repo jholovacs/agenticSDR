@@ -51,6 +51,20 @@ public class PacketTests
     }
 
     [Fact]
+    public void Known_channels_include_packet_group()
+    {
+        IReadOnlyList<KnownChannelGroup> groups = Region2BandPlan.KnownServiceChannels();
+        KnownChannelGroup? packet = groups.FirstOrDefault(group => group.Id == "packet");
+        Assert.NotNull(packet);
+        Assert.Contains(packet.Channels, channel =>
+            Math.Abs(channel.FrequencyHz - 144_390_000) < 1 && channel.Mode == "packet");
+        Assert.Contains(packet.Channels, channel =>
+            Math.Abs(channel.FrequencyHz - 145_010_000) < 1 && channel.Mode == "packet");
+        Assert.Contains(packet.Channels, channel =>
+            Math.Abs(channel.FrequencyHz - 445_925_000) < 1 && channel.Mode == "packet");
+    }
+
+    [Fact]
     public void Fcs_computes_and_detects_corrupted_bytes()
     {
         byte[] frame = PacketDecoder.BuildUiFrame(

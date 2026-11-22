@@ -252,6 +252,7 @@ public sealed partial class RadioSession
 
             RadioMode digiMode = text.Kind switch
             {
+                "ft8" => RadioMode.Ft8,
                 "olivia" => RadioMode.Olivia,
                 "jtty" => RadioMode.Jtty,
                 "wspr" => RadioMode.Wspr,

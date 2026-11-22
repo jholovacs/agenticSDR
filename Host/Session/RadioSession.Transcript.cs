@@ -57,6 +57,14 @@ public sealed partial class RadioSession
     {
         HookCallsigns();
         callsigns.PrefetchFromText(text);
+        // Scan-path Format() blocks still carry CQ/grid lines — plot Maidenhead centers.
+        foreach (string raw in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0)
+                continue;
+            NoteDigiLocation(mode, line);
+        }
         AppendSpan(CampSchedule.Canonical(mode), callsigns.EnrichText(text));
     }
 
@@ -99,8 +107,10 @@ public sealed partial class RadioSession
                 continue;
             }
 
-            // Indented explanation stays on the same transcript span as the message above.
-            if (raw.Length > 0 && char.IsWhiteSpace(raw[0]))
+            // Explanation lines are indented. FT8/JS8/WSPR heads are also left-padded
+            // ("  15 dB …") by the SNR format width — those are real decodes, not meanings.
+            bool indented = raw.Length > 0 && char.IsWhiteSpace(raw[0]);
+            if (indented && !LooksLikeDigiDecodeLine(line))
             {
                 string meaning = callsigns.EnrichText(line.TrimStart());
                 if (pending is null)
@@ -110,11 +120,44 @@ public sealed partial class RadioSession
                 continue;
             }
 
+            string decodeLine = line.TrimStart();
             FlushDigiLine(kind, ref pending);
-            pending = $"{stamp}  {callsigns.EnrichText(line)}";
+            NoteDigiLocation(mode, decodeLine);
+            pending = $"{stamp}  {callsigns.EnrichText(decodeLine)}";
         }
 
         FlushDigiLine(kind, ref pending);
+    }
+
+    /// <summary>SNR/Hz decode head from Format(), even when left-padded with spaces.</summary>
+    private static bool LooksLikeDigiDecodeLine(string line)
+    {
+        string text = line.TrimStart();
+        return text.Contains(" dB", StringComparison.Ordinal)
+            && text.Contains(" Hz", StringComparison.Ordinal);
+    }
+
+    /// <summary>Plot Maidenhead grids (4 or 6 characters) at the square center — no lat/lon needed on the wire.</summary>
+    private void NoteDigiLocation(RadioMode mode, string line)
+    {
+        if (!DigiLocation.TryParse(line, CampSchedule.Canonical(mode), out DigiLocationFix fix))
+            return;
+
+        string? place = Maidenhead.Describe(fix.Grid);
+        string comment = place is null
+            ? $"grid {fix.Grid} ({fix.Source})"
+            : $"grid {fix.Grid} — {place} ({fix.Source})";
+
+        UpsertWeatherStation(
+            fix.Callsign,
+            fix.LatitudeDegrees,
+            fix.LongitudeDegrees,
+            null, null, null, null, null, null, null, null, null,
+            comment,
+            line.Trim(),
+            isWeather: false,
+            source: fix.Source,
+            grid: fix.Grid);
     }
 
     private void FlushDigiLine(string kind, ref string? pending)
@@ -230,7 +273,8 @@ public sealed partial class RadioSession
                     null, null, null, null, null, null, null, null, null,
                     fix.IsWeatherSymbol ? "Weather station" : null,
                     fix.Raw,
-                    isWeather: fix.IsWeatherSymbol);
+                    isWeather: fix.IsWeatherSymbol,
+                    source: fix.IsWeatherSymbol ? "weather" : "aprs");
             }
         }
 
@@ -251,8 +295,28 @@ public sealed partial class RadioSession
                 report.PressureMbar,
                 report.Comment,
                 report.Raw,
-                isWeather: true);
+                isWeather: true,
+                source: "weather");
             return;
+        }
+
+        // Status / message packets with a Maidenhead square but no lat/lon — plot the square center.
+        if (AprsExplain.TryParseGridFix(text, out AprsGridFix gridFix))
+        {
+            string? place = Maidenhead.Describe(gridFix.Grid);
+            string comment = place is null
+                ? $"grid {gridFix.Grid}"
+                : $"grid {gridFix.Grid} — {place}";
+            UpsertWeatherStation(
+                gridFix.Callsign,
+                gridFix.LatitudeDegrees,
+                gridFix.LongitudeDegrees,
+                null, null, null, null, null, null, null, null, null,
+                comment,
+                gridFix.Raw,
+                isWeather: false,
+                source: "aprs",
+                grid: gridFix.Grid);
         }
 
         // Peet Bros Ultimeter: weather without a position — reuse last heard fix for that call.
@@ -289,7 +353,8 @@ public sealed partial class RadioSession
             ultimeter.PressureMbar,
             "Ultimeter",
             ultimeter.Raw,
-            isWeather: true);
+            isWeather: true,
+            source: "weather");
     }
 
     private void UpsertWeatherStation(
@@ -307,13 +372,21 @@ public sealed partial class RadioSession
         double? pressureMbar,
         string? comment,
         string raw,
-        bool isWeather)
+        bool isWeather,
+        string source = "aprs",
+        string? grid = null)
     {
-        // Don't let a bare digi beacon wipe a richer weather pin for the same call.
-        if (!isWeather
-            && _weatherStations.TryGetValue(callsign, out AprsWeatherStation? existing)
-            && existing.IsWeather)
-            return;
+        if (_weatherStations.TryGetValue(callsign, out AprsWeatherStation? existing))
+        {
+            // Weather pins beat digi/APRS-only pins; digi grids don't overwrite APRS fixes.
+            if (!isWeather && existing.IsWeather)
+                return;
+            if (IsDigiSource(source) && !IsDigiSource(existing.Source))
+                return;
+            // Keep a prior Maidenhead label when a weather upgrade omits it.
+            if (string.IsNullOrWhiteSpace(grid))
+                grid = existing.Grid;
+        }
 
         _weatherStations[callsign] = new AprsWeatherStation(
             callsign,
@@ -331,9 +404,15 @@ public sealed partial class RadioSession
             comment,
             DateTimeOffset.UtcNow,
             raw,
-            isWeather);
+            isWeather,
+            source,
+            string.IsNullOrWhiteSpace(grid) ? null : grid.Trim().ToUpperInvariant());
         _aprsPositions[callsign] = (latitude, longitude);
     }
+
+    private static bool IsDigiSource(string? source) =>
+        source is not null
+        && source is not "aprs" and not "weather";
 
     private IReadOnlyList<AprsWeatherStation> SnapshotWeatherStations()
     {
@@ -848,6 +927,25 @@ public sealed partial class RadioSession
 
     private bool TryLocation(out double latitude, out double longitude)
     {
+        // Desk “home” pin from UI prefs wins over config / operator grid.
+        try
+        {
+            UiPrefs prefs = uiPrefs.Load();
+            if (prefs.HomeLatitude is double homeLat && prefs.HomeLongitude is double homeLon)
+            {
+                latitude = homeLat;
+                longitude = homeLon;
+                return true;
+            }
+
+            if (Maidenhead.TryParse(prefs.HomeGrid, out latitude, out longitude))
+                return true;
+        }
+        catch
+        {
+            // Ignore unreadable prefs.
+        }
+
         if (options.Latitude is not null && options.Longitude is not null)
         {
             latitude = options.Latitude.Value;

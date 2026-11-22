@@ -168,11 +168,15 @@ public class PrivilegeTests
             var store = new UiPrefsStore(path);
             store.Patch(new UiPrefsPatch(Folds: new Dictionary<string, bool> { ["radio"] = true }, Volume: 70));
             store.Patch(new UiPrefsPatch(Folds: new Dictionary<string, bool> { ["prompt"] = false }, DialMhz: 7.050));
+            store.Patch(new UiPrefsPatch(HomeLatitude: 32.5, HomeLongitude: -107.0, HomeGrid: "DM62"));
             UiPrefs prefs = store.Load();
             Assert.True(prefs.Folds!["radio"]);
             Assert.False(prefs.Folds["prompt"]);
             Assert.Equal(70, prefs.Volume);
             Assert.Equal(7.050, prefs.DialMhz);
+            Assert.Equal(32.5, prefs.HomeLatitude);
+            Assert.Equal(-107.0, prefs.HomeLongitude);
+            Assert.Equal("DM62", prefs.HomeGrid);
         }
         finally
         {
