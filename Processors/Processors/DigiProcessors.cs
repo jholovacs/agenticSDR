@@ -41,7 +41,24 @@ public abstract class DigiProcessorBase : ISignalProcessor
 
         string text = _decode(input.Audio, input.SampleRate);
         if (string.IsNullOrWhiteSpace(text))
+        {
+            // Live digi chops used to fail silently — show that a slot was attempted.
+            if (KindKey is "ft8" or "js8" or "wspr")
+            {
+                double seconds = input.SampleRate > 0
+                    ? input.Audio.Length / (double)input.SampleRate
+                    : 0;
+                return SignalProcessResult.Text(
+                    input,
+                    new AttributedText(
+                        Id,
+                        DisplayName,
+                        "note",
+                        $"{DisplayName}: no messages in this {seconds:0.#} s slot."));
+            }
+
             return SignalProcessResult.Pass(input);
+        }
 
         return SignalProcessResult.Text(
             input,

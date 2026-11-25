@@ -202,26 +202,34 @@ public static class Js8Decoder
             }
         }
 
-        // Normal / Fast / Turbo first (common on published dials). Slow is rarer and much heavier to search.
-        foreach (Submode mode in Submodes)
+        // Normal first (most on-air traffic), with a mirrored-tone retry for HF direct-sampling I/Q flips
+        // before the heavier Fast/Turbo/Slow searches.
+        if (wave.Length >= Js8Tables.Symbols * Submodes[0].SymbolSamples)
         {
-            if (mode.Name == "Slow")
-                continue;
-            if (wave.Length < Js8Tables.Symbols * mode.SymbolSamples)
-                continue;
-            Take(DecodeSubmode(wave, mode, mirrorTones: false));
+            Take(DecodeSubmode(wave, Submodes[0], mirrorTones: false));
+            if (messages.Count == 0)
+                Take(DecodeSubmode(wave, Submodes[0], mirrorTones: true));
         }
 
+        if (messages.Count == 0)
+        {
+            foreach (Submode mode in Submodes)
+            {
+                if (mode.Name is "Normal" or "Slow")
+                    continue;
+                if (wave.Length < Js8Tables.Symbols * mode.SymbolSamples)
+                    continue;
+                Take(DecodeSubmode(wave, mode, mirrorTones: false));
+            }
+        }
+
+        // Slow needs ~26 s of audio; skip on short live 15 s chops.
         if (messages.Count == 0)
         {
             Submode slow = Submodes[3];
             if (wave.Length >= Js8Tables.Symbols * slow.SymbolSamples)
                 Take(DecodeSubmode(wave, slow, mirrorTones: false));
         }
-
-        // Direct-sampling / I-Q flip sometimes inverts the tone ladder; retry Normal once if nothing decoded.
-        if (messages.Count == 0 && wave.Length >= Js8Tables.Symbols * Submodes[0].SymbolSamples)
-            Take(DecodeSubmode(wave, Submodes[0], mirrorTones: true));
 
         return messages
             .OrderBy(message => message.TimeSeconds)

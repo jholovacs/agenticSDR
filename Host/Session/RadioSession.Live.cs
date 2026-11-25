@@ -329,6 +329,13 @@ public sealed partial class RadioSession
         }
     }
 
+    private void SubmitDigiSlot(SignalChain chain, float[] audio, int rate, RadioMode mode)
+    {
+        double seconds = rate > 0 ? audio.Length / (double)rate : 0;
+        AppendNote($"Decoding {mode} ({seconds:0.#} s audio)…");
+        TrySubmitLive(chain, SignalFrame.FromAudio(audio, rate));
+    }
+
     private void ApplyAttributed(AttributedText text, RadioMode mode, ref bool digiHeader)
     {
         if (string.IsNullOrWhiteSpace(text.Text))
@@ -742,18 +749,17 @@ public sealed partial class RadioSession
             {
                 if (slottedDigi)
                 {
-                    // Arm on the early pad before a UTC boundary so Costas is not clipped; keep playing audio meanwhile.
-                    double into = DateTime.UtcNow.TimeOfDay.TotalSeconds % digiPeriodSec;
-                    double earlyAt = digiPeriodSec - 0.45;
-                    int slot = (int)Math.Floor(DateTime.UtcNow.TimeOfDay.TotalSeconds / digiPeriodSec);
-                    if (into >= earlyAt)
-                        slot++;
-                    if (!digiDecodeArmed && (into >= earlyAt || into < 0.20))
+                    // Arm ~0.45 s before the UTC boundary so Costas is not clipped; audio keeps playing.
+                    // When the early-pad bumps the target slot, SUBMIT the buffer we just finished —
+                    // clearing first (old bug) wiped a full JS8/FT8/WSPR chop and left empty transcripts.
+                    double tod = DateTime.UtcNow.TimeOfDay.TotalSeconds;
+                    int targetSlot = DigiSlotBuffer.TargetSlot(tod, digiPeriodSec);
+                    if (!digiDecodeArmed && DigiSlotBuffer.ShouldArm(tod, digiPeriodSec))
                     {
                         digiDecodeArmed = true;
                         digiPeriod.Clear();
                         digiSinceSubmit = 0;
-                        digiSlotIndex = slot;
+                        digiSlotIndex = targetSlot;
                         if (!digiAlignNoted)
                         {
                             digiAlignNoted = true;
@@ -763,11 +769,13 @@ public sealed partial class RadioSession
 
                     if (digiDecodeArmed)
                     {
-                        if (slot != digiSlotIndex)
+                        if (targetSlot != digiSlotIndex)
                         {
+                            if (DigiSlotBuffer.TryTakeFinished(digiPeriod, digiStep, out float[] finished))
+                                SubmitDigiSlot(chain, finished, rate, mode);
                             digiPeriod.Clear();
                             digiSinceSubmit = 0;
-                            digiSlotIndex = slot;
+                            digiSlotIndex = targetSlot;
                         }
 
                         digiPeriod.AddRange(fresh);
@@ -778,7 +786,7 @@ public sealed partial class RadioSession
                                 digiPeriod.RemoveRange(0, digiStep);
                             float[] block = digiPeriod.GetRange(0, digiStep).ToArray();
                             digiPeriod.RemoveRange(0, digiStep);
-                            TrySubmitLive(chain, SignalFrame.FromAudio(block, rate));
+                            SubmitDigiSlot(chain, block, rate, mode);
                         }
                     }
                 }
@@ -924,7 +932,7 @@ public sealed partial class RadioSession
     private static string LiveMessage(RadioMode mode, double tuneHz) => mode switch
     {
         RadioMode.Js8 =>
-            $"Playing JS8 audio on {tuneHz / 1e6:0.000000} MHz — decode follows 30 s UTC slots.",
+            $"Playing JS8 audio on {tuneHz / 1e6:0.000000} MHz — decode follows 15 s UTC slots.",
         RadioMode.Ft8 =>
             $"Playing FT8 audio on {tuneHz / 1e6:0.000000} MHz — decode follows 15 s UTC slots.",
         RadioMode.Wspr =>

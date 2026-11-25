@@ -241,8 +241,9 @@ public sealed partial class RadioSession
     private static int DigiPeriodSeconds(RadioMode mode) => mode switch
     {
         RadioMode.Ft8 => 15,
-        // 30 s is the LCM of Normal (15), Fast (10), Turbo (6), and Slow (30).
-        RadioMode.Js8 => 30,
+        // Normal JS8 is a 15 s slot (same wall clock as FT8). Fast/Turbo fit inside; Slow (~30 s)
+        // still runs when the clip is long enough (clip listen keeps DigiListenSeconds at 32).
+        RadioMode.Js8 => 15,
         RadioMode.Wspr => 120,
         // Overlapping steps on a longer buffer so mid-block CQs still decode.
         // Olivia Walsh hunt is ~1 s on a 16 s window; 6 s keeps the queue from stacking.
@@ -495,6 +496,11 @@ public sealed partial class RadioSession
         // quiet parks several kHz off 144.390 and kills Bell 202 decode. Stay on the published dial;
         // per-radio ppm covers crystal error. ISS packet still hunts Doppler.
         if ((useMode is RadioMode.Packet or RadioMode.Ribbit) && issDoppler <= 0)
+            return publishedHz;
+
+        // FT8/JS8/WSPR are multi-tone windows. Snapping to the single loudest bin shifts the USB
+        // filter and parks weaker stations outside the decoder — stay on the published dial.
+        if (useMode is RadioMode.Ft8 or RadioMode.Js8 or RadioMode.Wspr)
             return publishedHz;
 
         double offset = Math.Min(50_000, device.SampleRateHz * 0.2);
