@@ -1711,7 +1711,8 @@ function ensureStationMapController() {
     emptyEl: document.querySelector("#weather-map-empty"),
     legendEl: document.querySelector("#weather-map-legend"),
     asideEl: document.querySelector("#station-map-aside"),
-    foldEl: document.querySelector('[data-fold="station-map"]')
+    foldEl: document.querySelector('[data-fold="station-map"]'),
+    dayNightEl: document.querySelector("#map-daynight")
   });
   return stationMapController;
 }
@@ -2244,7 +2245,8 @@ const tips = {
   "col-snr": `How far the signal stands above the noise, in decibels. Bigger is cleaner. See ${wiki("Signal-to-noise_ratio", "signal-to-noise ratio")}.`,
   "col-source": `A ${wiki("Band_plan", "band plan")} label, such as a calling frequency or “FM broadcast.” It is not a station’s name.`,
   selected: "The frequency you are hearing or camping on, with live audio and decoded text.",
-  "weather-map": `RF-only map of heard stations: ${wiki("Automatic_Packet_Reporting_System", "APRS")} weather and positions, plus digimode Maidenhead grids (FT8, JS8, WSPR, and free-text modes when a call sends a grid). Basemap is local Natural Earth land, lakes, rivers, and state/province lines (no internet tiles). Set Home so pins show distance. Stale pins drop after about an hour.`,
+  "weather-map": `RF-only map of heard stations: ${wiki("Automatic_Packet_Reporting_System", "APRS")} weather and positions, plus digimode Maidenhead grids (FT8, JS8, WSPR, and free-text modes when a call sends a grid). Basemap is local Natural Earth land, lakes, rivers, and state/province lines (no internet tiles). Optional Day/night shade is estimated from solar geometry on this machine (offline). Set Home so pins show distance. Stale pins drop after about an hour.`,
+  "map-daynight": `Shades the night side of Earth from the ${wiki("Solar_terminator", "solar terminator")}, computed locally from the clock (declination and equation of time). No internet required. The sun mark is the subsolar point. Handy for HF grey-line planning.`,
   "station-map-popout": `Opens a full-window station map you can drag to another screen. Same local basemap and RF-heard station list — no internet tiles.`,
   "station-map-home": `Your house location for the station map. Enter latitude/longitude or a Maidenhead grid (for example DM62). Pins and the legend show distance from this point.`,
   record: "Records the audio you are hearing. Stopping asks whether to download the MP3, then the temporary file is removed.",

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Station map — Agentic SDR</title>
   <link rel="icon" href="/favicon.ico?v=2" sizes="any">
-  <link rel="stylesheet" href="/app.css?v=50">
+  <link rel="stylesheet" href="/app.css?v=51">
   <link rel="stylesheet" href="/lib/leaflet/leaflet.css">
   <style>
     html, body {
@@ -162,6 +162,7 @@
         <button id="map-home-save" type="button">Set home</button>
       </div>
       <div class="actions">
+        <label class="map-overlay-toggle"><input id="map-daynight" type="checkbox"> Day / night</label>
         <button id="fit-all" type="button">Fit all</button>
         <button id="reload" type="button">Refresh</button>
       </div>
@@ -176,7 +177,7 @@
   </div>
 
   <script src="/lib/leaflet/leaflet.js"></script>
-  <script src="/station-map.js?v=14"></script>
+  <script src="/station-map.js?v=16"></script>
   <script>
     const statusEl = document.querySelector("#popout-status");
     const emptyEl = document.querySelector("#weather-map-empty");
@@ -188,6 +189,7 @@
       emptyEl,
       legendEl: document.querySelector("#weather-map-legend"),
       asideEl: document.querySelector("#station-map-aside"),
+      dayNightEl: document.querySelector("#map-daynight"),
       popout: true
     });
 

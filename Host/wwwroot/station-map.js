@@ -385,6 +385,172 @@
     return schedule;
   }
 
+  /**
+   * Approximate subsolar point from UTC (NOAA-style Fourier series). Offline — no network.
+   * Accurate to ~0.3° for a map terminator; good enough for HF day/night planning.
+   */
+  function subsolarPoint(date) {
+    const ms = date instanceof Date ? date.getTime() : Date.now();
+    const utc = new Date(ms);
+    const start = Date.UTC(utc.getUTCFullYear(), 0, 0);
+    const dayOfYear = (ms - start) / 86_400_000;
+    const hour = utc.getUTCHours() + utc.getUTCMinutes() / 60 + utc.getUTCSeconds() / 3600;
+    const gamma = (2 * Math.PI / 365) * (dayOfYear - 1 + (hour - 12) / 24);
+    // Declination (radians).
+    const decl = 0.006918
+      - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma)
+      - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma)
+      - 0.002697 * Math.cos(3 * gamma) + 0.00148 * Math.sin(3 * gamma);
+    // Equation of time (minutes).
+    const eqTime = 229.18 * (
+      0.000075
+      + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma)
+      - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+    let lon = -15 * (hour - 12) - eqTime / 4;
+    while (lon < -180) lon += 360;
+    while (lon > 180) lon -= 360;
+    return { lat: decl * (180 / Math.PI), lon };
+  }
+
+  /** Latitude on the geometric terminator (° sun elevation = 0) at longitude lonDeg. */
+  function terminatorLatitude(lonDeg, sunLatDeg, sunLonDeg) {
+    const rad = Math.PI / 180;
+    // Avoid tan(δ)→0 at equinox; a 0.05° nudge keeps the closed-form stable.
+    const clamped = Math.abs(sunLatDeg) < 0.05
+      ? (sunLatDeg >= 0 ? 0.05 : -0.05)
+      : sunLatDeg;
+    const delta = clamped * rad;
+    const H = (lonDeg - sunLonDeg) * rad;
+    return Math.atan(-Math.cos(H) / Math.tan(delta)) / rad;
+  }
+
+  function terminatorRing(sunLat, sunLon, step) {
+    const terminator = [];
+    for (let lon = -180; lon <= 180; lon += step)
+      terminator.push([lon, terminatorLatitude(lon, sunLat, sunLon)]);
+    const nightPole = sunLat >= 0 ? -90 : 90;
+    const ring = terminator.map((p) => p.slice());
+    ring.push([180, nightPole], [-180, nightPole]);
+    ring.push(ring[0].slice());
+    return ring;
+  }
+
+  /**
+   * Night polygon from solar geometry (offline). Geometric terminator (sun elevation 0°);
+   * refraction / civil twilight are ignored so the shade stays a clean estimate.
+   */
+  function nightPolygons(date) {
+    const sun = subsolarPoint(date);
+    const ring = terminatorRing(sun.lat, sun.lon, 3);
+    return {
+      sun,
+      night: {
+        type: "Feature",
+        properties: { kind: "night" },
+        geometry: { type: "Polygon", coordinates: [ring] }
+      }
+    };
+  }
+
+  const DAYNIGHT_PREF = "agentic-sdr-map-daynight";
+
+  function dayNightPrefEnabled() {
+    try {
+      return localStorage.getItem(DAYNIGHT_PREF) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setDayNightPref(on) {
+    try {
+      localStorage.setItem(DAYNIGHT_PREF, on ? "1" : "0");
+    } catch (_) { /* ignore */ }
+  }
+
+  /**
+   * Optional day/night shade + sun marker. Pure solar geometry (offline).
+   * @returns {{ setEnabled: (on: boolean) => void, enabled: () => boolean, destroy: () => void }}
+   */
+  function bindDayNightOverlay(map) {
+    let layer = null;
+    let sunMarker = null;
+    let timer = 0;
+    let enabled = false;
+
+    function clear() {
+      if (timer) {
+        clearInterval(timer);
+        timer = 0;
+      }
+      if (layer) {
+        map.removeLayer(layer);
+        layer = null;
+      }
+      if (sunMarker) {
+        map.removeLayer(sunMarker);
+        sunMarker = null;
+      }
+    }
+
+    function paint() {
+      if (!enabled || !map)
+        return;
+      const { sun, night } = nightPolygons(new Date());
+      const group = L.layerGroup();
+      L.geoJSON(night, {
+        interactive: false,
+        style: {
+          fillColor: "#050a10",
+          fillOpacity: 0.48,
+          color: "#2a4050",
+          weight: 1.2,
+          opacity: 0.65
+        }
+      }).addTo(group);
+
+      if (layer)
+        map.removeLayer(layer);
+      layer = group.addTo(map);
+
+      const sunHtml = `<span class="map-sun" title="Subsolar point ${sun.lat.toFixed(1)}°, ${sun.lon.toFixed(1)}°">☀</span>`;
+      if (sunMarker)
+        map.removeLayer(sunMarker);
+      sunMarker = L.marker([sun.lat, sun.lon], {
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 200,
+        icon: L.divIcon({
+          className: "map-sun-icon",
+          html: sunHtml,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0]
+        })
+      }).addTo(map);
+    }
+
+    function setEnabled(on) {
+      enabled = !!on;
+      setDayNightPref(enabled);
+      if (!enabled) {
+        clear();
+        return;
+      }
+      paint();
+      if (timer)
+        clearInterval(timer);
+      // Terminator crawls ~2.5°/hour; 10 min is enough without busy redraws.
+      timer = setInterval(paint, 10 * 60_000);
+    }
+
+    return {
+      setEnabled,
+      enabled: () => enabled,
+      destroy: clear,
+      refresh: () => { if (enabled) paint(); }
+    };
+  }
+
   function addOfflineBasemap(map, onLayerPainted) {
     map.getContainer().classList.add("offline-basemap");
     addGraticule(map);
@@ -432,7 +598,7 @@
     // Imperial first for US ops; metric stays as the shorter second bar.
     L.control.scale({ imperial: true, metric: true, maxWidth: 120, position: "bottomleft" }).addTo(map);
     map.attributionControl.setPrefix("");
-    map.attributionControl.addAttribution("Natural Earth (local) · Leaflet");
+    map.attributionControl.addAttribution("Natural Earth (local) · Leaflet · day/night solar estimate");
   }
 
   /**
@@ -442,6 +608,7 @@
    * @param {HTMLElement} [opts.legendEl]
    * @param {HTMLElement} [opts.asideEl]
    * @param {HTMLElement} [opts.foldEl]
+   * @param {HTMLInputElement} [opts.dayNightEl] checkbox to toggle day/night shade
    * @param {boolean} [opts.popout]
    */
   function create(opts) {
@@ -450,9 +617,12 @@
     const legendEl = opts.legendEl || null;
     const asideEl = opts.asideEl || null;
     const foldEl = opts.foldEl || null;
+    const dayNightEl = opts.dayNightEl || null;
     const popout = !!opts.popout;
 
     let map = null;
+    /** @type {ReturnType<typeof bindDayNightOverlay> | null} */
+    let dayNight = null;
     const markers = new Map();
     /** @type {Map<string, string>} */
     const markerFingerprints = new Map();
@@ -507,6 +677,15 @@
 
       requestSize = bindMapSize(map, mapEl);
       addOfflineBasemap(map, () => requestSize?.());
+      dayNight = bindDayNightOverlay(map);
+      const preferDayNight = dayNightEl ? dayNightEl.checked : dayNightPrefEnabled();
+      if (dayNightEl) {
+        dayNightEl.checked = preferDayNight;
+        dayNightEl.addEventListener("change", () => {
+          dayNight?.setEnabled(dayNightEl.checked);
+        });
+      }
+      dayNight.setEnabled(preferDayNight);
 
       map.on("dragstart", onUserView);
       map.on("zoomstart", onUserView);
@@ -521,6 +700,7 @@
             requestSize?.();
             map.invalidateSize({ animate: false, pan: false });
             fitAll(true);
+            dayNight?.refresh();
           });
         });
       }
@@ -807,7 +987,9 @@
       invalidate: () => {
         requestSize?.();
         if (map) map.invalidateSize({ animate: false, pan: false });
+        dayNight?.refresh();
       },
+      setDayNight: (on) => dayNight?.setEnabled(!!on),
       get map() { return map; }
     };
   }

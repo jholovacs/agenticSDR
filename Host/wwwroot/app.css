@@ -591,6 +591,33 @@ pre .src {
   width: 4.5rem;
   text-transform: uppercase;
 }
+.map-overlay-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.map-overlay-toggle input {
+  accent-color: var(--amber, #c4a06a);
+}
+.map-sun-icon {
+  background: transparent !important;
+  border: 0 !important;
+}
+.map-sun {
+  display: block;
+  transform: translate(-50%, -50%);
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #f0d080;
+  text-shadow: 0 0 6px #c09030, 0 0 2px #12100e;
+  pointer-events: none;
+  opacity: 0.9;
+}
 .weather-map {
   height: 280px;
   margin: 8px 0 10px;
